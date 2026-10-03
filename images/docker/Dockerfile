@@ -1,7 +1,8 @@
 # The Docker CLI with the buildx and compose plugins, from Docker's Debian
 # package repository. There is no daemon: run with clod --docker, the CLI
 # drives the host's Docker through its socket.
-FROM clod
+ARG BASE=clod
+FROM $BASE
 USER root
 RUN curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && printf '%s\n' 'Types: deb' 'URIs: https://download.docker.com/linux/debian' \

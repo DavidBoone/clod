@@ -1,5 +1,6 @@
 # PHP with common extensions, Composer, Apache with mod_php, and MariaDB.
-FROM clod
+ARG BASE=clod
+FROM $BASE
 USER root
 RUN apt-get install -y \
        php-cli php-mysql php-sqlite3 php-mbstring php-xml php-curl \

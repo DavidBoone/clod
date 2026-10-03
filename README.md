@@ -148,8 +148,8 @@ The containers the agent starts run beside clod's, on your Docker, and outlive
 it. Their bind mounts take paths on your machine, so the container gets the
 project's path as `$CLOD_HOST_WORKSPACE`, and the agent reaches their published
 ports at `host.docker.internal`. The `docker` variant tells Claude all this.
-`--docker` works with any image that has the Docker CLI, such as your own
-variant `FROM clod-docker`; with one that doesn't, clod warns at launch.
+`--docker` works with any image that has the Docker CLI, such as a combination
+like `-i go+docker`; with one that doesn't, clod warns at launch.
 
 `clod` refuses to run from your home directory or any directory above it, from
 `~/.clod`, or from `~/.clod/homes` or anything under it, since the agent could
@@ -250,13 +250,32 @@ the base image changes. To pick up a newer Go or Rust, rebuild it with
 `clod -i go rebuild`. Rebuilding the base makes every variant rebuild on its
 next use.
 
-Your own variants go in `~/.clod/images/<name>/`, a directory holding a
-`Dockerfile` that starts `FROM clod`, or `FROM` another variant. `clod
-new-image` creates one:
+Variants combine with `+`: `clod -i browser+dotnet` builds `clod-browser`, then
+the `dotnet` variant on top of it as `clod-browser.dotnet`. They build in the
+order given, which matters only when two variants change the same files. A
+combination rebuilds, and is set as a default, like any variant:
 
 ```bash
-clod new-image mine        # a starter Dockerfile, FROM clod
+clod -i browser+dotnet          # .NET with a browser, for testing a web app
+clod default image go+sudo      # Go, with passwordless sudo
+```
+
+Every variant after the first must take its base as an argument; the bundled
+ones all do, starting with:
+
+```dockerfile
+ARG BASE=clod
+FROM $BASE
+```
+
+Your own variants go in `~/.clod/images/<name>/`, a directory holding a
+`Dockerfile` built `FROM clod`, or `FROM` another variant. Built `FROM $BASE`,
+as above, it combines with the others. `clod new-image` creates one:
+
+```bash
+clod new-image mine        # a starter Dockerfile, FROM $BASE
 clod new-image mine go     # a copy of the go variant
+clod new-image mine go+sudo  # a starter Dockerfile, FROM clod-go.sudo
 clod new-image go          # your own copy of the bundled go, which then takes its place
 ```
 
@@ -272,6 +291,11 @@ USER claude
 
 `build-essential` is there for npm or pip packages that compile native code on
 install; most ship prebuilt binaries and don't need it.
+
+A variant can be `FROM` a combination by its tag, as in `FROM clod-browser.dotnet`:
+clod builds the combination first, and rebuilds yours when any variant in it
+changes. That keeps your own additions on top of bundled variants without
+copying their install steps.
 
 `clod -i mine` builds `clod-go` if needed, then `clod-mine`, and
 rebuilds each whenever a file in its directory or an image it is `FROM`
@@ -318,7 +342,7 @@ over the envrc, and the envrc over the config file:
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
 | `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory. |
-| `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod images` lists them), named `NAME` or `clod-NAME`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
+| `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod images` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
 | `CLOD_CREDS` | `--creds` | unset  | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
@@ -349,7 +373,7 @@ path. Your shell's settings and a project's envrc win over these defaults;
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
-tag (`clod`, `clod-<variant>`), and `CLOD_CREDS`, set only when a login is
+tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`), and `CLOD_CREDS`, set only when a login is
 borrowed, the home it came from.
 
 ### Per-project environment

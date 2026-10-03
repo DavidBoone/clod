@@ -2,7 +2,8 @@
 # libraries Playwright's own browsers need. Chromium runs without its sandbox,
 # which needs kernel features Docker doesn't allow; the container is the
 # boundary instead.
-FROM clod
+ARG BASE=clod
+FROM $BASE
 USER root
 RUN apt-get install -y chromium fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
     && echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox"' > /etc/chromium.d/clod

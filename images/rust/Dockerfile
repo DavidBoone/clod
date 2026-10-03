@@ -1,7 +1,8 @@
 # Rust's stable toolchain via rustup, and the C toolchain it links with. The
 # Rust toolchain lives in the image; cargo's registry cache and `cargo
 # install`ed tools go to ~/.cargo in the home.
-FROM clod
+ARG BASE=clod
+FROM $BASE
 USER root
 RUN apt-get install -y build-essential
 RUN mkdir /usr/local/rustup /usr/local/cargo \
