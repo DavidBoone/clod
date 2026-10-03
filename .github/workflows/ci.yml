@@ -92,6 +92,20 @@ jobs:
           done
           grep -q served out
           kill %1 2>/dev/null || true
+      - name: --docker mounts the host's Docker socket, and only --docker does
+        run: |
+          cd "$(mktemp -d)"
+          echo sibling > from-host
+          clod bash -c 'test ! -e /var/run/docker.sock'
+          if clod env | grep -q '^docker:'; then exit 1; fi
+          clod --docker env | grep -q '^docker:'
+          # shellcheck disable=SC2016 # the quoted script expands in the container
+          clod -i docker --docker bash -c '
+            set -e
+            test "$(id -un)" = claude
+            docker ps
+            test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
+          '
       - name: .clod.envrc variables and launcher settings
         run: |
           cd "$(mktemp -d)"
@@ -202,6 +216,10 @@ jobs:
               chromium --headless --screenshot=/tmp/shot.png --window-size=800,600 file:///tmp/page.html &&
               test -s /tmp/shot.png &&
               test -s /etc/clod/.claude/rules/browser.md
+          - image: docker
+            check: >-
+              docker --version && docker compose version && docker buildx version &&
+              test -s /etc/clod/.claude/rules/docker.md
           - image: dotnet
             check: dotnet --version
           - image: go

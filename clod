@@ -38,7 +38,8 @@
 # Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
 # hold the home label, image tag and login source this run resolved to, and
 # CLOD_PORTS the published container ports. CLOD_WORKSPACE_FILES is set when the
-# current directory has files, so the container can warn if it sees none.
+# current directory has files, so the container can warn if it sees none. With
+# --docker, CLOD_HOST_WORKSPACE is the current directory's path on the host.
 #
 # On a Linux host the clod image's claude user is built with the host user's
 # uid and gid, and host.docker.internal is mapped to the host.
@@ -49,6 +50,10 @@
 # bash with set -a and direnv's stdlib when direnv is installed; an .envrc is
 # loaded by direnv itself, so it must be allowed and only exports count.
 # Launcher settings it sets are used, not passed in.
+#
+# --docker mounts the Docker socket, which is root on the Docker host (on macOS,
+# the VM, with your home folder mounted). It is an option only, with no setting
+# in the environment, envrc or config, so a project can't turn it on.
 
 # Written for bash 3.2, the /bin/bash macOS ships.
 
@@ -106,6 +111,9 @@ Options (before the command):
   -f, --force            run from a directory clod otherwise refuses; replace
                          an existing clod (install) or shared config (new-shared)
       --skip-build       run the image as built, even if its files have changed
+      --docker           mount the host's Docker socket (for the docker
+                         variant). WARNING: that is root on the Docker host,
+                         which can mount and read anything on your machine
   -h, --help             show this help
       --version          show clod's version
   --                     end of options: the rest goes to the default command
@@ -128,7 +136,7 @@ usage_error() {
   exit 2
 }
 
-force='' skip_build='' command='' dashdash=''
+force='' skip_build='' docker_socket='' command='' dashdash=''
 opt_image='' opt_home='' opt_creds='' opt_ports=()
 while (( $# )); do
   case $1 in
@@ -148,6 +156,7 @@ while (( $# )); do
     --port=*) opt_ports+=("${1#*=}"); shift ;;
     -f|--force) force=1; shift ;;
     --skip-build) skip_build=1; shift ;;
+    --docker) docker_socket=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --version)
       echo "clod $(clod_version)"
@@ -697,6 +706,7 @@ if [[ $command == env ]]; then
   [[ $OSTYPE == linux* ]] && echo "user:  claude as $(id -u):$(id -g)"
   [[ -n $shared_dir ]] && echo "shared: $(tildify "$shared_dir")"
   (( ${#port_args[@]} )) && echo "ports: ${port_args[*]}"
+  [[ -n $docker_socket ]] && echo "docker: the host's Docker socket (root on the Docker host)"
   [[ -f $config ]] && echo "config: $(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
   exit 0
@@ -842,7 +852,6 @@ if [[ -n $creds ]]; then
   [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
 fi
 
-echo "clod · $home_label · $tag · ${#vars[@]} vars" >&2
 args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
 [[ -n $creds ]] && args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
 [[ -n $tz ]] && args+=(-e "TZ=$tz")
@@ -855,6 +864,29 @@ fi
 [[ -n $shared_dir ]] && args+=(-v "$shared_dir:/etc/claude-code:ro")
 # Docker Engine on Linux has no built-in host.docker.internal.
 [[ $OSTYPE == linux* ]] && args+=(--add-host=host.docker.internal:host-gateway)
+# --docker mounts the socket of the Docker that runs clod, which must be local:
+# the path is the same on Linux, in Colima's VM and in Docker Desktop's. The
+# socket's group, as a container sees it, lets claude use it. --mount, unlike
+# -v, fails rather than creating a missing source.
+if [[ -n $docker_socket ]]; then
+  endpoint=${DOCKER_HOST:-$(docker context inspect -f '{{.Endpoints.docker.Host}}' 2>/dev/null)}
+  case $endpoint in
+    ''|unix://*) ;;
+    *)
+      echo "clod: --docker needs a local Docker, but it's at $endpoint" >&2
+      exit 1
+      ;;
+  esac
+  sock=/var/run/docker.sock
+  mount=(--mount "type=bind,src=$sock,dst=$sock")
+  sock_stat=$(docker run --rm --pull=never "${mount[@]}" --entrypoint stat "$tag" -c '%F %g' "$sock" 2>&1)
+  if [[ ! $sock_stat =~ ^socket\ [0-9]+$ ]]; then
+    echo "clod: --docker: can't find Docker's socket at $sock on the Docker host: $sock_stat" >&2
+    exit 1
+  fi
+  args+=("${mount[@]}" --group-add "${sock_stat#socket }" -e "CLOD_HOST_WORKSPACE=$PWD")
+fi
 [[ -t 0 && -t 1 ]] && args+=(-t)
+echo "clod · $home_label · $tag · ${#vars[@]} vars${docker_socket:+ · Docker socket}" >&2
 # Images are local: clod builds them, so a mistyped name must not pull one.
 exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${args[@]}" "$tag" "$command" "$@"
