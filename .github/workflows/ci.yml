@@ -114,6 +114,20 @@ jobs:
           clod env | grep -q '^image: clod-python'
           clod default image clod
           clod env | grep -q '^image: clod$'
+      - name: new-shared copies the starter, and a missing CLAUDE.md warns
+        run: |
+          cd "$(mktemp -d)"
+          clod new-shared
+          test -f ~/.clod/shared/CLAUDE.md && test -f ~/.clod/shared/statusline.sh
+          clod new-shared | grep -q 'has everything in the starter'
+          clod env | grep -q '^shared: ~/.clod/shared'
+          rm ~/.clod/shared/CLAUDE.md
+          clod new-shared | grep -q 'missing  *CLAUDE.md'
+          clod bash -c true 2>&1 | grep -q 'has no CLAUDE.md'
+          clod --force new-shared
+          test -f ~/.clod/shared/CLAUDE.md
+          ls -d ~/.clod/shared.bak-*
+          rm -rf ~/.clod/shared ~/.clod/shared.bak-*
       - name: Command line
         run: |
           cd "$(mktemp -d)"

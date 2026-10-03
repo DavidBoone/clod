@@ -153,15 +153,19 @@ this repo's [`shared/`](shared) there, which updates with `git pull`:
 - `statusline.sh` is the statusline.
 - `managed-settings.json` turns that statusline on.
 
-To customise them, copy them out and edit your copy:
+To customise them, make your own copy and edit that:
 
 ```bash
-cp -R ~/.clod/src/shared ~/.clod/shared
+clod new-shared       # copies the starter to ~/.clod/shared
 ```
 
-From then on clod mounts `~/.clod/shared`, and updates to the repo's `shared/`
-reach you only when you merge them in (`diff -r ~/.clod/src/shared
-~/.clod/shared`). Add your own instructions to its `CLAUDE.md`, and any other
+From then on clod mounts `~/.clod/shared` in place of the starter, so keep
+everything you want from it there: clod warns if your copy has no `CLAUDE.md`,
+since that's what tells Claude about the container. Updates to the repo's
+`shared/` reach you only when you merge them in. Run `clod new-shared` again
+to compare: it lists the starter's files that yours is missing or differs on,
+with the `diff` command to see them, and `clod --force new-shared` replaces
+yours with the starter, keeping yours as a backup. Add your own instructions to its `CLAUDE.md`, and any other
 [managed settings](https://code.claude.com/docs/en/settings) to
 `managed-settings.json` or `managed-settings.d/*.json`. Managed settings take
 precedence over a home's own settings, so keep per-client config in the homes.
