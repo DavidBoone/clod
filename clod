@@ -321,6 +321,12 @@ build_image() {
 
 if [[ $tag == clod || -n $variant_dir ]]; then
   build_image "$tag"
+elif ! docker image inspect "$tag" >/dev/null 2>&1; then
+  variants=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
+    [[ -f $f ]] && basename "$(dirname "$f")"
+  done | sort -u | tr '\n' ' ')
+  echo "clod: no variant or local image named '$image'${variants:+ (variants: ${variants% })}" >&2
+  exit 1
 fi
 
 # Docker creates a missing mount target as root, which on a Linux host leaves
