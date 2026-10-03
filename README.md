@@ -176,7 +176,7 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 
 | Variant   | Adds |
 |-----------|------|
-| `browser` | the system libraries Playwright's Chromium needs |
+| `browser` | Chromium, fonts, and the system libraries Playwright's browsers need |
 | `dotnet`  | .NET 10 SDK, from Microsoft's package repository |
 | `go`      | the latest Go release, as of when the image is built |
 | `lamp`    | PHP with common extensions, Composer, Apache and MariaDB |
@@ -224,6 +224,15 @@ the same name, so copying one there is how to customise it. Apt lists are kept
 in the base, so variants can `apt-get install` without `apt-get update`. The
 directory is the build context, so `COPY` works for files beside the
 `Dockerfile`.
+
+A variant can give Claude instructions about itself, such as where its tools
+are. Put them in a Markdown file beside the `Dockerfile` and copy it into
+`/etc/clod/.claude/rules/`, which Claude Code loads in every image built from
+the variant:
+
+```dockerfile
+COPY CLAUDE.md /etc/clod/.claude/rules/mine.md
+```
 
 Images are never pulled at launch, so `-i` must name a variant or an image
 already built locally.

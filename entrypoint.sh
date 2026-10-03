@@ -43,6 +43,13 @@ done
 if [ -n "$skip" ]; then
     set -- "$skip" "$@"
 fi
+# Instructions an image adds under /etc/clod (a CLAUDE.md, or files in
+# .claude/rules/) load through --add-dir. The = form keeps the option, which
+# takes several directories, from taking a subcommand or prompt as one.
+if [ -d /etc/clod ]; then
+    set -- --add-dir=/etc/clod "$@"
+    export CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
+fi
 # Installed into the mounted home so Claude Code can update itself.
 command -v claude >/dev/null || {
     echo "clod: installing Claude Code into this home..." >&2
