@@ -175,7 +175,7 @@ jobs:
           clod images | grep -q '^\* clod  *built'
           clod homes | grep -q '^\* default'
           clod new-image mine go
-          grep -q '^FROM clod$' ~/.clod/images/mine/Dockerfile
+          grep -q '^FROM \$BASE$' ~/.clod/images/mine/Dockerfile
           clod new-image starter
           clod images | grep -q 'starter .*~/.clod/images/starter'
           clod --skip-build bash -c true 2>&1 | grep -q 'running clod as built'
@@ -194,6 +194,28 @@ jobs:
           grep -q 'building clod-one' out
           grep -q 'building clod-stages' out
           clod images | grep -q '^  stages  *built'
+      - name: Variants combine, each built on the one before
+        run: |
+          cd "$(mktemp -d)"
+          mkdir -p ~/.clod/images/first ~/.clod/images/second ~/.clod/images/fixed
+          printf 'ARG BASE=clod\nFROM $BASE\nRUN echo first > /tmp/order\n' > ~/.clod/images/first/Dockerfile
+          printf 'ARG BASE=clod\nFROM $BASE\nRUN echo second >> /tmp/order\n' > ~/.clod/images/second/Dockerfile
+          printf 'FROM clod\n' > ~/.clod/images/fixed/Dockerfile
+          clod -i first+second env | grep -q '^image: *clod-first.second '
+          clod -i first+second bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
+          clod images | grep -q '^  first.second  *built'
+          clod -i clod-first.second --skip-build bash -c true
+          echo 'RUN true' >> ~/.clod/images/first/Dockerfile
+          clod images | grep -q '^  first.second  *stale'
+          clod -i first+second bash -c true 2>&1 | grep -q 'building clod-first.second'
+          set +e
+          clod -i first+fixed env 2>&1 | grep -q "fixed can't go on top"; test "${PIPESTATUS[0]}" = 1 || exit 1
+          clod -i first+nope env; test $? = 1 || exit 1
+          set -e
+          clod -i fixed+first env | grep -q '^image: *clod-fixed.first '
+          clod new-image ontop first+second
+          grep -q '^FROM clod-first.second$' ~/.clod/images/ontop/Dockerfile
+          clod -i ontop bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
       - name: rebuild replaces the image and prunes the old one
         run: |
           before=$(docker image inspect -f '{{.Id}}' clod)
@@ -203,12 +225,14 @@ jobs:
           if docker image inspect "$before" >/dev/null 2>&1; then exit 1; fi
 
   # Homebrew's docker on macOS has no buildx, so clod's builds there use the
-  # classic builder; the base image must build without BuildKit.
+  # classic builder; the base image, and a variant on top of another through
+  # BASE, must build without BuildKit.
   classic-builder:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: DOCKER_BUILDKIT=0 docker build -q -t clod-classic .
+      - run: DOCKER_BUILDKIT=0 docker build -q --build-arg BASE=clod-classic images/sudo
 
   variant:
     runs-on: ubuntu-latest
@@ -240,6 +264,8 @@ jobs:
             check: >-
               test "$(sudo -n whoami)" = root &&
               test -s /etc/clod/.claude/rules/sudo.md
+          - image: go+sudo
+            check: go version && test "$(sudo -n whoami)" = root
     steps:
       - uses: actions/checkout@v4
       - name: Install clod

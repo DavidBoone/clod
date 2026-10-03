@@ -13,7 +13,8 @@
 #               slash, a host path relative to the current directory (default: default)
 #   CLOD_IMAGE  image to run (default clod): a variant name, built from
 #               ~/.clod/images/<name>/ or else this script's images/<name>/ as
-#               clod-<name>, or any local docker image
+#               clod-<name>; variants combined as a+b, b built on a as clod-a.b;
+#               or any local docker image
 #   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME);
 #               unset = the home keeps its own
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
@@ -28,7 +29,9 @@
 #
 # The clod image is built from this script's directory, and a variant from its
 # directory, whenever their files (or, for a variant, an image it is FROM, in
-# any stage) change. A variant can build on another as FROM clod-<name>.
+# any stage) change. A variant can build on another as FROM clod-<name>, or
+# declare ARG BASE=clod and build FROM $BASE, so a combination a+b can pass it
+# --build-arg BASE=clod-a.
 #
 # ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
 # reads managed settings and CLAUDE.md for every home. Until you create it, the
@@ -91,7 +94,8 @@ Commands:
   images                 list the base image and the variants
   homes                  list the homes and their logins
   new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
-                         of the bundled variant NAME, or as a starter
+                         a starter on combination FROM (A+B), a copy of the
+                         bundled variant NAME, or a starter
   new-shared             create ~/.clod/shared as a copy of the starter shared
                          config, to customise; if it exists, compare it with the
                          starter (--force replaces it, keeping a backup)
@@ -103,6 +107,7 @@ Commands:
 
 Options (before the command):
   -i, --image NAME       image or variant to run            (CLOD_IMAGE)
+                           -i go+sudo    the sudo variant built on go
   -H, --home NAME|PATH   container home                     (CLOD_HOME)
       --creds HOME       borrow another home's login        (CLOD_CREDS)
   -P, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
@@ -422,9 +427,91 @@ base_hash() {
     printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1
 }
 
-# Prints the images variant directory $1's Dockerfile is FROM, one per line.
+# Prints the images variant directory $1's Dockerfile is FROM, one per line,
+# with the ARGs declared before its first FROM expanded; BASE is $2 if given.
 variant_parents() {
-  awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; break } }' "$1/Dockerfile"
+  awk -v base="$2" '
+    function expand(s,   out, name) {
+      out = ""
+      while (match(s, /\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*/)) {
+        name = substr(s, RSTART, RLENGTH)
+        gsub(/[${}]/, "", name)
+        out = out substr(s, 1, RSTART - 1) arg[name]
+        s = substr(s, RSTART + RLENGTH)
+      }
+      return out s
+    }
+    toupper($1) == "ARG" && !from {
+      name = $2; value = ""
+      if (i = index(name, "=")) { value = substr(name, i + 1); name = substr(name, 1, i - 1) }
+      gsub(/^"|"$/, "", value)
+      arg[name] = (name == "BASE" && base != "") ? base : value
+    }
+    toupper($1) == "FROM" {
+      from = 1
+      for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print expand($i); break }
+    }' "$1/Dockerfile"
+}
+
+# True when variant directory $1's Dockerfile declares ARG BASE before its first
+# FROM, so it can be built on another variant.
+takes_base() {
+  awk 'toupper($1) == "FROM" { exit } toupper($1) == "ARG" && $2 ~ /^BASE(=|$)/ { found = 1 }
+    END { exit !found }' "$1/Dockerfile"
+}
+
+# Sets REPLY to the directory of the variant clod image $1 is built from, or to
+# nothing if it isn't a variant's, and variant_base to the image a combination's
+# last variant is built on (clod-a.b for clod-a.b.c), or to nothing.
+tag_variant() {
+  local parts part
+  REPLY='' variant_base=''
+  [[ $1 == clod-?* && $1 != clod-.* && $1 != *. && $1 != *..* ]] || return 0
+  IFS=. read -ra parts <<< "${1#clod-}"
+  for part in "${parts[@]}"; do
+    find_variant "$part"
+    [[ -n $REPLY ]] || return 0
+  done
+  (( ${#parts[@]} > 1 )) && variant_base=${1%.*}
+}
+
+# Sets REPLY to the tag of the variant or combination image name $1 means:
+# clod-NAME for NAME or clod-NAME, clod-A.B for A+B, A.B or clod-A.B. Sets it
+# to nothing when $1 is neither.
+variant_tag() {
+  local name=${1//+/.}
+  if [[ $name == clod-* ]]; then
+    tag_variant "$name"
+    [[ -n $REPLY ]] && { REPLY=$name; return 0; }
+  fi
+  tag_variant "clod-$name"
+  [[ -n $REPLY ]] && REPLY=clod-$name
+}
+
+# Exits with an error when image name $1 is a combination clod can't build: a
+# name with + in it whose parts aren't all variants, or one whose variants after
+# the first don't take ARG BASE.
+check_combination() {
+  local name=${1#clod-} parts part i=0
+  name=${name//+/.}
+  [[ $name == *.* ]] || return 0
+  if [[ $1 == *+* && ( $name == .* || $name == *. || $name == *..* ) ]]; then
+    echo "clod: invalid image name '$1': a combination is variants joined by +, like go+sudo" >&2
+    exit 1
+  fi
+  IFS=. read -ra parts <<< "$name"
+  for part in "${parts[@]}"; do
+    find_variant "$part"
+    if [[ -z $REPLY ]]; then
+      [[ $1 == *+* ]] || return 0
+      echo "clod: no variant named '$part' (clod images lists them)" >&2
+      exit 1
+    fi
+    if (( i++ )) && ! takes_base "$REPLY"; then
+      echo "clod: variant $part can't go on top of another: its Dockerfile needs ARG BASE=clod and FROM \$BASE in place of FROM clod" >&2
+      exit 1
+    fi
+  done
 }
 
 # Prints the hash a variant from directory $1, FROM images $2..., is labelled
@@ -481,7 +568,8 @@ if [[ $command == default ]]; then
   if [[ -n $value ]]; then
     case $key in
       image)
-        find_variant "$value"
+        check_combination "$value"
+        variant_tag "$value"
         if [[ -z $REPLY ]] && ! docker image inspect "$value" >/dev/null 2>&1; then
           echo "clod: no variant or local image named '$value' (clod images lists them)" >&2
           exit 1
@@ -550,17 +638,17 @@ if [[ $image == *[[:space:]]* ]]; then
   echo "clod: invalid CLOD_IMAGE '$image'" >&2
   exit 1
 fi
-# clod-NAME, the tag a variant is built as, names variant NAME too.
-if [[ $image == clod-* ]]; then
-  find_variant "${image#clod-}"
-  [[ -n $REPLY ]] && image=${image#clod-}
-fi
-find_variant "$image"
-variant_dir=$REPLY
-if [[ -n $variant_dir ]]; then
-  tag=clod-$image
+# A variant NAME is built as clod-NAME, and a combination A+B, B built on A, as
+# clod-A.B; image becomes NAME or A.B.
+check_combination "$image"
+variant_tag "$image"
+if [[ -n $REPLY ]]; then
+  tag=$REPLY
+  image=${tag#clod-}
+  tag_variant "$tag"
+  variant_dir=$REPLY
 else
-  tag=$image
+  tag=$image variant_dir=''
 fi
 
 shared_dir=$clod_dir/shared
@@ -592,7 +680,7 @@ if [[ $command == images ]]; then
   # built. An image clod has no files for is built or -.
   checking=()
   image_state() {
-    local tag=$1 dir label hash parent parents=() stale='' c
+    local tag=$1 dir base label hash parent parents=() stale='' c
     REPLY=-
     label=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$tag" 2>/dev/null) || return 0
     REPLY=built
@@ -603,8 +691,8 @@ if [[ $command == images ]]; then
       [[ -z $base_dir ]] && return 0
       hash=$(base_hash)
     else
-      find_variant "${tag#clod-}"
-      dir=$REPLY
+      tag_variant "$tag"
+      dir=$REPLY base=$variant_base
       [[ -z $dir ]] && { REPLY=built; return 0; }
       checking+=("$tag")
       while IFS= read -r parent; do
@@ -613,7 +701,7 @@ if [[ $command == images ]]; then
           image_state "$parent"
           [[ $REPLY == built ]] || stale=1
         fi
-      done < <(variant_parents "$dir")
+      done < <(variant_parents "$dir" "$base")
       unset 'checking[${#checking[@]}-1]'
       hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
     fi
@@ -626,10 +714,10 @@ if [[ $command == images ]]; then
     [[ $1 == "$image" ]] && mark='*'
     image_state "$2"
     [[ $REPLY == stale ]] && any_stale=1
-    printf '%s %-12s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
+    printf '%s %-16s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
   }
   any_stale=''
-  printf '  %-12s %-7s %s\n' NAME STATE SOURCE
+  printf '  %-16s %-7s %s\n' NAME STATE SOURCE
   image_row clod clod "$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)"
   names=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
     [[ -f $f ]] && basename "$(dirname "$f")"
@@ -643,8 +731,15 @@ if [[ $command == images ]]; then
     fi
     image_row "$n" "clod-$n" "$src"
   done
+  # Combinations that are built, and the one that runs here.
+  combos=$({ docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null
+             [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-.*\.' | sort -u)
+  for t in $combos; do
+    image_row "${t#clod-}" "$t" "$(t=${t#clod-}; echo "${t//./ + }")"
+  done
   echo
-  echo "*        runs here by default; clod -i NAME runs another"
+  echo "*        runs here by default; clod -i NAME runs another, and clod -i A+B"
+  echo "         builds variant B on A as clod-A.B"
   echo "bundled  comes with clod, in $(tildify "$script_dir")"
   [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
   exit 0
@@ -723,11 +818,14 @@ if [[ $command == new-image ]]; then
     echo "clod: $(tildify "$target") already exists" >&2
     exit 1
   fi
-  src=''
+  src='' combo=''
   if [[ -n $from ]]; then
+    check_combination "$from"
+    variant_tag "$from"
+    [[ $REPLY == clod-*.* ]] && combo=$REPLY
     find_variant "$from"
     src=$REPLY
-    if [[ -z $src ]]; then
+    if [[ -z $src && -z $combo ]]; then
       echo "clod: no variant named '$from' (clod images lists them)" >&2
       exit 1
     fi
@@ -740,17 +838,27 @@ if [[ $command == new-image ]]; then
     echo "clod: created $(tildify "$target") from $(tildify "$src")"
   else
     mkdir "$target"
+    if [[ -n $combo ]]; then
+      variants=${combo#clod-}
+      from_lines="# Built as clod-$name and run with \`clod -i $name\`. It rebuilds whenever a
+# file in this directory or in ${variants//./, } changes.
+FROM $combo"
+    else
+      from_lines="# Built as clod-$name and run with \`clod -i $name\`. It rebuilds whenever a
+# file in this directory or the image it is FROM changes. BASE lets it go on top
+# of another variant, as in \`clod -i go+$name\`.
+ARG BASE=clod
+FROM \$BASE"
+    fi
     cat > "$target/Dockerfile" <<STARTER
-# Built as clod-$name and run with \`clod -i $name\`. It rebuilds whenever a
-# file in this directory or the image it is FROM changes.
-FROM clod
+$from_lines
 USER root
 # RUN apt-get install -y postgresql-client
 USER claude
 # Instructions for Claude about this image, from a CLAUDE.md beside this file:
 # COPY CLAUDE.md /etc/clod/.claude/rules/$name.md
 STARTER
-    echo "clod: created $(tildify "$target") with a starter Dockerfile"
+    echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, FROM $combo}"
   fi
   echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
   exit 0
@@ -764,7 +872,17 @@ if [[ $command == env ]]; then
   else
     field home "$home_label ($home_path)"
   fi
-  field image "$tag${variant_dir:+ ($(tildify "$variant_dir"))}"
+  if [[ $tag == clod-*.* ]]; then
+    IFS=. read -ra parts <<< "$image"
+    from=''
+    for p in "${parts[@]}"; do
+      find_variant "$p"
+      from+="${from:+ + }$(tildify "$REPLY")"
+    done
+    field image "$tag ($from)"
+  else
+    field image "$tag${variant_dir:+ ($(tildify "$variant_dir"))}"
+  fi
   field command "${CLOD_COMMAND:-claude} (what a bare clod runs)"
   if [[ -n $creds ]]; then
     field login "borrowed from $creds_label"
@@ -809,7 +927,7 @@ build_if_changed() {
 # every stage's, so a multi-stage Dockerfile can name one in any stage.
 building=() done_images=()
 build_image() {
-  local tag=$1 dir parents=() parent hash build_args=() b
+  local tag=$1 dir base parents=() parent hash build_args=() b
   for b in ${building[@]+"${building[@]}"}; do
     if [[ $b == "$tag" ]]; then
       echo "clod: image $tag is built FROM itself" >&2
@@ -828,16 +946,17 @@ build_image() {
     build_args=(${base_args[@]+"${base_args[@]}"})
     [[ -n $rebuild ]] && build_args+=(--pull)
   else
-    find_variant "${tag#clod-}"
-    dir=$REPLY
+    tag_variant "$tag"
+    dir=$REPLY base=$variant_base
+    [[ -n $base ]] && build_args=(--build-arg "BASE=$base")
     while IFS= read -r parent; do
       parents+=("$parent")
-    done < <(variant_parents "$dir")
+    done < <(variant_parents "$dir" "$base")
     for parent in ${parents[@]+"${parents[@]}"}; do
       if [[ $parent == clod ]]; then
         build_image clod
       elif [[ $parent == clod-* ]]; then
-        find_variant "${parent#clod-}"
+        tag_variant "$parent"
         [[ -n $REPLY ]] && build_image "$parent"
       fi
     done
