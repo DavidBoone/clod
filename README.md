@@ -1,13 +1,14 @@
 # clod
 
-Run Claude Code or Codex in a throwaway Docker container, on whatever directory
-you're in. `clod` builds the image, mounts your project and a persistent home,
-and starts Claude Code with its permission prompts off, so it can work without
-asking at every step while staying out of the rest of your machine.
+Run Claude Code or Codex with no permission prompts, safely. `clod` starts the
+agent in a throwaway Docker container that sees only the directory you run it
+from and a home of its own. Inside, it's unrestricted: it browses the web,
+installs packages and runs whatever tools it needs without stopping to ask,
+while the rest of your machine stays out of reach.
 
-> **The container is not a sandbox.** Both agents run with their permission
-> prompts disabled, and the agent can read and write everything in the mounted
-> home and workspace and reach the network. See [Security](#security).
+> **What the agent can reach:** your project directory, its own home with
+> whatever logins and keys you give it, and the network. Nothing else on your
+> machine. See [What the agent can reach](#what-the-agent-can-reach).
 
 ## Quick start
 
@@ -282,19 +283,30 @@ services.
 - Docker 23 or newer (BuildKit)
 - bash 3.2 or newer, and `shasum` or `sha1sum`, which macOS and Linux include
 
-## Security
+## What the agent can reach
 
-The container keeps the agents off your host filesystem outside the mounts, but
-it is a convenience boundary, not a sandbox against a misbehaving agent:
+clod gives the agent a fixed reach instead of a stream of permission prompts.
+Claude Code runs with `--dangerously-skip-permissions` and Codex with
+`--dangerously-bypass-approvals-and-sandbox`, so within that reach they act
+without asking:
 
-- Claude Code runs with `--dangerously-skip-permissions` (unless you choose a
-  permission mode) and Codex with `--dangerously-bypass-approvals-and-sandbox`.
-- The workspace and the whole home are mounted read-write. Anything you keep
-  in a home, such as SSH keys or API tokens, is available to the agent.
-- The container has normal outbound network access and can reach services on
-  the host through `host.docker.internal`.
-- Claude Code is installed on first run with
-  `curl -fsSL https://claude.ai/install.sh | bash`, and Codex from npm.
+- **The project directory**, read-write: the agent can change or delete any
+  file in it, and commit and push with whatever git credentials the home
+  holds.
+- **Its home**: the Claude and Codex logins, MCP tokens, and anything else you
+  put there, such as SSH keys or API tokens. Give each home only what its work
+  needs.
+- **The network**, including services on your machine through
+  `host.docker.internal`.
+
+Everything else on your machine is out of reach: your own home directory,
+other projects, host processes and system files. The container's system is
+discarded on exit, so whatever the agent installs or breaks there goes with
+it. `clod` refuses to mount your home directory, `~/.clod` or the homes as the
+project, unless run with `--force`.
+
+Claude Code installs on first run with
+`curl -fsSL https://claude.ai/install.sh | bash`, and Codex from npm.
 
 ## License
 

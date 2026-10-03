@@ -20,7 +20,7 @@ On a Linux host, where bind mounts keep host ownership, the launcher builds the 
 
 ## Security
 
-The container is a convenience boundary, not a sandbox against a hostile agent:
+The container defines what the agent can reach; within it, the agent runs unrestricted:
 
 - Claude Code runs with `--dangerously-skip-permissions` unless its arguments choose a permission mode, and Codex with `--dangerously-bypass-approvals-and-sandbox`
 - The workspace and the whole home are mounted read-write, so anything in the home (SSH keys, tokens, credentials) is visible to the agent
