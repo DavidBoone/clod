@@ -21,7 +21,7 @@
 #               (an address first, as in docker run -p, publishes there instead)
 #
 # The envrc (below) can set these too, as defaults for the shell's, and
-# ~/.clod/config (NAME=value lines, written by --default) as defaults for both.
+# ~/.clod/config (NAME=value lines, written by `clod default`) as defaults for both.
 #
 # The clod image is built from this script's directory, and a variant from its
 # directory, whenever their files (or, for a variant, the image it is FROM)
@@ -62,6 +62,11 @@ script_dir=$(cd "$(dirname "$script")" && pwd -P)
 base_dir=$script_dir
 [[ -f $base_dir/Dockerfile ]] || base_dir=
 
+# Prints clod's version: its checkout's commit, or a tag when there is one.
+clod_version() {
+  git -C "$script_dir" describe --tags --always --dirty 2>/dev/null || echo unknown
+}
+
 usage() {
   cat <<'USAGE'
 Usage: clod [options] [command] [args...]
@@ -77,6 +82,10 @@ Commands:
   homes                  list the homes and their logins
   new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
                          of the bundled variant NAME, or as a starter
+  default [IMAGE]        set the default image, or show it
+  rebuild                rebuild the image and its bases from scratch
+  update                 update clod itself (git pull in its checkout)
+  install [DIR]          link clod into DIR, or a directory on your PATH
 
 Options (before the command):
   -i, --image NAME       image or variant to run            (CLOD_IMAGE)
@@ -86,9 +95,7 @@ Options (before the command):
                            -p 5173       localhost:5173 -> container port 5173
                            -p 3000:5173  localhost:3000 -> container port 5173
   -f, --force            run from a directory clod otherwise refuses
-      --rebuild          rebuild the image and its bases from scratch, then exit
       --skip-build       run the image as built, even if its files have changed
-      --default [IMAGE]  set the default image, or show it
   -h, --help             show this help
       --version          show clod's version
   --                     end of options: the rest goes to Claude Code
@@ -107,7 +114,7 @@ usage_error() {
   exit 2
 }
 
-force='' rebuild='' skip_build='' set_default='' show_default='' command=''
+force='' skip_build='' command=''
 opt_image='' opt_home='' opt_creds='' opt_ports=()
 while (( $# )); do
   case $1 in
@@ -126,21 +133,10 @@ while (( $# )); do
     --creds=*) opt_creds=${1#*=}; shift ;;
     --port=*) opt_ports+=("${1#*=}"); shift ;;
     -f|--force) force=1; shift ;;
-    --rebuild) rebuild=1; shift ;;
     --skip-build) skip_build=1; shift ;;
-    --default)
-      if [[ $# -ge 2 && $2 != -* ]]; then
-        set_default=$2
-        shift 2
-      else
-        show_default=1
-        shift
-      fi
-      ;;
-    --default=*) set_default=${1#*=}; shift ;;
     -h|--help) usage; exit 0 ;;
     --version)
-      echo "clod $(git -C "$script_dir" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+      echo "clod $(clod_version)"
       exit 0
       ;;
     --) shift; command=claude; break ;;
@@ -150,7 +146,7 @@ while (( $# )); do
 done
 if [[ -z $command ]]; then
   case ${1:-claude} in
-    claude|codex|bash|zsh|env|images|homes|new-image)
+    claude|codex|bash|zsh|env|images|homes|new-image|default|rebuild|update|install)
       command=${1:-claude}
       [[ $# -gt 0 ]] && shift
       ;;
@@ -246,6 +242,65 @@ envrc_vars() {
   return 0
 }
 
+if [[ $command == install ]]; then
+  target=$script_dir/clod
+  if [[ -n $1 ]]; then
+    dir=$1
+  else
+    # The first of these on PATH that you can write to, else ~/.local/bin.
+    dir=''
+    for d in "$HOME/.local/bin" "$HOME/bin" /opt/homebrew/bin /usr/local/bin; do
+      case ":$PATH:" in
+        *":$d:"*) if [[ -d $d && -w $d ]]; then dir=$d; break; fi ;;
+      esac
+    done
+    [[ -n $dir ]] || dir=$HOME/.local/bin
+  fi
+  link=$dir/clod
+  if [[ -L $link && $(readlink "$link") == "$target" ]]; then
+    echo "clod is already installed as $(tildify "$link")"
+  elif [[ -e $link || -L $link ]] && [[ -z $force ]]; then
+    echo "clod: $(tildify "$link") already exists; clod --force install replaces it" >&2
+    exit 1
+  else
+    mkdir -p "$dir" && ln -sfn "$target" "$link" || exit 1
+    echo "clod: installed $(tildify "$link") -> $(tildify "$target")"
+  fi
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *)
+      case ${SHELL##*/} in
+        zsh) rc=$(tildify "$HOME/.zshrc") ;;
+        bash) if [[ $OSTYPE == darwin* ]]; then rc=$(tildify "$HOME/.bash_profile"); else rc=$(tildify "$HOME/.bashrc"); fi ;;
+        *) rc='your shell startup file' ;;
+      esac
+      echo
+      echo "$(tildify "$dir") isn't on your PATH. Add this line to $rc, then open a new terminal:"
+      echo "  export PATH=\"${dir/#$HOME/\$HOME}:\$PATH\""
+      ;;
+  esac
+  exit 0
+fi
+
+if [[ $command == update ]]; then
+  if ! git -C "$script_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "clod: $(tildify "$script_dir") isn't a git checkout, so there's nothing to update" >&2
+    exit 1
+  fi
+  before=$(clod_version)
+  if ! git -C "$script_dir" pull --ff-only --quiet; then
+    echo "clod: couldn't fast-forward $(tildify "$script_dir"); update it with git there" >&2
+    exit 1
+  fi
+  after=$(clod_version)
+  if [[ $before == "$after" ]]; then
+    echo "clod $after is up to date"
+  else
+    echo "clod updated: $before -> $after"
+  fi
+  exit 0
+fi
+
 find_envrc
 envrc=$REPLY
 vars=()
@@ -340,12 +395,13 @@ find_variant() {
   done
 }
 
-if [[ -n $show_default ]]; then
+if [[ $command == default && -z $1 ]]; then
   current=$(sed -n 's/^CLOD_IMAGE=//p' "$config" 2>/dev/null | tail -1)
   echo "default image: ${current:-clod}"
   exit 0
 fi
-if [[ -n $set_default ]]; then
+if [[ $command == default ]]; then
+  set_default=$1
   find_variant "$set_default"
   if [[ -z $REPLY && $set_default != clod ]] && ! docker image inspect "$set_default" >/dev/null 2>&1; then
     echo "clod: no variant or local image named '$set_default'" >&2
@@ -506,9 +562,10 @@ if [[ $command == env ]]; then
 fi
 
 # Builds $1 from directory $2, with any further docker build arguments, unless
-# the image is already labelled with hash $3. With --rebuild it always builds,
+# the image is already labelled with hash $3. For `clod rebuild` it always builds,
 # without the layer cache.
-built=
+built='' rebuild=''
+[[ $command == rebuild ]] && rebuild=1
 build_if_changed() {
   local no_cache=()
   if [[ -n $rebuild ]]; then

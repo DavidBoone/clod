@@ -24,7 +24,8 @@ jobs:
       - name: Install clod
         run: |
           mkdir -p ~/.local/bin
-          ln -s "$GITHUB_WORKSPACE/clod" ~/.local/bin/clod
+          PATH="$HOME/.local/bin:$PATH" ./clod install
+          test "$(readlink ~/.local/bin/clod)" = "$GITHUB_WORKSPACE/clod"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: clod env
         run: cd "$(mktemp -d)" && clod env
@@ -100,14 +101,14 @@ jobs:
           CLOD_HOME=borrower CLOD_CREDS=owner clod bash -c 'cat ~/.claude/.credentials.json; touch ~/.claude/written' | tee out
           grep -q '"ci"' out
           test "$(stat -c %u ~/.clod/homes/borrower/.claude)" = "$(id -u)"
-      - name: --default sets and resets the default image
+      - name: default sets and resets the default image
         run: |
           cd "$(mktemp -d)"
-          if clod --default no-such-image; then exit 1; fi
-          clod --default python
-          clod --default | grep -q 'default image: python'
+          if clod default no-such-image; then exit 1; fi
+          clod default python
+          clod default | grep -q 'default image: python'
           clod env | grep -q '^image: clod-python'
-          clod --default clod
+          clod default clod
           clod env | grep -q '^image: clod$'
       - name: Command line
         run: |
@@ -129,10 +130,10 @@ jobs:
           clod new-image starter
           clod images | grep -q 'starter .*~/.clod/images/starter'
           clod --skip-build bash -c true 2>&1 | grep -q 'running clod as built'
-      - name: --rebuild replaces the image and prunes the old one
+      - name: rebuild replaces the image and prunes the old one
         run: |
           before=$(docker image inspect -f '{{.Id}}' clod)
-          clod --rebuild
+          clod rebuild
           after=$(docker image inspect -f '{{.Id}}' clod)
           test "$before" != "$after"
           if docker image inspect "$before" >/dev/null 2>&1; then exit 1; fi
@@ -160,7 +161,8 @@ jobs:
       - name: Install clod
         run: |
           mkdir -p ~/.local/bin
-          ln -s "$GITHUB_WORKSPACE/clod" ~/.local/bin/clod
+          PATH="$HOME/.local/bin:$PATH" ./clod install
+          test "$(readlink ~/.local/bin/clod)" = "$GITHUB_WORKSPACE/clod"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build and check ${{ matrix.image }}
         env:
