@@ -43,6 +43,14 @@ jobs:
             git --version; gh --version | head -1; node --version; python3 --version; jq --version
           '
           test "$(stat -c %u from-container)" = "$(id -u)"
+      - name: Warns when the workspace mount comes up empty
+        run: |
+          cd "$(mktemp -d)"
+          touch file
+          clod bash -c true 2>&1 | tee out
+          if grep -q 'workspace is empty' out; then exit 1; fi
+          docker run --rm -e CLOD_WORKSPACE_FILES=1 -v "$(mktemp -d):/workspace" clod bash -c true 2>&1 |
+            grep -q 'workspace is empty'
       - name: Refuses the home directory
         run: |
           cd ~

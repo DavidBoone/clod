@@ -27,7 +27,7 @@ brew services start colima      # optional: start it at login
 Docker Desktop works too. Colima shares your home folder with the containers
 by default, so keep projects under it, or add other folders with
 `colima start --mount /path:w`. A project outside the shared folders appears
-as an empty `/workspace`.
+as an empty `/workspace`, and clod warns at launch when that happens.
 
 **Linux:** install Docker Engine with Docker's convenience script, then add
 yourself to the `docker` group and log in again:
