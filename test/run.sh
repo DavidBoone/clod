@@ -23,7 +23,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 lint_tests='lint'
 base_tests='env run-command empty-workspace refuses-home claude codex statusline
   port docker-socket envrc creds default new-shared command-line multi-stage
-  combine rebuild'
+  combine rebuild completion'
 classic_tests='classic'
 variant_names='browser docker dotnet go lamp python rust sudo go+sudo'
 variants_tests=$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)
@@ -306,6 +306,33 @@ test_rebuild() {
   done
 }
 
+# Tab completion: clod __complete's candidates, and the shim it prints, in bash
+# and (if installed) zsh. Needs no Docker.
+test_completion() {
+  mkdir -p ~/.clod/homes/work ~/.clod/images/plain
+  printf 'FROM clod\n' > ~/.clod/images/plain/Dockerfile
+  test "$(clod __complete 'new-')" = "$(printf 'new-image\nnew-shared')"
+  test "$(clod __complete --sk)" = --skip-build
+  clod __complete -i '' | has -x go
+  clod __complete -i '' | has -x clod
+  test "$(clod __complete -i go+su)" = go+sudo
+  # after +: not a variant already there, nor one built FROM clod
+  if clod __complete -i go+ | grep -qxE 'go\+(go|plain)'; then false; fi
+  clod __complete -H w | has -x work
+  test -z "$(clod __complete -H ./w)"
+  test "$(clod __complete default co)" = command
+  clod __complete default command '' | has -x codex
+  if clod __complete new-image mine '' | grep -qx clod; then false; fi
+  test -z "$(clod __complete claude --re)"
+  test -z "$(clod __complete -- '')"
+  printf '%s\n' 'eval "$(clod completion)"' 'COMP_WORDS=(clod -i go+su); COMP_CWORD=2; _clod' \
+    'echo "${COMPREPLY[*]}"' > shim-test
+  test "$(bash shim-test)" = go+sudo
+  if command -v zsh >/dev/null; then
+    test "$(zsh -f shim-test 2>/dev/null)" = go+sudo
+  fi
+}
+
 # Homebrew's docker on macOS has no buildx, so clod's builds there use the
 # classic builder; the base image, and a variant on top of another through
 # BASE, must build without BuildKit.
@@ -367,7 +394,7 @@ if [[ $OSTYPE != linux* ]]; then
 fi
 needs_docker=''
 for t in "${selected[@]}"; do
-  [[ $t == lint ]] || needs_docker=1
+  [[ $t == lint || $t == completion ]] || needs_docker=1
 done
 if [[ -n $needs_docker ]]; then
   if [[ -z $CI && -z $yes ]]; then

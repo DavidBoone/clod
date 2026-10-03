@@ -54,6 +54,14 @@ git clone https://github.com/DavidBoone/clod.git ~/.clod/src
 or else creates `~/.local/bin` and prints the line that adds it to your
 `PATH`. `clod install DIR` links it into a directory of your choice.
 
+For tab completion of commands, options, variants (including `go+sudo`
+combinations), homes and `clod default` settings, add this line to your
+`~/.zshrc` or `~/.bashrc`:
+
+```bash
+eval "$(clod completion)"
+```
+
 ### 3. Run it
 
 ```bash
