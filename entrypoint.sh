@@ -31,13 +31,26 @@ mkdir -p "$config"
 [ -e "$config/settings.json" ] ||
     echo '{"skipDangerousModePermissionPrompt":true}' > "$config/settings.json"
 
-# Preserve the original default and forwarding of Claude arguments.
-if [ "$#" -eq 0 ]; then
-    set -- --dangerously-skip-permissions
+# Permission prompts are off unless the arguments choose a permission mode.
+skip=--dangerously-skip-permissions
+for arg; do
+    case $arg in
+        --) break ;;
+        --permission-mode|--permission-mode=*|--dangerously-skip-permissions|--allow-dangerously-skip-permissions)
+            skip= ;;
+    esac
+done
+if [ -n "$skip" ]; then
+    set -- "$skip" "$@"
 fi
 # Installed into the mounted home so Claude Code can update itself.
 command -v claude >/dev/null || {
     echo "clod: installing Claude Code into this home..." >&2
+    # sh has no pipefail, so a failed download only shows up here.
     curl -fsSL https://claude.ai/install.sh | bash
+    command -v claude >/dev/null || {
+        echo "clod: Claude Code install failed" >&2
+        exit 1
+    }
 }
 exec claude "$@"

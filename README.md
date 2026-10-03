@@ -18,12 +18,18 @@ directory. Claude Code is the default.
 
 ## Usage
 
-Symlink the [`clod`](clod) script onto your `PATH`, then from any project
-directory:
+Clone this repo and symlink the [`clod`](clod) script onto your `PATH`:
 
 ```bash
-clod                 # Claude Code (default flags: --dangerously-skip-permissions)
-clod --resume        # Claude Code with your own args
+git clone https://github.com/DavidBoone/clod.git ~/.clod/src
+ln -s ~/.clod/src/clod ~/.local/bin/clod
+```
+
+Then from any project directory:
+
+```bash
+clod                 # Claude Code, with --dangerously-skip-permissions
+clod --resume        # Claude Code with your own args (permission prompts stay off)
 clod codex [args]    # Codex
 clod bash | zsh      # a shell
 clod env             # show the home, image, login, envrc and variables that would be used
@@ -33,6 +39,16 @@ The container's entire home directory is persisted on the host, by default in
 `~/.clod/homes/default`. Claude Code and Codex install themselves there on first
 run and keep their config and updates there. On the first run Claude Code asks
 you to `/login`; open the printed URL in your host browser.
+
+A fresh home skips Claude Code's first-run prompts (onboarding, folder trust,
+bypass-permissions warning); the entrypoint seeds `.claude.json` and
+`settings.json` when they are missing.
+
+Claude Code runs with `--dangerously-skip-permissions` unless its arguments
+include `--permission-mode`, `--dangerously-skip-permissions` or
+`--allow-dangerously-skip-permissions`, so `clod --permission-mode plan` brings
+the prompts back. Without a terminal (`clod -p "..." | ...`) the container runs
+without a TTY.
 
 The launcher builds the `clod` image itself from the script's directory (follow
 the symlink back to this repo), and rebuilds it when `Dockerfile` or
@@ -58,7 +74,9 @@ The launcher reads these from your shell environment, for a one-off
 | `CLOD_CREDS` | unset                      | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
 
 In a direnv `.envrc`, `$PWD` is the `.envrc`'s directory, so
-`export CLOD_HOME=$PWD/.clod-home` pins a project-local home.
+`export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside
+the project directory is also visible under `/workspace`, login included, so
+gitignore it.
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
@@ -83,8 +101,11 @@ USER claude
 whenever a file in that directory or the image it is `FROM` changes. A variant
 can build on another with `FROM clod-<name>`; the launcher builds the chain in
 order. Apt lists are kept in the base, so variants can `apt-get install`
-without `apt-get update`. The directory is the build context, so `COPY` works for files beside
-the `Dockerfile`.
+without `apt-get update`. The directory is the build context, so `COPY` works
+for files beside the `Dockerfile`.
+
+Images are never pulled at launch, so `CLOD_IMAGE` must name a variant or an
+image already built locally.
 
 ### Logins
 
@@ -153,8 +174,6 @@ logs each turn's cache reads and writes to `~/.claude/cache-turns.log`.
 Managed settings take precedence over a home's own settings, so keep
 per-client config in the homes.
 
-The container gets the host's timezone (`$TZ`, else `/etc/localtime`).
-
 ### Linux hosts
 
 Docker Engine on Linux keeps bind-mount ownership as is, so on a Linux host
@@ -162,13 +181,6 @@ Docker Engine on Linux keeps bind-mount ownership as is, so on a Linux host
 to the home and workspace belong to you. The image is therefore specific to the
 user who built it. The launcher also maps `host.docker.internal` to the host,
 which Docker Desktop and Colima provide on their own.
-
-A fresh home skips Claude Code's first-run prompts (onboarding, folder trust,
-bypass-permissions warning); the entrypoint seeds `.claude.json` and
-`settings.json` when they are missing.
-
-A home inside the project directory is also visible under `/workspace`, login
-included, so gitignore it.
 
 ### Per-project environment
 
@@ -202,8 +214,10 @@ the container (`host.docker.internal`, not `localhost` or a host socket path).
 for the launcher, and the same variable set in your shell wins. So a
 `.clod.envrc` can pick the home and image for a project whose `.envrc` you
 can't change.
-Multi-line values are not supported by `--env-file`. Changes take effect on the
-next `clod` launch.
+`--env-file` can't carry multi-line values, so variables holding one are
+skipped with a warning. Changes take effect on the next `clod` launch.
+
+The container also gets the host's timezone (`$TZ`, else `/etc/localtime`).
 
 ### Plain docker run
 
@@ -235,8 +249,6 @@ Arguments after `codex` are passed directly to Codex.
 Codex runs with `--dangerously-bypass-approvals-and-sandbox`, disabling its internal
 sandbox and approval prompts inside the Docker container, including resumed sessions.
 It can modify everything writable inside the container, including bind mounts.
-Claude Code defaults to `--dangerously-skip-permissions`; passing Claude arguments
-replaces that default.
 
 Both agents share the home. Codex login is per home. The workspace and home mounts persist
 after `--rm`; other container changes do not.
@@ -246,8 +258,8 @@ after `--rm`; other container changes do not.
 The container keeps the agents off your host filesystem outside the mounts, but
 it is a convenience boundary, not a sandbox against a misbehaving agent:
 
-- Claude Code runs with `--dangerously-skip-permissions` (unless you pass your
-  own arguments) and Codex with `--dangerously-bypass-approvals-and-sandbox`.
+- Claude Code runs with `--dangerously-skip-permissions` (unless you choose a
+  permission mode) and Codex with `--dangerously-bypass-approvals-and-sandbox`.
 - `claude` has passwordless sudo inside the container.
 - The workspace and the whole home are mounted read-write. Anything you keep in
   a home, such as SSH keys or API tokens, is available to the agent.

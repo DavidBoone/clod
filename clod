@@ -54,12 +54,20 @@ find_envrc() {
 }
 
 # Prints the variables envrc file $1 sets, as NAME=value lines. Host-only
-# variables (PATH, terminal size, direnv's own) are left out.
+# variables (PATH, terminal size, direnv's own) are left out, and multi-line
+# ones, which --env-file can't carry, are skipped with a warning.
 envrc_vars() {
   local clean=(env -i HOME="$HOME" PATH="$PATH" DIRENV_LOG_FORMAT=) base out
+  local dump='BEGIN {
+    for (k in ENVIRON) {
+      if (k !~ /^[A-Za-z_][A-Za-z0-9_]*$/) continue
+      if (ENVIRON[k] ~ /\n/) print "clod: skipping multi-line variable " k > "/dev/stderr"
+      else print k "=" ENVIRON[k]
+    }
+  }'
   [[ -n $XDG_CONFIG_HOME ]] && clean+=(XDG_CONFIG_HOME="$XDG_CONFIG_HOME")
   [[ -n $XDG_DATA_HOME ]] && clean+=(XDG_DATA_HOME="$XDG_DATA_HOME")
-  base=$($clean env)
+  base=$($clean awk $dump)
   if [[ $1 == */.clod.envrc ]]; then
     out=$($clean bash -c '
       command -v direnv >/dev/null && eval "$(direnv stdlib)"
@@ -67,17 +75,17 @@ envrc_vars() {
       set -a
       . "$1"
       set +a
-      env
-    ' _ $1) || { print -u2 "clod: ${1/#$HOME/~} failed"; return 1 }
+      awk "$2"
+    ' _ $1 $dump) || { print -u2 "clod: ${1/#$HOME/~} failed"; return 1 }
   elif (( $+commands[direnv] )); then
-    out=$($clean direnv exec ${1:h} env) ||
+    out=$($clean direnv exec ${1:h} awk $dump) ||
       { print -u2 "clod: run 'direnv allow' to use ${1/#$HOME/~}, or add a .clod.envrc beside it"; return 1 }
   else
     print -u2 "clod: ignoring ${1/#$HOME/~}: direnv is not installed"
     return 0
   fi
   print -r -- $out | grep -vxF -f <(print -r -- $base) |
-    grep -vE '^(PATH|PWD|OLDPWD|SHLVL|_|LINES|COLUMNS|DIRENV_[A-Z_]*)='
+    grep -vE '^(PATH|PWD|OLDPWD|SHLVL|_|LINES|COLUMNS|DIRENV_[A-Z_]*)=' | sort
   return 0
 }
 
@@ -93,11 +101,7 @@ fi
 for v in ${(M)vars:#CLOD_(HOME|IMAGE|CREDS)=*}; do
   [[ -n ${(P)${v%%=*}} ]] || typeset -g ${v%%=*}=${v#*=}
 done
-vars=(${vars:#CLOD_(HOME|IMAGE|CREDS|PROFILE)=*})
-if (( ${+CLOD_PROFILE} )); then
-  print -u2 "clod: CLOD_PROFILE is retired; set CLOD_HOME=$CLOD_PROFILE instead"
-  exit 1
-fi
+vars=(${vars:#CLOD_(HOME|IMAGE|CREDS)=*})
 
 clod_dir=$HOME/.clod
 (( $+commands[shasum] )) && sum=shasum || sum=sha1sum
@@ -213,11 +217,21 @@ if [[ $tag == clod || -n $variant_dir ]]; then
   build_image $tag
 fi
 
+# Docker creates a missing mount target as root, which on a Linux host leaves
+# the home's .claude unwritable for claude, so the borrowed login's target is
+# created here first.
+if [[ -n $creds ]]; then
+  mkdir -p $home/.claude
+  [[ -e $home/.claude/.credentials.json ]] || : > $home/.claude/.credentials.json
+fi
+
 print -u2 "clod · $home_label · $tag · ${#vars} vars"
-args=(-v "$home":/home/claude -v "$PWD":/workspace -e CLOD_HOME=$home_label -e CLOD_IMAGE=$tag)
+args=(-i -v "$home":/home/claude -v "$PWD":/workspace -e CLOD_HOME=$home_label -e CLOD_IMAGE=$tag)
 [[ -n $creds ]] && args+=(-v "$creds":/home/claude/.claude/.credentials.json -e CLOD_CREDS=$creds_label)
 [[ -n $tz ]] && args+=(-e TZ=$tz)
 [[ -d $clod_dir/shared ]] && args+=(-v "$clod_dir/shared":/etc/claude-code:ro)
 # Docker Engine on Linux has no built-in host.docker.internal.
 [[ $OSTYPE == linux* ]] && args+=(--add-host=host.docker.internal:host-gateway)
-exec docker run -it --rm --env-file <(print -rl -- $vars) $args "$tag" "$@"
+[[ -t 0 && -t 1 ]] && args+=(-t)
+# Images are local: clod builds them, so a mistyped name must not pull one.
+exec docker run --rm --pull=never --env-file <(print -rl -- $vars) $args "$tag" "$@"
