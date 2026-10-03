@@ -287,16 +287,23 @@ if [[ $command == update ]]; then
     echo "clod: $(tildify "$script_dir") isn't a git checkout, so there's nothing to update" >&2
     exit 1
   fi
-  before=$(clod_version)
+  before=$(git -C "$script_dir" rev-parse HEAD)
   if ! git -C "$script_dir" pull --ff-only --quiet; then
     echo "clod: couldn't fast-forward $(tildify "$script_dir"); update it with git there" >&2
     exit 1
   fi
-  after=$(clod_version)
+  after=$(git -C "$script_dir" rev-parse HEAD)
   if [[ $before == "$after" ]]; then
-    echo "clod $after is up to date"
-  else
-    echo "clod updated: $before -> $after"
+    echo "clod $(clod_version) is up to date"
+    exit 0
+  fi
+  # One line per change: --first-parent shows a merged pull request as its
+  # merge commit rather than every commit inside it.
+  count=$(git -C "$script_dir" rev-list --first-parent --count "$before..$after")
+  echo "clod updated to $(clod_version), $count change$([[ $count == 1 ]] || echo s):"
+  git -C "$script_dir" log --first-parent --no-decorate --format='  %h %s' -n 20 "$before..$after"
+  if (( count > 20 )); then
+    echo "  ... and $((count - 20)) more: git -C $(tildify "$script_dir") log"
   fi
   exit 0
 fi
