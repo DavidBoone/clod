@@ -85,6 +85,8 @@ Commands:
   homes                  list the homes and their logins
   new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
                          of the bundled variant NAME, or as a starter
+  new-shared             create ~/.clod/shared as a copy of the starter shared
+                         config, to customise
   default [KEY [VALUE]]  show or set your defaults: image, command, home,
                          creds, ports (VALUE --reset removes one)
   rebuild                rebuild the image and its bases from scratch
@@ -154,7 +156,7 @@ while (( $# )); do
 done
 if [[ -z $dashdash && $# -gt 0 ]]; then
   case $1 in
-    claude|codex|bash|zsh|env|images|homes|new-image|default|rebuild|update|install)
+    claude|codex|bash|zsh|env|images|homes|new-image|new-shared|default|rebuild|update|install)
       command=$1
       shift
       ;;
@@ -581,6 +583,23 @@ if [[ $command == homes ]]; then
   exit 0
 fi
 
+if [[ $command == new-shared ]]; then
+  target=$clod_dir/shared
+  if [[ -e $target ]]; then
+    echo "clod: $(tildify "$target") already exists" >&2
+    exit 1
+  fi
+  if [[ ! -d $script_dir/shared ]]; then
+    echo "clod: there's no starter shared config in $(tildify "$script_dir")" >&2
+    exit 1
+  fi
+  mkdir -p "$clod_dir"
+  cp -R "$script_dir/shared" "$target"
+  echo "clod: created $(tildify "$target") from $(tildify "$script_dir/shared")"
+  echo "Edit the files there; every clod from now on mounts it instead of the starter."
+  exit 0
+fi
+
 if [[ $command == new-image ]]; then
   name=$1 from=$2
   [[ -n $name ]] || usage_error "new-image needs a NAME"
@@ -741,6 +760,9 @@ if [[ -n $creds ]]; then
   [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
 fi
 
+if [[ $shared_dir == "$clod_dir/shared" && ! -f $shared_dir/CLAUDE.md ]]; then
+  echo "clod: $(tildify "$shared_dir") has no CLAUDE.md, so Claude isn't told about the container; the starter's is $(tildify "$script_dir/shared/CLAUDE.md")" >&2
+fi
 echo "clod · $home_label · $tag · ${#vars[@]} vars" >&2
 args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
 [[ -n $creds ]] && args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
