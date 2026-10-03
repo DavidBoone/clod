@@ -13,9 +13,9 @@ git clone https://github.com/DavidBoone/clod.git ~/.clod/src
 docker build -t clod ~/.clod/src
 ```
 
-The build needs only `Dockerfile` and `entrypoint.sh`, so you can instead copy
-those two files into a directory of your own, change them as you like, and
-build from there.
+The build needs only `Dockerfile`, `entrypoint.sh` and `container.md` (what
+Claude is told about the container), so you can instead copy those three files
+into a directory of your own, change them as you like, and build from there.
 
 On a Linux host, give the container's `claude` user your uid and gid, so files
 it writes to the workspace and home belong to you:
@@ -61,10 +61,10 @@ Each piece:
 - **`-v "$PWD":/workspace`** is the project, read-write. The image's working
   directory is `/workspace`, and a new home is set to trust it.
 - **`-v ~/.clod/src/shared:/etc/claude-code:ro`** is the managed config Claude
-  Code reads for every home: a `CLAUDE.md` telling Claude about the container,
-  the statusline, and the settings that turn it on. Use your own copy (such as
-  `~/.clod/shared`) to change them. Read-only, so the agent can't edit its own
-  instructions. Leave it out and Claude runs without them.
+  Code reads for every home: the statusline and the settings that turn it on.
+  Use your own copy (such as `~/.clod/shared`) to change them or to add a
+  `CLAUDE.md` of your own instructions. Read-only, so the agent can't edit its
+  own instructions. Leave it out and Claude runs without the statusline.
 - **`-e TZ=...`** sets the timezone, which is otherwise UTC. Use your host's
   zone name, as found under `/usr/share/zoneinfo`.
 - **`clod`** is the image. A variant goes here instead (see below).

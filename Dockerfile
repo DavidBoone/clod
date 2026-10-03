@@ -58,6 +58,9 @@ RUN groupadd -o -g $CLOD_GID claude \
 COPY entrypoint.sh /usr/local/bin/clod-entrypoint
 RUN chmod 755 /usr/local/bin/clod-entrypoint
 
+# Tells Claude about the container; the entrypoint loads /etc/clod.
+COPY container.md /etc/clod/.claude/rules/clod.md
+
 USER claude
 ENV PATH="$PATH:/home/claude/.local/bin"
 ENV NPM_CONFIG_PREFIX=/home/claude/.local
