@@ -115,7 +115,7 @@ jobs:
           clod env 2>&1 | tee out
           grep -q '^FOO=bar$' out
           grep -q 'skipping multi-line variable MULTI' out
-          grep -q '^home:  from-envrc' out
+          grep -q '^home: *from-envrc' out
           # shellcheck disable=SC2016 # the quoted script expands in the container
           clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc'
       - name: CLOD_CREDS borrows another home's login
@@ -136,16 +136,16 @@ jobs:
           clod -i clod -- -c 'echo from-default-command' | grep -q from-default-command
           clod default command --reset
           clod default command | grep -q '^command  *claude .*built in'
-          clod env | grep -q '^image: clod-python'
+          clod env | grep -q '^image: *clod-python'
           clod default image clod
-          clod env | grep -q '^image: clod$'
+          clod env | grep -q '^image: *clod$'
       - name: new-shared copies and compares the starter
         run: |
           cd "$(mktemp -d)"
           clod new-shared
           test -f ~/.clod/shared/statusline.sh
           clod new-shared | grep -q 'has everything in the starter'
-          clod env | grep -q '^shared: ~/.clod/shared'
+          clod env | grep -q '^shared: *~/.clod/shared'
           rm ~/.clod/shared/statusline.sh
           clod new-shared | grep -q 'missing  *statusline.sh'
           cp "$GITHUB_WORKSPACE/container.md" ~/.clod/shared/CLAUDE.md
@@ -161,7 +161,7 @@ jobs:
           clod -p 'a prompt'; test $? = 2 || exit 1
           clod -H ~ bash -c true; test $? = 1 || exit 1
           set -e
-          clod -i clod-python env | grep -q '^image: clod-python (.*images/python)'
+          clod -i clod-python env | grep -q '^image: *clod-python (.*images/python)'
           clod --help | grep -q '^Usage: clod'
           clod --version | grep -q '^clod '
           set +e
@@ -169,9 +169,9 @@ jobs:
           clod 'a prompt'; test $? = 2 || exit 1
           set -e
           clod -H other -i python -P 3000:8080 env | tee out
-          grep -q '^home:  other' out
-          grep -q '^image: clod-python' out
-          grep -q '127.0.0.1:3000:8080' out
+          grep -q '^home: *other' out
+          grep -q '^image: *clod-python' out
+          grep -q '^ports: *127.0.0.1:3000 → 8080$' out
           clod images | grep -q '^\* clod  *built'
           clod homes | grep -q '^\* default'
           clod new-image mine go
