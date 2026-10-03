@@ -59,6 +59,16 @@
 # in the environment, envrc or config, so a project can't turn it on.
 
 # Written for bash 3.2, the /bin/bash macOS ships.
+#
+# Below are the helpers, the setup phases and the commands (cmd_* functions);
+# the dispatch at the bottom runs the phases a command needs, then the command.
+# A new command goes in `commands`, the usage, a cmd_ function and the
+# dispatch; a new launcher setting goes in `settings`.
+#
+# Helpers return a value in REPLY, plus named globals when there are more, so
+# callers needn't fork a subshell. Those whose result is text print it instead:
+# text for output, a list read line by line, or a hash from a pipeline. Those
+# described as "true when" return a status.
 
 # This script's directory, found by following symlinks to it (macOS readlink
 # has no -f before 12.3), holds the base image's files, the bundled variants
@@ -74,6 +84,27 @@ done
 script_dir=$(cd "$(dirname "$script")" && pwd -P)
 base_dir=$script_dir
 [[ -f $base_dir/Dockerfile ]] || base_dir=
+
+# The commands, and the ones among them that run in the container.
+run_commands='claude codex bash zsh'
+commands="$run_commands env images homes new-image new-shared default rebuild update install"
+
+# The launcher settings, as KEY:VARIABLE:BUILT-IN (- for none), in the order
+# clod default lists them.
+settings='image:CLOD_IMAGE:clod command:CLOD_COMMAND:claude home:CLOD_HOME:default
+  creds:CLOD_CREDS:- ports:CLOD_PORTS:-'
+
+name_re='^[A-Za-z0-9_-]+$'
+port_re='^((([0-9.]+|\[[0-9a-fA-F:]+\]):)?[0-9]+:)?[0-9]+(/(tcp|udp))?$'
+clod_dir=$HOME/.clod
+config=$clod_dir/config
+command -v shasum >/dev/null && sum=shasum || sum=sha1sum
+
+# Docker Engine on Linux keeps bind-mount ownership as is, so claude gets the
+# host user's ids there.
+base_args=()
+[[ $OSTYPE == linux* ]] &&
+  base_args=(--build-arg "CLOD_UID=$(id -u)" --build-arg "CLOD_GID=$(id -g)")
 
 # Prints clod's version: its checkout's commit, or a tag when there is one.
 clod_version() {
@@ -142,56 +173,14 @@ usage_error() {
   exit 2
 }
 
-force='' skip_build='' docker_socket='' command='' dashdash=''
-opt_image='' opt_home='' opt_creds='' opt_ports=()
-while (( $# )); do
-  case $1 in
-    -i|--image|-H|--home|--creds|-P|--port)
-      [[ $# -ge 2 ]] || usage_error "$1 needs a value"
-      case $1 in
-        -i|--image) opt_image=$2 ;;
-        -H|--home) opt_home=$2 ;;
-        --creds) opt_creds=$2 ;;
-        -P|--port) opt_ports+=("$2") ;;
-      esac
-      shift 2
-      ;;
-    --image=*) opt_image=${1#*=}; shift ;;
-    --home=*) opt_home=${1#*=}; shift ;;
-    --creds=*) opt_creds=${1#*=}; shift ;;
-    --port=*) opt_ports+=("${1#*=}"); shift ;;
-    -f|--force) force=1; shift ;;
-    --skip-build) skip_build=1; shift ;;
-    --docker) docker_socket=1; shift ;;
-    -h|--help) usage; exit 0 ;;
-    --version)
-      echo "clod $(clod_version)"
-      exit 0
-      ;;
-    --) shift; dashdash=1; break ;;
-    # Claude Code's -p (print) and -c (continue), typed as if clod were claude.
-    -p|-c) usage_error "unknown option $1; for Claude Code's $1, use: clod claude $1 ..." ;;
-    -*) usage_error "unknown option $1; a command's own options go after it, or after --" ;;
-    *) break ;;
-  esac
-done
-if [[ -z $dashdash && $# -gt 0 ]]; then
-  case $1 in
-    claude|codex|bash|zsh|env|images|homes|new-image|new-shared|default|rebuild|update|install)
-      command=$1
-      shift
-      ;;
-    *) usage_error "unknown command '$1'; the default command's args go after --" ;;
-  esac
-fi
-# Options win over the environment, the envrc and ~/.clod/config.
-[[ -n $opt_image ]] && CLOD_IMAGE=$opt_image
-[[ -n $opt_home ]] && CLOD_HOME=$opt_home
-[[ -n $opt_creds ]] && CLOD_CREDS=$opt_creds
-(( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
-
-name_re='^[A-Za-z0-9_-]+$'
-port_re='^((([0-9.]+|\[[0-9a-fA-F:]+\]):)?[0-9]+:)?[0-9]+(/(tcp|udp))?$'
+# True when $1 is one of the words in list $2.
+is_one_of() {
+  local word
+  for word in $2; do
+    [[ $word == "$1" ]] && return 0
+  done
+  return 1
+}
 
 # Prints path $1 with a leading $HOME shown as ~.
 tildify() {
@@ -219,9 +208,10 @@ abspath() {
   [[ -n $REPLY ]] || REPLY=/
 }
 
-# Prints directory $1 with symlinks resolved, or $1 itself if it doesn't exist.
+# Sets REPLY to directory $1 with symlinks resolved, or to $1 itself if it
+# doesn't exist.
 realdir() {
-  (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"
+  REPLY=$( (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1")
 }
 
 # Sets REPLY to the nearest .clod.envrc or .envrc from $PWD up, or to nothing.
@@ -280,116 +270,25 @@ envrc_vars() {
   return 0
 }
 
-if [[ $command == install ]]; then
-  target=$script_dir/clod
-  if [[ -n $1 ]]; then
-    dir=$1
-  else
-    # The first of these on PATH that you can write to, else ~/.local/bin.
-    dir=''
-    for d in "$HOME/.local/bin" "$HOME/bin" /opt/homebrew/bin /usr/local/bin; do
-      case ":$PATH:" in
-        *":$d:"*) if [[ -d $d && -w $d ]]; then dir=$d; break; fi ;;
-      esac
-    done
-    [[ -n $dir ]] || dir=$HOME/.local/bin
-  fi
-  link=$dir/clod
-  if [[ -L $link && $(readlink "$link") == "$target" ]]; then
-    echo "clod is already installed as $(tildify "$link")"
-  elif [[ -e $link || -L $link ]] && [[ -z $force ]]; then
-    echo "clod: $(tildify "$link") already exists; clod --force install replaces it" >&2
-    exit 1
-  else
-    mkdir -p "$dir" && ln -sfn "$target" "$link" || exit 1
-    echo "clod: installed $(tildify "$link") -> $(tildify "$target")"
-  fi
-  case ":$PATH:" in
-    *":$dir:"*) ;;
-    *)
-      case ${SHELL##*/} in
-        zsh) rc=$(tildify "$HOME/.zshrc") ;;
-        bash) if [[ $OSTYPE == darwin* ]]; then rc=$(tildify "$HOME/.bash_profile"); else rc=$(tildify "$HOME/.bashrc"); fi ;;
-        *) rc='your shell startup file' ;;
-      esac
-      echo
-      echo "$(tildify "$dir") isn't on your PATH. Add this line to $rc, then open a new terminal:"
-      echo "  export PATH=\"${dir/#$HOME/\$HOME}:\$PATH\""
-      ;;
-  esac
-  exit 0
-fi
+# Sets setting_key, setting_var and setting_builtin to the launcher setting
+# whose key or variable is $1, or fails if there is none.
+find_setting() {
+  local s
+  for s in $settings; do
+    setting_key=${s%%:*} s=${s#*:}
+    setting_var=${s%%:*} setting_builtin=${s#*:}
+    [[ $1 == "$setting_key" || $1 == "$setting_var" ]] && return 0
+  done
+  return 1
+}
 
-if [[ $command == update ]]; then
-  if ! git -C "$script_dir" rev-parse --git-dir >/dev/null 2>&1; then
-    echo "clod: $(tildify "$script_dir") isn't a git checkout, so there's nothing to update" >&2
-    exit 1
-  fi
-  before=$(git -C "$script_dir" rev-parse HEAD)
-  if ! git -C "$script_dir" pull --ff-only --quiet; then
-    echo "clod: git pull failed in $(tildify "$script_dir") (git's message is above); sort it out with git there" >&2
-    exit 1
-  fi
-  after=$(git -C "$script_dir" rev-parse HEAD)
-  if [[ $before == "$after" ]]; then
-    echo "clod $(clod_version) is up to date"
-    exit 0
-  fi
-  # One line per change: --first-parent shows a merged pull request as its
-  # merge commit rather than every commit inside it.
-  count=$(git -C "$script_dir" rev-list --first-parent --count "$before..$after")
-  echo "clod updated to $(clod_version), $count change$([[ $count == 1 ]] || echo s):"
-  git -C "$script_dir" log --first-parent --no-decorate --format='  %h %s' -n 20 "$before..$after"
-  if (( count > 20 )); then
-    echo "  ... and $((count - 20)) more: git -C $(tildify "$script_dir") log"
-  fi
-  exit 0
-fi
-
-find_envrc
-envrc=$REPLY
-vars=()
-if [[ -n $envrc ]]; then
-  out=$(envrc_vars "$envrc") || exit 1
-  while IFS= read -r line; do
-    [[ -n $line ]] && vars+=("$line")
-  done <<< "$out"
-fi
-# Launcher settings from the envrc are defaults for the shell's, not container
-# variables.
-container_vars=()
-for v in ${vars[@]+"${vars[@]}"}; do
-  case $v in
-    CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*|CLOD_COMMAND=*)
-      name=${v%%=*}
-      [[ -n ${!name} ]] || printf -v "$name" '%s' "${v#*=}"
-      ;;
-    *) container_vars+=("$v") ;;
-  esac
-done
-vars=(${container_vars[@]+"${container_vars[@]}"})
-
-clod_dir=$HOME/.clod
-config=$clod_dir/config
-# ~/.clod/config holds launcher settings as NAME=value lines, defaults for both
-# the shell's and the envrc's.
-if [[ -f $config ]]; then
-  while IFS= read -r line || [[ -n $line ]]; do
-    case $line in
-      CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*|CLOD_COMMAND=*)
-        name=${line%%=*}
-        [[ -n ${!name} ]] || printf -v "$name" '%s' "${line#*=}"
-        ;;
-    esac
-  done < "$config"
-fi
-command -v shasum >/dev/null && sum=shasum || sum=sha1sum
-
-# Docker Engine on Linux keeps bind-mount ownership as is, so claude gets the
-# host user's ids there.
-base_args=()
-[[ $OSTYPE == linux* ]] &&
-  base_args=(--build-arg "CLOD_UID=$(id -u)" --build-arg "CLOD_GID=$(id -g)")
+# Sets the launcher setting that NAME=value line $1 names, unless it is set
+# already; fails if $1 isn't a launcher setting.
+default_setting() {
+  [[ $1 == CLOD_*=* ]] || return 1
+  find_setting "${1%%=*}" || return 1
+  [[ -n ${!setting_var} ]] || printf -v "$setting_var" '%s' "${1#*=}"
+}
 
 # Resolves a CLOD_HOME-style value ($2, named $1 in errors) into $REPLY.
 resolve_home() {
@@ -417,6 +316,14 @@ find_variant() {
   done
 }
 
+# Prints the names of the variants, yours and the bundled ones, one per line.
+variant_names() {
+  local f
+  for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
+    [[ -f $f ]] && basename "$(dirname "$f")"
+  done | sort -u
+}
+
 files_hash() {
   (cd "$1" && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 "$sum") | $sum | cut -d' ' -f1
 }
@@ -425,6 +332,17 @@ files_hash() {
 base_hash() {
   { cat "$base_dir/Dockerfile" "$base_dir/entrypoint.sh" "$base_dir/container.md"
     printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1
+}
+
+# Prints the hash a variant from directory $1, FROM images $2..., is labelled
+# with when built on those images as they are now.
+variant_hash() {
+  local dir=$1 parent
+  shift
+  { for parent in "$@"; do
+      docker image inspect -f '{{.Id}}' "$parent" 2>/dev/null
+    done
+    files_hash "$dir"; } | $sum | cut -d' ' -f1
 }
 
 # Prints the images variant directory $1's Dockerfile is FROM, one per line,
@@ -462,124 +380,438 @@ takes_base() {
 
 # Sets REPLY to the directory of the variant clod image $1 is built from, or to
 # nothing if it isn't a variant's, and variant_base to the image a combination's
-# last variant is built on (clod-a.b for clod-a.b.c), or to nothing.
+# last variant is built on (clod-a.b for clod-a.b.c), or to nothing. Of the
+# variants its name lists, variant_missing is the first that doesn't exist, and
+# variant_fixed the first after the first that doesn't take ARG BASE.
 tag_variant() {
-  local parts part
-  REPLY='' variant_base=''
-  [[ $1 == clod-?* && $1 != clod-.* && $1 != *. && $1 != *..* ]] || return 0
+  local parts part i=0
+  REPLY='' variant_base='' variant_missing='' variant_fixed=''
   IFS=. read -ra parts <<< "${1#clod-}"
-  for part in "${parts[@]}"; do
+  for part in ${parts[@]+"${parts[@]}"}; do
     find_variant "$part"
-    [[ -n $REPLY ]] || return 0
+    [[ -n $REPLY ]] || { variant_missing=$part; return 0; }
+    (( i++ )) && [[ -z $variant_fixed ]] && ! takes_base "$REPLY" && variant_fixed=$part
   done
+  [[ $1 == clod-?* && $1 != clod-.* && $1 != *. && $1 != *..* ]] || { REPLY=''; return 0; }
   (( ${#parts[@]} > 1 )) && variant_base=${1%.*}
+  return 0
 }
 
 # Sets REPLY to the tag of the variant or combination image name $1 means:
 # clod-NAME for NAME or clod-NAME, clod-A.B for A+B, A.B or clod-A.B. Sets it
-# to nothing when $1 is neither.
-variant_tag() {
+# to nothing when $1 is neither, so names a local docker image. Exits with an
+# error when $1 is a combination clod can't build: a name with + in it whose
+# parts aren't all variants, or one whose variants after the first don't take
+# ARG BASE.
+resolve_variant() {
   local name=${1//+/.}
-  if [[ $name == clod-* ]]; then
-    tag_variant "$name"
-    [[ -n $REPLY ]] && { REPLY=$name; return 0; }
+  if [[ $1 == *+* ]]; then
+    case ${name#clod-} in
+      .*|*.|*..*)
+        echo "clod: invalid image name '$1': a combination is variants joined by +, like go+sudo" >&2
+        exit 1
+        ;;
+    esac
   fi
-  tag_variant "clod-$name"
-  [[ -n $REPLY ]] && REPLY=clod-$name
-}
-
-# Exits with an error when image name $1 is a combination clod can't build: a
-# name with + in it whose parts aren't all variants, or one whose variants after
-# the first don't take ARG BASE.
-check_combination() {
-  local name=${1#clod-} parts part i=0
-  name=${name//+/.}
-  [[ $name == *.* ]] || return 0
-  if [[ $1 == *+* && ( $name == .* || $name == *. || $name == *..* ) ]]; then
-    echo "clod: invalid image name '$1': a combination is variants joined by +, like go+sudo" >&2
+  tag_variant "clod-${name#clod-}"
+  if [[ -n $variant_fixed ]]; then
+    echo "clod: variant $variant_fixed can't go on top of another: its Dockerfile needs ARG BASE=clod and FROM \$BASE in place of FROM clod" >&2
     exit 1
   fi
-  IFS=. read -ra parts <<< "$name"
-  for part in "${parts[@]}"; do
-    find_variant "$part"
-    if [[ -z $REPLY ]]; then
-      [[ $1 == *+* ]] || return 0
-      echo "clod: no variant named '$part' (clod images lists them)" >&2
-      exit 1
-    fi
-    if (( i++ )) && ! takes_base "$REPLY"; then
-      echo "clod: variant $part can't go on top of another: its Dockerfile needs ARG BASE=clod and FROM \$BASE in place of FROM clod" >&2
-      exit 1
-    fi
+  if [[ -n $variant_missing && $1 == *+* ]]; then
+    echo "clod: no variant named '$variant_missing' (clod images lists them)" >&2
+    exit 1
+  fi
+  if [[ -n $REPLY ]]; then
+    REPLY=clod-${name#clod-}
+  elif [[ $name == clod-* ]]; then
+    # a variant named clod-NAME
+    tag_variant "clod-$name"
+    [[ -n $REPLY ]] && REPLY=clod-$name
+  fi
+  return 0
+}
+
+# Builds $1 from directory $2, with any further docker build arguments, unless
+# the image is already labelled with hash $3. For `clod rebuild` it always builds,
+# without the layer cache.
+built=''
+build_if_changed() {
+  local no_cache=()
+  if [[ $command == rebuild ]]; then
+    no_cache=(--no-cache)
+  else
+    [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$3" ]] && return
+  fi
+  echo "clod: building $1..." >&2
+  docker build -t "$1" --label "clod.hash=$3" ${no_cache[@]+"${no_cache[@]}"} "${@:4}" "$2" || exit 1
+  built=1
+}
+
+# Goes through clod image $1 and the clod images it is FROM, in every stage, so
+# a multi-stage Dockerfile can name one in any stage. With $2 build, it builds
+# those of them clod has files for, bases first, wherever they changed. With $2
+# state, it sets REPLY to the state of $1: - when it isn't built, stale when its
+# next run rebuilds it (its files or an image it is FROM changed), or else
+# built. An image clod has no files for is built or -.
+walking=() walked=()
+walk_image() {
+  local tag=$1 mode=$2 label dir base hash parent parents=() build_args=() stale='' t
+  if [[ $mode == state ]]; then
+    REPLY=-
+    label=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$tag" 2>/dev/null) || return 0
+    REPLY=built
+  fi
+  for t in ${walking[@]+"${walking[@]}"}; do
+    [[ $t == "$tag" ]] || continue
+    [[ $mode == state ]] && return 0
+    echo "clod: image $tag is built FROM itself" >&2
+    exit 1
   done
-}
-
-# Prints the hash a variant from directory $1, FROM images $2..., is labelled
-# with when built on those images as they are now.
-variant_hash() {
-  local dir=$1 parent
-  shift
-  { for parent in "$@"; do
-      docker image inspect -f '{{.Id}}' "$parent" 2>/dev/null
+  if [[ $mode == build ]]; then
+    for t in ${walked[@]+"${walked[@]}"}; do
+      [[ $t == "$tag" ]] && return 0
     done
-    files_hash "$dir"; } | $sum | cut -d' ' -f1
+    walked+=("$tag")
+  fi
+  if [[ $tag == clod ]]; then
+    [[ -n $base_dir ]] || return 0
+    dir=$base_dir hash=$(base_hash)
+    build_args=(${base_args[@]+"${base_args[@]}"})
+    [[ $command == rebuild ]] && build_args+=(--pull)
+  else
+    tag_variant "$tag"
+    dir=$REPLY base=$variant_base
+    REPLY=built
+    [[ -n $dir ]] || return 0
+    [[ -n $base ]] && build_args=(--build-arg "BASE=$base")
+    while IFS= read -r parent; do
+      parents+=("$parent")
+    done < <(variant_parents "$dir" "$base")
+    walking+=("$tag")
+    for parent in ${parents[@]+"${parents[@]}"}; do
+      [[ $parent == clod || $parent == clod-* ]] || continue
+      walk_image "$parent" "$mode"
+      [[ $REPLY == built ]] || stale=1
+    done
+    unset 'walking[${#walking[@]}-1]'
+    hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
+  fi
+  if [[ $mode == build ]]; then
+    build_if_changed "$tag" "$dir" "$hash" ${build_args[@]+"${build_args[@]}"}
+  else
+    REPLY=built
+    [[ -n $stale || $label != "$hash" ]] && REPLY=stale
+  fi
+  return 0
 }
 
-# `clod default`: shows and edits the launcher settings in ~/.clod/config.
-# Prints the variable and built-in value of setting $1, or fails.
-setting_of() {
-  case $1 in
-    image) echo "CLOD_IMAGE clod" ;;
-    command) echo "CLOD_COMMAND claude" ;;
-    home) echo "CLOD_HOME default" ;;
-    creds) echo "CLOD_CREDS -" ;;
-    ports) echo "CLOD_PORTS -" ;;
-    *) return 1 ;;
+# Exits with advice when Docker is missing or its daemon isn't running.
+need_docker() {
+  if ! command -v docker >/dev/null; then
+    echo "clod: docker isn't installed (see the README's quick start)" >&2
+    exit 1
+  fi
+  if ! docker version -f '{{.Server.Version}}' >/dev/null 2>&1; then
+    echo "clod: can't reach Docker; start it (colima start, or open Docker Desktop) and try again" >&2
+    exit 1
+  fi
+}
+
+# True when directory $1 is /, your home directory or one above it, ~/.clod or
+# ~/.clod/homes: mounting it would show the agent your credentials and every
+# home's login.
+holds_secrets() {
+  realdir "$1"
+  [[ $REPLY == / || $host_home == "$REPLY" || $host_home == "$REPLY"/* ||
+     $REPLY == "$clod_real" || $REPLY == "$clod_real/homes" ]]
+}
+
+# The setup phases.
+
+# Reads the command line into force, skip_build, docker_socket, command (empty
+# for the default command) and args, the command's arguments. Options set the
+# launcher settings, winning over the environment, the envrc and ~/.clod/config.
+parse_args() {
+  local opt_image='' opt_home='' opt_creds='' opt_ports=() dashdash=''
+  force='' skip_build='' docker_socket='' command=''
+  while (( $# )); do
+    case $1 in
+      -i|--image|-H|--home|--creds|-P|--port)
+        [[ $# -ge 2 ]] || usage_error "$1 needs a value"
+        case $1 in
+          -i|--image) opt_image=$2 ;;
+          -H|--home) opt_home=$2 ;;
+          --creds) opt_creds=$2 ;;
+          -P|--port) opt_ports+=("$2") ;;
+        esac
+        shift 2
+        ;;
+      --image=*) opt_image=${1#*=}; shift ;;
+      --home=*) opt_home=${1#*=}; shift ;;
+      --creds=*) opt_creds=${1#*=}; shift ;;
+      --port=*) opt_ports+=("${1#*=}"); shift ;;
+      -f|--force) force=1; shift ;;
+      --skip-build) skip_build=1; shift ;;
+      --docker) docker_socket=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      --version) echo "clod $(clod_version)"; exit 0 ;;
+      --) shift; dashdash=1; break ;;
+      # Claude Code's -p (print) and -c (continue), typed as if clod were claude.
+      -p|-c) usage_error "unknown option $1; for Claude Code's $1, use: clod claude $1 ..." ;;
+      -*) usage_error "unknown option $1; a command's own options go after it, or after --" ;;
+      *) break ;;
+    esac
+  done
+  if [[ -z $dashdash && $# -gt 0 ]]; then
+    is_one_of "$1" "$commands" || usage_error "unknown command '$1'; the default command's args go after --"
+    command=$1
+    shift
+  fi
+  args=("$@")
+  [[ -n $opt_image ]] && CLOD_IMAGE=$opt_image
+  [[ -n $opt_home ]] && CLOD_HOME=$opt_home
+  [[ -n $opt_creds ]] && CLOD_CREDS=$opt_creds
+  (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
+  return 0
+}
+
+# Sets envrc to the envrc in use and vars to the variables it sets, except the
+# launcher settings: those, and then ~/.clod/config's, are defaults for the
+# shell's.
+load_settings() {
+  local out line
+  find_envrc
+  envrc=$REPLY
+  vars=()
+  if [[ -n $envrc ]]; then
+    out=$(envrc_vars "$envrc") || exit 1
+    while IFS= read -r line; do
+      [[ -n $line ]] || continue
+      # Launcher settings from the envrc are defaults for the shell's, not
+      # container variables.
+      default_setting "$line" || vars+=("$line")
+    done <<< "$out"
+  fi
+  # ~/.clod/config holds launcher settings as NAME=value lines, defaults for both
+  # the shell's and the envrc's.
+  if [[ -f $config ]]; then
+    while IFS= read -r line || [[ -n $line ]]; do
+      default_setting "$line"
+    done < "$config"
+  fi
+}
+
+# With no command, the default command runs.
+default_command() {
+  command=${CLOD_COMMAND:-claude}
+  is_one_of "$command" "$run_commands" && return 0
+  local others=${run_commands% *}
+  echo "clod: CLOD_COMMAND is '$command'; it must be ${others// /, } or ${run_commands##* }" >&2
+  exit 1
+}
+
+# Sets home and home_label to the container home, and creds, creds_home and
+# creds_label to a borrowed login, or creds to nothing when the home keeps its
+# own.
+setup_home() {
+  resolve_home CLOD_HOME "${CLOD_HOME:-default}"
+  home=$REPLY
+  home_label=$(tildify "${home#"$clod_dir/homes/"}")
+  creds=
+  if [[ -n $CLOD_CREDS ]]; then
+    resolve_home CLOD_CREDS "$CLOD_CREDS"
+    creds=$REPLY/.claude/.credentials.json
+    if [[ ! -s $creds ]]; then
+      echo "clod: CLOD_CREDS home has no login yet: $(tildify "$creds")" >&2
+      exit 1
+    fi
+    [[ $REPLY == "$home" ]] && creds=
+  fi
+  creds_home=${creds%/.claude/.credentials.json}
+  creds_label=$(tildify "${creds_home#"$clod_dir/homes/"}")
+}
+
+# Sets tag to the image to run, image to its name, and variant_dir to the
+# directory of the variant it is built from (the last, for a combination), or
+# to nothing. A variant NAME is built as clod-NAME, and a combination A+B, B
+# built on A, as clod-A.B; image becomes NAME or A.B.
+setup_image() {
+  image=${CLOD_IMAGE:-clod}
+  if [[ $image == *[[:space:]]* ]]; then
+    echo "clod: invalid CLOD_IMAGE '$image'" >&2
+    exit 1
+  fi
+  resolve_variant "$image"
+  if [[ -n $REPLY ]]; then
+    tag=$REPLY
+    image=${tag#clod-}
+    tag_variant "$tag"
+    variant_dir=$REPLY
+  else
+    tag=$image variant_dir=''
+  fi
+}
+
+# Sets shared_dir to the shared config to mount, port_args and container_ports
+# to CLOD_PORTS's, and tz to the timezone.
+setup_container() {
+  local p
+  shared_dir=$clod_dir/shared
+  [[ -d $shared_dir ]] || shared_dir=$script_dir/shared
+  [[ -d $shared_dir ]] || shared_dir=
+
+  # Publishes each CLOD_PORTS entry on the host's 127.0.0.1 unless it names an
+  # address, and collects the container ports for the container's CLOD_PORTS.
+  port_args=() container_ports=()
+  for p in ${CLOD_PORTS//,/ }; do
+    if [[ ! $p =~ $port_re ]]; then
+      echo "clod: invalid port '$p' (use PORT, HOST:CONTAINER or ADDRESS:HOST:CONTAINER)" >&2
+      exit 1
+    fi
+    case $p in
+      *.*:*|\[*) port_args+=(-p "$p") ;;
+      *:*) port_args+=(-p "127.0.0.1:$p") ;;
+      *) port_args+=(-p "127.0.0.1:$p:$p") ;;
+    esac
+    container_ports+=("${p##*:}")
+  done
+
+  tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
+  tz=${tz##*zoneinfo/}
+}
+
+# Exits, unless --force, when the workspace, the home or a borrowed login's
+# home holds secrets.
+refuse_secrets() {
+  local workspace
+  realdir "$HOME"; host_home=$REPLY
+  realdir "$clod_dir"; clod_real=$REPLY
+  [[ -n $force ]] && return 0
+  workspace=$(pwd -P)
+  if holds_secrets "$workspace" || [[ $workspace == "$clod_real/homes"/* ]]; then
+    echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
+    exit 1
+  fi
+  if holds_secrets "$home"; then
+    echo "clod: refusing to use $(tildify "$home") as the container's home: it holds your credentials or every home's login (clod --force to run anyway)" >&2
+    exit 1
+  fi
+  if [[ -n $creds ]] && holds_secrets "$creds_home"; then
+    echo "clod: refusing to borrow the login in $(tildify "$creds_home"): it isn't a clod home (clod --force to run anyway)" >&2
+    exit 1
+  fi
+}
+
+# The commands.
+
+# Links clod into directory $1, or the first of these on PATH that you can
+# write to, else ~/.local/bin.
+cmd_install() {
+  local target=$script_dir/clod dir=$1 d link rc
+  if [[ -z $dir ]]; then
+    for d in "$HOME/.local/bin" "$HOME/bin" /opt/homebrew/bin /usr/local/bin; do
+      case ":$PATH:" in
+        *":$d:"*) if [[ -d $d && -w $d ]]; then dir=$d; break; fi ;;
+      esac
+    done
+    [[ -n $dir ]] || dir=$HOME/.local/bin
+  fi
+  link=$dir/clod
+  if [[ -L $link && $(readlink "$link") == "$target" ]]; then
+    echo "clod is already installed as $(tildify "$link")"
+  elif [[ -e $link || -L $link ]] && [[ -z $force ]]; then
+    echo "clod: $(tildify "$link") already exists; clod --force install replaces it" >&2
+    exit 1
+  else
+    mkdir -p "$dir" && ln -sfn "$target" "$link" || exit 1
+    echo "clod: installed $(tildify "$link") -> $(tildify "$target")"
+  fi
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *)
+      case ${SHELL##*/} in
+        zsh) rc=$(tildify "$HOME/.zshrc") ;;
+        bash) if [[ $OSTYPE == darwin* ]]; then rc=$(tildify "$HOME/.bash_profile"); else rc=$(tildify "$HOME/.bashrc"); fi ;;
+        *) rc='your shell startup file' ;;
+      esac
+      echo
+      echo "$(tildify "$dir") isn't on your PATH. Add this line to $rc, then open a new terminal:"
+      echo "  export PATH=\"${dir/#$HOME/\$HOME}:\$PATH\""
+      ;;
   esac
 }
+
+cmd_update() {
+  local before after count
+  if ! git -C "$script_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "clod: $(tildify "$script_dir") isn't a git checkout, so there's nothing to update" >&2
+    exit 1
+  fi
+  before=$(git -C "$script_dir" rev-parse HEAD)
+  if ! git -C "$script_dir" pull --ff-only --quiet; then
+    echo "clod: git pull failed in $(tildify "$script_dir") (git's message is above); sort it out with git there" >&2
+    exit 1
+  fi
+  after=$(git -C "$script_dir" rev-parse HEAD)
+  if [[ $before == "$after" ]]; then
+    echo "clod $(clod_version) is up to date"
+    return 0
+  fi
+  # One line per change: --first-parent shows a merged pull request as its
+  # merge commit rather than every commit inside it.
+  count=$(git -C "$script_dir" rev-list --first-parent --count "$before..$after")
+  echo "clod updated to $(clod_version), $count change$([[ $count == 1 ]] || echo s):"
+  git -C "$script_dir" log --first-parent --no-decorate --format='  %h %s' -n 20 "$before..$after"
+  if (( count > 20 )); then
+    echo "  ... and $((count - 20)) more: git -C $(tildify "$script_dir") log"
+  fi
+}
+
 # Prints setting $1 with its value in the config file, or its built-in value.
 show_setting() {
-  local var builtin value
-  read -r var builtin <<< "$(setting_of "$1")"
-  value=$(sed -n "s/^$var=//p" "$config" 2>/dev/null | tail -1)
+  local value
+  find_setting "$1"
+  value=$(sed -n "s/^$setting_var=//p" "$config" 2>/dev/null | tail -1)
   if [[ -n $value ]]; then
     printf '%-8s %-14s (%s)\n' "$1" "$value" "$(tildify "$config")"
   else
-    printf '%-8s %-14s (built in)\n' "$1" "$builtin"
+    printf '%-8s %-14s (built in)\n' "$1" "$setting_builtin"
   fi
 }
-if [[ $command == default ]]; then
-  keys='image command home creds ports'
+
+# Shows the launcher settings in ~/.clod/config, or setting $1, or sets it to
+# $2.
+cmd_default() {
+  local keys='' s key=$1 value=$2 var rest p
+  for s in $settings; do keys+="${keys:+ }${s%%:*}"; done
   if [[ $# -eq 0 ]]; then
-    for k in $keys; do show_setting "$k"; done
+    for s in $keys; do show_setting "$s"; done
     echo
     echo "clod default KEY VALUE sets one; clod default KEY --reset removes it"
-    exit 0
+    return 0
   fi
-  key=$1 value=$2
-  setting_of "$key" >/dev/null || usage_error "unknown setting '$key' (one of: ${keys// /, })"
+  is_one_of "$key" "$keys" || usage_error "unknown setting '$key' (one of: ${keys// /, })"
   if [[ $# -eq 1 ]]; then
     show_setting "$key"
-    exit 0
+    return 0
   fi
   [[ $# -eq 2 ]] || usage_error "default takes a setting and one value"
-  read -r var builtin <<< "$(setting_of "$key")"
-  [[ $value == --reset || $value == "$builtin" ]] && value=''
+  find_setting "$key"
+  var=$setting_var
+  [[ $value == --reset || $value == "$setting_builtin" ]] && value=''
   if [[ -n $value ]]; then
     case $key in
       image)
-        check_combination "$value"
-        variant_tag "$value"
+        resolve_variant "$value"
         if [[ -z $REPLY ]] && ! docker image inspect "$value" >/dev/null 2>&1; then
           echo "clod: no variant or local image named '$value' (clod images lists them)" >&2
           exit 1
         fi
         ;;
       command)
-        case $value in
-          claude|codex|bash|zsh) ;;
-          *) usage_error "the default command is one of claude, codex, bash, zsh" ;;
-        esac
+        is_one_of "$value" "$run_commands" ||
+          usage_error "the default command is one of ${run_commands// /, }"
         ;;
       home|creds)
         # A path is stored absolute, since the config applies everywhere.
@@ -600,129 +832,23 @@ if [[ $command == default ]]; then
     if [[ -n $value ]]; then echo "$var=$value"; fi
   } > "$config.tmp" && mv "$config.tmp" "$config"
   show_setting "$key"
-  exit 0
-fi
+}
 
-# With no command, the default command runs.
-if [[ -z $command ]]; then
-  command=${CLOD_COMMAND:-claude}
-  case $command in
-    claude|codex|bash|zsh) ;;
-    *)
-      echo "clod: CLOD_COMMAND is '$command'; it must be claude, codex, bash or zsh" >&2
-      exit 1
-      ;;
-  esac
-fi
+# Prints a row for image $1, tagged $2, from source $3.
+image_row() {
+  local mark=' '
+  [[ $1 == "$image" ]] && mark='*'
+  walk_image "$2" state
+  [[ $REPLY == stale ]] && any_stale=1
+  printf '%s %-16s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
+}
 
-resolve_home CLOD_HOME "${CLOD_HOME:-default}"
-home=$REPLY
-home_label=$(tildify "${home#"$clod_dir/homes/"}")
-
-image=${CLOD_IMAGE:-clod}
-
-creds=
-if [[ -n $CLOD_CREDS ]]; then
-  resolve_home CLOD_CREDS "$CLOD_CREDS"
-  creds=$REPLY/.claude/.credentials.json
-  if [[ ! -s $creds ]]; then
-    echo "clod: CLOD_CREDS home has no login yet: $(tildify "$creds")" >&2
-    exit 1
-  fi
-  [[ $REPLY == "$home" ]] && creds=
-fi
-creds_home=${creds%/.claude/.credentials.json}
-creds_label=$(tildify "${creds_home#"$clod_dir/homes/"}")
-
-if [[ $image == *[[:space:]]* ]]; then
-  echo "clod: invalid CLOD_IMAGE '$image'" >&2
-  exit 1
-fi
-# A variant NAME is built as clod-NAME, and a combination A+B, B built on A, as
-# clod-A.B; image becomes NAME or A.B.
-check_combination "$image"
-variant_tag "$image"
-if [[ -n $REPLY ]]; then
-  tag=$REPLY
-  image=${tag#clod-}
-  tag_variant "$tag"
-  variant_dir=$REPLY
-else
-  tag=$image variant_dir=''
-fi
-
-shared_dir=$clod_dir/shared
-[[ -d $shared_dir ]] || shared_dir=$script_dir/shared
-[[ -d $shared_dir ]] || shared_dir=
-
-# Publishes each CLOD_PORTS entry on the host's 127.0.0.1 unless it names an
-# address, and collects the container ports for the container's CLOD_PORTS.
-port_args=() container_ports=()
-for p in ${CLOD_PORTS//,/ }; do
-  if [[ ! $p =~ $port_re ]]; then
-    echo "clod: invalid port '$p' (use PORT, HOST:CONTAINER or ADDRESS:HOST:CONTAINER)" >&2
-    exit 1
-  fi
-  case $p in
-    *.*:*|\[*) port_args+=(-p "$p") ;;
-    *:*) port_args+=(-p "127.0.0.1:$p") ;;
-    *) port_args+=(-p "127.0.0.1:$p:$p") ;;
-  esac
-  container_ports+=("${p##*:}")
-done
-
-tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
-tz=${tz##*zoneinfo/}
-
-if [[ $command == images ]]; then
-  # Sets REPLY to the state of clod image $1: - when it isn't built, stale when
-  # its next run rebuilds it (its files or an image it is FROM changed), or else
-  # built. An image clod has no files for is built or -.
-  checking=()
-  image_state() {
-    local tag=$1 dir base label hash parent parents=() stale='' c
-    REPLY=-
-    label=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$tag" 2>/dev/null) || return 0
-    REPLY=built
-    for c in ${checking[@]+"${checking[@]}"}; do
-      [[ $c == "$tag" ]] && return 0
-    done
-    if [[ $tag == clod ]]; then
-      [[ -z $base_dir ]] && return 0
-      hash=$(base_hash)
-    else
-      tag_variant "$tag"
-      dir=$REPLY base=$variant_base
-      [[ -z $dir ]] && { REPLY=built; return 0; }
-      checking+=("$tag")
-      while IFS= read -r parent; do
-        parents+=("$parent")
-        if [[ $parent == clod || $parent == clod-* ]]; then
-          image_state "$parent"
-          [[ $REPLY == built ]] || stale=1
-        fi
-      done < <(variant_parents "$dir" "$base")
-      unset 'checking[${#checking[@]}-1]'
-      hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
-    fi
-    REPLY=built
-    [[ -n $stale || $label != "$hash" ]] && REPLY=stale
-  }
-  # Prints a row for image $1, tagged $2, from source $3.
-  image_row() {
-    local mark=' '
-    [[ $1 == "$image" ]] && mark='*'
-    image_state "$2"
-    [[ $REPLY == stale ]] && any_stale=1
-    printf '%s %-16s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
-  }
+cmd_images() {
+  local n src t
   any_stale=''
   printf '  %-16s %-7s %s\n' NAME STATE SOURCE
   image_row clod clod "$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)"
-  names=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
-    [[ -f $f ]] && basename "$(dirname "$f")"
-  done | sort -u)
-  for n in $names; do
+  for n in $(variant_names); do
     if [[ -f $clod_dir/images/$n/Dockerfile ]]; then
       src=$(tildify "$clod_dir/images/$n")
       [[ -f $script_dir/images/$n/Dockerfile ]] && src="$src (overrides bundled)"
@@ -732,9 +858,8 @@ if [[ $command == images ]]; then
     image_row "$n" "clod-$n" "$src"
   done
   # Combinations that are built, and the one that runs here.
-  combos=$({ docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null
-             [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-.*\.' | sort -u)
-  for t in $combos; do
+  for t in $({ docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null
+              [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-.*\.' | sort -u); do
     image_row "${t#clod-}" "$t" "$(t=${t#clod-}; echo "${t//./ + }")"
   done
   echo
@@ -742,20 +867,21 @@ if [[ $command == images ]]; then
   echo "         builds variant B on A as clod-A.B"
   echo "bundled  comes with clod, in $(tildify "$script_dir")"
   [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
-  exit 0
-fi
+  return 0
+}
 
-if [[ $command == homes ]]; then
-  # Prints a row for home directory $1, labelled $2.
-  home_row() {
-    local mark=' ' claude=- codex=-
-    [[ $1 == "$home" ]] && mark='*'
-    [[ -s $1/.claude/.credentials.json ]] && claude=yes
-    [[ -s $1/.codex/auth.json ]] && codex=yes
-    printf '%s %-20s %-7s %s\n' "$mark" "$2" "$claude" "$codex"
-  }
+# Prints a row for home directory $1, labelled $2.
+home_row() {
+  local mark=' ' claude=- codex=-
+  [[ $1 == "$home" ]] && mark='*'
+  [[ -s $1/.claude/.credentials.json ]] && claude=yes
+  [[ -s $1/.codex/auth.json ]] && codex=yes
+  printf '%s %-20s %-7s %s\n' "$mark" "$2" "$claude" "$codex"
+}
+
+cmd_homes() {
+  local d listed=''
   printf '  %-20s %-7s %s\n' HOME CLAUDE CODEX
-  listed=''
   for d in "$clod_dir"/homes/*; do
     [[ -d $d ]] || continue
     home_row "$d" "$(basename "$d")"
@@ -764,11 +890,10 @@ if [[ $command == homes ]]; then
   [[ -n $listed ]] || home_row "$home" "$home_label"
   echo
   echo "* used here; clod -H NAME uses another, and a new name creates it"
-  exit 0
-fi
+}
 
-if [[ $command == new-shared ]]; then
-  target=$clod_dir/shared starter=$script_dir/shared
+cmd_new_shared() {
+  local target=$clod_dir/shared starter=$script_dir/shared report backup
   if [[ ! -d $starter ]]; then
     echo "clod: there's no starter shared config in $(tildify "$script_dir")" >&2
     exit 1
@@ -789,13 +914,13 @@ if [[ $command == new-shared ]]; then
     done)
     if [[ -z $report ]]; then
       echo "clod: $(tildify "$target") has everything in the starter, unchanged"
-      exit 0
+      return 0
     fi
     echo "clod: $(tildify "$target") already exists. Compared with the starter in $(tildify "$starter"):"
     echo "$report"
     echo "See the differences: diff -ru $(tildify "$starter") $(tildify "$target")"
     echo "Replace yours with the starter (yours is kept as a backup): clod --force new-shared"
-    exit 0
+    return 0
   fi
   mkdir -p "$clod_dir"
   if [[ -e $target ]]; then
@@ -806,11 +931,10 @@ if [[ $command == new-shared ]]; then
   cp -R "$starter" "$target"
   echo "clod: created $(tildify "$target") from $(tildify "$starter")"
   echo "Edit the files there; every clod from now on mounts it instead of the starter."
-  exit 0
-fi
+}
 
-if [[ $command == new-image ]]; then
-  name=$1 from=$2
+cmd_new_image() {
+  local name=$1 from=$2 target src='' combo='' variants from_lines
   [[ -n $name ]] || usage_error "new-image needs a NAME"
   [[ $name =~ $name_re ]] || usage_error "invalid image name '$name'"
   target=$clod_dir/images/$name
@@ -818,10 +942,8 @@ if [[ $command == new-image ]]; then
     echo "clod: $(tildify "$target") already exists" >&2
     exit 1
   fi
-  src='' combo=''
   if [[ -n $from ]]; then
-    check_combination "$from"
-    variant_tag "$from"
+    resolve_variant "$from"
     [[ $REPLY == clod-*.* ]] && combo=$REPLY
     find_variant "$from"
     src=$REPLY
@@ -861,11 +983,13 @@ STARTER
     echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, FROM $combo}"
   fi
   echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
-  exit 0
-fi
+}
 
-if [[ $command == env ]]; then
-  field() { printf '%-9s%s\n' "$1:" "$2"; }
+# Prints a line of clod env: field $1 with value $2.
+field() { printf '%-9s%s\n' "$1:" "$2"; }
+
+cmd_env() {
+  local home_path parts p from shown
   home_path=$(tildify "$home")
   if [[ $home_label == "$home_path" ]]; then
     field home "$home_label"
@@ -903,185 +1027,110 @@ if [[ $command == env ]]; then
   [[ -n $docker_socket ]] && field docker "the host's Docker socket (root on the Docker host)"
   [[ -f $config ]] && field config "$(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
-  exit 0
-fi
-
-# Builds $1 from directory $2, with any further docker build arguments, unless
-# the image is already labelled with hash $3. For `clod rebuild` it always builds,
-# without the layer cache.
-built='' rebuild=''
-[[ $command == rebuild ]] && rebuild=1
-build_if_changed() {
-  local no_cache=()
-  if [[ -n $rebuild ]]; then
-    no_cache=(--no-cache)
-  else
-    [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$3" ]] && return
-  fi
-  echo "clod: building $1..." >&2
-  docker build -t "$1" --label "clod.hash=$3" ${no_cache[@]+"${no_cache[@]}"} "${@:4}" "$2" || exit 1
-  built=1
+  return 0
 }
 
-# Builds clod or clod-<variant> $1, first building the clod images it is FROM:
-# every stage's, so a multi-stage Dockerfile can name one in any stage.
-building=() done_images=()
-build_image() {
-  local tag=$1 dir base parents=() parent hash build_args=() b
-  for b in ${building[@]+"${building[@]}"}; do
-    if [[ $b == "$tag" ]]; then
-      echo "clod: image $tag is built FROM itself" >&2
-      exit 1
-    fi
-  done
-  for b in ${done_images[@]+"${done_images[@]}"}; do
-    [[ $b == "$tag" ]] && return 0
-  done
-  done_images+=("$tag")
-  [[ $tag == clod && -z $base_dir ]] && return 0
-  building+=("$tag")
-  if [[ $tag == clod ]]; then
-    dir=$base_dir
-    hash=$(base_hash)
-    build_args=(${base_args[@]+"${base_args[@]}"})
-    [[ -n $rebuild ]] && build_args+=(--pull)
-  else
-    tag_variant "$tag"
-    dir=$REPLY base=$variant_base
-    [[ -n $base ]] && build_args=(--build-arg "BASE=$base")
-    while IFS= read -r parent; do
-      parents+=("$parent")
-    done < <(variant_parents "$dir" "$base")
-    for parent in ${parents[@]+"${parents[@]}"}; do
-      if [[ $parent == clod ]]; then
-        build_image clod
-      elif [[ $parent == clod-* ]]; then
-        tag_variant "$parent"
-        [[ -n $REPLY ]] && build_image "$parent"
-      fi
-    done
-    hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
-  fi
-  build_if_changed "$tag" "$dir" "$hash" ${build_args[@]+"${build_args[@]}"}
-  unset 'building[${#building[@]}-1]'
-}
-
-# Exits with advice when Docker is missing or its daemon isn't running.
-need_docker() {
-  if ! command -v docker >/dev/null; then
-    echo "clod: docker isn't installed (see the README's quick start)" >&2
-    exit 1
-  fi
-  if ! docker version -f '{{.Server.Version}}' >/dev/null 2>&1; then
-    echo "clod: can't reach Docker; start it (colima start, or open Docker Desktop) and try again" >&2
-    exit 1
-  fi
-}
-
-if [[ -n $rebuild ]]; then
-  need_docker
+cmd_rebuild() {
   if [[ $tag != clod && -z $variant_dir ]]; then
     echo "clod: $tag is not a clod image or variant, so there is nothing to rebuild" >&2
     exit 1
   fi
-  build_image "$tag"
+  walk_image "$tag" build
   docker image prune -f --filter label=clod.hash >/dev/null
-  exit 0
-fi
-
-host_home=$(realdir "$HOME") clod_real=$(realdir "$clod_dir")
-# True when directory $1 is /, your home directory or one above it, ~/.clod or
-# ~/.clod/homes: mounting it would show the agent your credentials and every
-# home's login.
-holds_secrets() {
-  local d
-  d=$(realdir "$1")
-  [[ $d == / || $host_home == "$d" || $host_home == "$d"/* ||
-     $d == "$clod_real" || $d == "$clod_real/homes" ]]
 }
-if [[ -z $force ]]; then
-  workspace=$(pwd -P)
-  if holds_secrets "$workspace" || [[ $workspace == "$clod_real/homes"/* ]]; then
-    echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
+
+# Runs command $command with arguments $@ in the container, building its image
+# first if needed.
+cmd_run() {
+  local run_args variants endpoint sock mount probe sock_stat
+  mkdir -p "$home"
+
+  if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
+    echo "clod: running $tag as built" >&2
+  elif [[ $tag == clod || -n $variant_dir ]]; then
+    walk_image "$tag" build
+  elif ! docker image inspect "$tag" >/dev/null 2>&1; then
+    variants=$(variant_names | tr '\n' ' ')
+    echo "clod: no variant or local image named '$image'${variants:+ (variants: ${variants% })}" >&2
     exit 1
   fi
-  if holds_secrets "$home"; then
-    echo "clod: refusing to use $(tildify "$home") as the container's home: it holds your credentials or every home's login (clod --force to run anyway)" >&2
-    exit 1
+  # Images replaced by a build are left untagged; remove them.
+  [[ -n $built ]] && docker image prune -f --filter label=clod.hash >/dev/null
+
+  # Docker creates a missing mount target as root, which on a Linux host leaves
+  # the home's .claude unwritable for claude, so the borrowed login's target is
+  # created here first.
+  if [[ -n $creds ]]; then
+    mkdir -p "$home/.claude"
+    [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
   fi
-  if [[ -n $creds ]] && holds_secrets "$creds_home"; then
-    echo "clod: refusing to borrow the login in $(tildify "$creds_home"): it isn't a clod home (clod --force to run anyway)" >&2
-    exit 1
+
+  run_args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
+  [[ -n $creds ]] && run_args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
+  [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
+  # A folder Docker doesn't share (outside Colima's mounts, say) shows up empty;
+  # the entrypoint warns when it sees nothing where this says there are files.
+  [[ -n $(ls -A 2>/dev/null) ]] && run_args+=(-e CLOD_WORKSPACE_FILES=1)
+  if (( ${#port_args[@]} )); then
+    run_args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
   fi
-fi
-need_docker
-
-mkdir -p "$home"
-
-if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
-  echo "clod: running $tag as built" >&2
-elif [[ $tag == clod || -n $variant_dir ]]; then
-  build_image "$tag"
-elif ! docker image inspect "$tag" >/dev/null 2>&1; then
-  variants=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
-    [[ -f $f ]] && basename "$(dirname "$f")"
-  done | sort -u | tr '\n' ' ')
-  echo "clod: no variant or local image named '$image'${variants:+ (variants: ${variants% })}" >&2
-  exit 1
-fi
-# Images replaced by a build are left untagged; remove them.
-[[ -n $built ]] && docker image prune -f --filter label=clod.hash >/dev/null
-
-# Docker creates a missing mount target as root, which on a Linux host leaves
-# the home's .claude unwritable for claude, so the borrowed login's target is
-# created here first.
-if [[ -n $creds ]]; then
-  mkdir -p "$home/.claude"
-  [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
-fi
-
-args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
-[[ -n $creds ]] && args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
-[[ -n $tz ]] && args+=(-e "TZ=$tz")
-# A folder Docker doesn't share (outside Colima's mounts, say) shows up empty;
-# the entrypoint warns when it sees nothing where this says there are files.
-[[ -n $(ls -A 2>/dev/null) ]] && args+=(-e CLOD_WORKSPACE_FILES=1)
-if (( ${#port_args[@]} )); then
-  args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
-fi
-[[ -n $shared_dir ]] && args+=(-v "$shared_dir:/etc/claude-code:ro")
-# Docker Engine on Linux has no built-in host.docker.internal.
-[[ $OSTYPE == linux* ]] && args+=(--add-host=host.docker.internal:host-gateway)
-# --docker mounts the socket of the Docker that runs clod, which must be local:
-# the path is the same on Linux, in Colima's VM and in Docker Desktop's. The
-# socket's group, as a container sees it, lets claude use it. --mount, unlike
-# -v, fails rather than creating a missing source. The same throwaway container
-# checks the image has the docker CLI.
-if [[ -n $docker_socket ]]; then
-  endpoint=${DOCKER_HOST:-$(docker context inspect -f '{{.Endpoints.docker.Host}}' 2>/dev/null)}
-  case $endpoint in
-    ''|unix://*) ;;
-    *)
-      echo "clod: --docker needs a local Docker, but it's at $endpoint" >&2
+  [[ -n $shared_dir ]] && run_args+=(-v "$shared_dir:/etc/claude-code:ro")
+  # Docker Engine on Linux has no built-in host.docker.internal.
+  [[ $OSTYPE == linux* ]] && run_args+=(--add-host=host.docker.internal:host-gateway)
+  # --docker mounts the socket of the Docker that runs clod, which must be local:
+  # the path is the same on Linux, in Colima's VM and in Docker Desktop's. The
+  # socket's group, as a container sees it, lets claude use it. --mount, unlike
+  # -v, fails rather than creating a missing source. The same throwaway container
+  # checks the image has the docker CLI.
+  if [[ -n $docker_socket ]]; then
+    endpoint=${DOCKER_HOST:-$(docker context inspect -f '{{.Endpoints.docker.Host}}' 2>/dev/null)}
+    case $endpoint in
+      ''|unix://*) ;;
+      *)
+        echo "clod: --docker needs a local Docker, but it's at $endpoint" >&2
+        exit 1
+        ;;
+    esac
+    sock=/var/run/docker.sock
+    mount=(--mount "type=bind,src=$sock,dst=$sock")
+    # shellcheck disable=SC2016 # the quoted script runs in the container
+    probe=$(docker run --rm --pull=never "${mount[@]}" --entrypoint sh "$tag" \
+      -c 'stat -c "%F %g" "$1" && { command -v docker >/dev/null || echo no-cli; }' sh "$sock" 2>&1)
+    sock_stat=${probe%%$'\n'*}
+    if [[ ! $sock_stat =~ ^socket\ [0-9]+$ ]]; then
+      echo "clod: --docker: can't find Docker's socket at $sock on the Docker host: $probe" >&2
       exit 1
-      ;;
-  esac
-  sock=/var/run/docker.sock
-  mount=(--mount "type=bind,src=$sock,dst=$sock")
-  # shellcheck disable=SC2016 # the quoted script runs in the container
-  probe=$(docker run --rm --pull=never "${mount[@]}" --entrypoint sh "$tag" \
-    -c 'stat -c "%F %g" "$1" && { command -v docker >/dev/null || echo no-cli; }' sh "$sock" 2>&1)
-  sock_stat=${probe%%$'\n'*}
-  if [[ ! $sock_stat =~ ^socket\ [0-9]+$ ]]; then
-    echo "clod: --docker: can't find Docker's socket at $sock on the Docker host: $probe" >&2
-    exit 1
+    fi
+    if [[ $probe == *no-cli ]]; then
+      echo "clod: --docker: $tag has no docker CLI, so only the socket is there; the docker variant has it (clod -i docker --docker)" >&2
+    fi
+    run_args+=("${mount[@]}" --group-add "${sock_stat#socket }" -e "CLOD_HOST_WORKSPACE=$PWD")
   fi
-  if [[ $probe == *no-cli ]]; then
-    echo "clod: --docker: $tag has no docker CLI, so only the socket is there; the docker variant has it (clod -i docker --docker)" >&2
-  fi
-  args+=("${mount[@]}" --group-add "${sock_stat#socket }" -e "CLOD_HOST_WORKSPACE=$PWD")
-fi
-[[ -t 0 && -t 1 ]] && args+=(-t)
-echo "clod · $home_label · $tag · ${#vars[@]} vars${docker_socket:+ · Docker socket}" >&2
-# Images are local: clod builds them, so a mistyped name must not pull one.
-exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${args[@]}" "$tag" "$command" "$@"
+  [[ -t 0 && -t 1 ]] && run_args+=(-t)
+  echo "clod · $home_label · $tag · ${#vars[@]} vars${docker_socket:+ · Docker socket}" >&2
+  # Images are local: clod builds them, so a mistyped name must not pull one.
+  exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
+}
+
+# The dispatch. install and update run before the envrc is read, and default
+# before the settings it edits are resolved, so a broken one can be fixed with
+# it. The rest run once the home, image and ports are settled. Only rebuild and
+# a run check that Docker is up, and only a run refuses mounts holding secrets.
+parse_args "$@"
+set -- ${args[@]+"${args[@]}"}
+case $command in
+  install|update) "cmd_$command" "$@"; exit 0 ;;
+esac
+load_settings
+[[ $command == default ]] && { cmd_default "$@"; exit 0; }
+[[ -n $command ]] || default_command
+setup_home
+setup_image
+setup_container
+case $command in
+  env|images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
+  rebuild) need_docker; cmd_rebuild; exit 0 ;;
+esac
+refuse_secrets
+need_docker
+cmd_run "$@"
