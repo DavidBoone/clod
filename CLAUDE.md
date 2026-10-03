@@ -23,7 +23,6 @@ On a Linux host, where bind mounts keep host ownership, the launcher builds the 
 The container is a convenience boundary, not a sandbox against a hostile agent:
 
 - Claude Code runs with `--dangerously-skip-permissions` unless its arguments choose a permission mode, and Codex with `--dangerously-bypass-approvals-and-sandbox`
-- `claude` has passwordless sudo inside the container
 - The workspace and the whole home are mounted read-write, so anything in the home (SSH keys, tokens, credentials) is visible to the agent
 - The container has normal outbound network access and can reach host services via `host.docker.internal`
 - Claude Code installs via `curl https://claude.ai/install.sh | bash` on first run

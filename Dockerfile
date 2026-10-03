@@ -10,7 +10,7 @@ RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y \
        curl wget ca-certificates \
        git build-essential \
-       sudo locales
+       locales
 
 # Culture (the clod launcher passes the host's TZ)
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
@@ -53,9 +53,7 @@ RUN git config --system --add safe.directory '*'
 ARG CLOD_UID=1000
 ARG CLOD_GID=1000
 RUN groupadd -o -g $CLOD_GID claude \
-    && useradd -l -m -o -u $CLOD_UID -g claude -s /bin/bash claude \
-    && echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude \
-    && chmod 0440 /etc/sudoers.d/claude
+    && useradd -l -m -o -u $CLOD_UID -g claude -s /bin/bash claude
 
 USER claude
 ENV PATH="$PATH:/home/claude/.local/bin"

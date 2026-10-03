@@ -7,4 +7,4 @@ Running in a disposable Docker container (`docker run --rm`) started by the user
 - `/etc/claude-code` ← `~/.clod/shared` (read-only here): managed settings, statusline, this file
 - `$CLOD_HOME`, `$CLOD_IMAGE` and (only when a login is borrowed) `$CLOD_CREDS` name this run's home, image and login source
 
-Only `/home/claude` and `/workspace` persist. Anything installed system-wide (apt, global pip/npm, `/usr/local`) is lost on exit; lasting system tooling belongs in a Dockerfile, and single-file tools can go in `~/.local/bin`.
+Only `/home/claude` and `/workspace` persist. System packages (apt, `/usr/local`) belong in an image variant's Dockerfile, which the user maintains. `npm install -g` goes to `~/.local` and persists, Python packages go in a venv, and single-file tools can go in `~/.local/bin`.

@@ -5,8 +5,7 @@ and `clod`, a launcher script that builds it and runs it on the current
 directory. Claude Code is the default.
 
 > **The container is not a sandbox.** Both agents run with their permission
-> prompts disabled, the `claude` user has passwordless sudo, and the agent can
-> read and write everything in the mounted home and workspace and reach the
+> prompts disabled, and the agent can read and write everything in the mounted home and workspace and reach the
 > network. See [Security](#security).
 
 ## Requirements
@@ -276,11 +275,10 @@ it is a convenience boundary, not a sandbox against a misbehaving agent:
 
 - Claude Code runs with `--dangerously-skip-permissions` (unless you choose a
   permission mode) and Codex with `--dangerously-bypass-approvals-and-sandbox`.
-- `claude` has passwordless sudo inside the container.
 - The workspace and the whole home are mounted read-write. `clod` refuses
   workspaces that would expose your host home or the clod homes unless run
-  with `--force`. Anything you keep in
-  a home, such as SSH keys or API tokens, is available to the agent.
+  with `--force`. Anything you keep in a home, such as SSH keys or API
+  tokens, is available to the agent.
 - The container has normal outbound network access and can reach services on
   the host through `host.docker.internal`.
 - Claude Code is installed on first run with
