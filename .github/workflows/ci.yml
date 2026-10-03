@@ -39,6 +39,7 @@ jobs:
             test "$(id -u)" = "'"$(id -u)"'"
             test "$(cat /workspace/from-host)" = hello
             test -f /etc/claude-code/managed-settings.json
+            test -s /etc/clod/.claude/rules/clod.md
             touch /workspace/from-container
             git --version; gh --version | head -1; node --version; python3 --version; jq --version; fd --version
           '
@@ -122,18 +123,19 @@ jobs:
           clod env | grep -q '^image: clod-python'
           clod default image clod
           clod env | grep -q '^image: clod$'
-      - name: new-shared copies the starter, and a missing CLAUDE.md warns
+      - name: new-shared copies and compares the starter
         run: |
           cd "$(mktemp -d)"
           clod new-shared
-          test -f ~/.clod/shared/CLAUDE.md && test -f ~/.clod/shared/statusline.sh
+          test -f ~/.clod/shared/statusline.sh
           clod new-shared | grep -q 'has everything in the starter'
           clod env | grep -q '^shared: ~/.clod/shared'
-          rm ~/.clod/shared/CLAUDE.md
-          clod new-shared | grep -q 'missing  *CLAUDE.md'
-          clod bash -c true 2>&1 | grep -q 'has no CLAUDE.md'
+          rm ~/.clod/shared/statusline.sh
+          clod new-shared | grep -q 'missing  *statusline.sh'
+          cp "$GITHUB_WORKSPACE/container.md" ~/.clod/shared/CLAUDE.md
+          clod new-shared | grep -q 'describes the container'
           clod --force new-shared
-          test -f ~/.clod/shared/CLAUDE.md
+          test -f ~/.clod/shared/statusline.sh
           ls -d ~/.clod/shared.bak-*
           rm -rf ~/.clod/shared ~/.clod/shared.bak-*
       - name: Command line

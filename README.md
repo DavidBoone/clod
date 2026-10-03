@@ -168,7 +168,6 @@ Claude Code reads managed settings and a managed `CLAUDE.md` from
 `/etc/claude-code`, for every home. Until `~/.clod/shared` exists, clod mounts
 this repo's [`shared/`](shared) there, which updates with `git pull`:
 
-- `CLAUDE.md` tells Claude about the clod container.
 - `statusline.sh` is the statusline.
 - `managed-settings.json` turns that statusline on.
 
@@ -179,16 +178,19 @@ clod new-shared       # copies the starter to ~/.clod/shared
 ```
 
 From then on clod mounts `~/.clod/shared` in place of the starter, so keep
-everything you want from it there: clod warns if your copy has no `CLAUDE.md`,
-since that's what tells Claude about the container. Updates to the repo's
-`shared/` reach you only when you merge them in. Run `clod new-shared` again
-to compare: it lists the starter's files that yours is missing or differs on,
-with the `diff` command to see them, and `clod --force new-shared` replaces
-yours with the starter, keeping yours as a backup. Add your own instructions
-to its `CLAUDE.md`, and any other
-[managed settings](https://code.claude.com/docs/en/settings) to
+everything you want from it there. Updates to the repo's `shared/` reach you
+only when you merge them in. Run `clod new-shared` again to compare: it lists
+the starter's files that yours is missing or differs on, with the `diff`
+command to see them, and `clod --force new-shared` replaces yours with the
+starter, keeping yours as a backup. Put your own instructions for Claude in a
+`CLAUDE.md` there, and any other
+[managed settings](https://code.claude.com/docs/en/settings) in
 `managed-settings.json` or `managed-settings.d/*.json`. Managed settings take
 precedence over a home's own settings, so keep per-client config in the homes.
+
+What Claude is told about the container (the mounts, what persists, the
+`CLOD_*` variables) comes with the image, from [`container.md`](container.md),
+so your `CLAUDE.md` only needs your own additions.
 
 Changes to `statusline.sh` show up on its next refresh. To turn it off, remove
 `statusLine` from `managed-settings.json`; homes can then set their own in

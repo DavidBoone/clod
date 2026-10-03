@@ -32,7 +32,8 @@
 #
 # ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
 # reads managed settings and CLAUDE.md for every home. Until you create it, the
-# starter set in this script's shared/ directory is mounted instead.
+# starter set in this script's shared/ directory is mounted instead. What Claude
+# is told about the container comes with the image, from container.md.
 #
 # Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
 # hold the home label, image tag and login source this run resolved to, and
@@ -600,6 +601,10 @@ if [[ $command == new-shared ]]; then
     exit 1
   fi
   if [[ -e $target && -z $force ]]; then
+    # A CLAUDE.md that describes the container repeats the image's container.md.
+    if grep -qs "started by the user's \`clod\` launcher" "$target/CLAUDE.md"; then
+      echo "clod: $(tildify "$target/CLAUDE.md") describes the container, which the image already does; remove that section"
+    fi
     # Compares the starter's files with yours; files only you have aren't listed.
     report=$(cd "$starter" && find . -type f | sort | while IFS= read -r f; do
       f=${f#./}
@@ -737,7 +742,7 @@ build_image() {
   building+=("$tag")
   if [[ $tag == clod ]]; then
     dir=$base_dir
-    hash=$( { cat "$dir/Dockerfile" "$dir/entrypoint.sh"; printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1)
+    hash=$( { cat "$dir/Dockerfile" "$dir/entrypoint.sh" "$dir/container.md"; printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1)
     build_args=(${base_args[@]+"${base_args[@]}"})
     [[ -n $rebuild ]] && build_args+=(--pull)
   else
@@ -837,9 +842,6 @@ if [[ -n $creds ]]; then
   [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
 fi
 
-if [[ $shared_dir == "$clod_dir/shared" && ! -f $shared_dir/CLAUDE.md ]]; then
-  echo "clod: $(tildify "$shared_dir") has no CLAUDE.md, so Claude isn't told about the container; the starter's is $(tildify "$script_dir/shared/CLAUDE.md")" >&2
-fi
 echo "clod · $home_label · $tag · ${#vars[@]} vars" >&2
 args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
 [[ -n $creds ]] && args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
