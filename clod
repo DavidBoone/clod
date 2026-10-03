@@ -619,8 +619,10 @@ if [[ $command == images ]]; then
     local mark=' '
     [[ $1 == "$image" ]] && mark='*'
     image_state "$2"
+    [[ $REPLY == stale ]] && any_stale=1
     printf '%s %-12s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
   }
+  any_stale=''
   printf '  %-12s %-7s %s\n' NAME STATE SOURCE
   image_row clod clod "$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)"
   names=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
@@ -636,8 +638,9 @@ if [[ $command == images ]]; then
     image_row "$n" "clod-$n" "$src"
   done
   echo
-  echo "* runs here by default; clod -i NAME runs another"
-  echo "bundled: $(tildify "$script_dir"); stale: rebuilt on its next run"
+  echo "*        runs here by default; clod -i NAME runs another"
+  echo "bundled  comes with clod, in $(tildify "$script_dir")"
+  [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
   exit 0
 fi
 
