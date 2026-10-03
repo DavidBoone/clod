@@ -153,7 +153,8 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 | `browser` | the system libraries Playwright's Chromium needs |
 | `dotnet`  | .NET 10 SDK, from Microsoft's package repository |
 | `go`      | the latest Go release, as of when the image is built |
-| `java`    | OpenJDK 25 and Maven |
+| `lamp`    | PHP with common extensions, Composer, Apache and MariaDB |
+| `python`  | uv, and the C toolchain and headers for native extensions |
 | `rust`    | Rust's stable toolchain, via rustup, and the C toolchain |
 
 ```bash
