@@ -27,8 +27,8 @@
 # defaults for both.
 #
 # The clod image is built from this script's directory, and a variant from its
-# directory, whenever their files (or, for a variant, the image it is FROM)
-# change. A variant can build on another as FROM clod-<name>.
+# directory, whenever their files (or, for a variant, an image it is FROM, in
+# any stage) change. A variant can build on another as FROM clod-<name>.
 #
 # ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
 # reads managed settings and CLAUDE.md for every home. Until you create it, the
@@ -717,19 +717,24 @@ files_hash() {
   (cd "$1" && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 "$sum") | $sum | cut -d' ' -f1
 }
 
-# Builds clod or clod-<variant> $1, first building the clod image it is FROM.
-building=()
+# Builds clod or clod-<variant> $1, first building the clod images it is FROM:
+# every stage's, so a multi-stage Dockerfile can name one in any stage.
+building=() done_images=()
 build_image() {
-  local tag=$1 dir parent hash build_args=() b
+  local tag=$1 dir parents=() parent hash build_args=() b
   for b in ${building[@]+"${building[@]}"}; do
     if [[ $b == "$tag" ]]; then
       echo "clod: image $tag is built FROM itself" >&2
       exit 1
     fi
   done
+  for b in ${done_images[@]+"${done_images[@]}"}; do
+    [[ $b == "$tag" ]] && return 0
+  done
+  done_images+=("$tag")
+  [[ $tag == clod && -z $base_dir ]] && return 0
   building+=("$tag")
   if [[ $tag == clod ]]; then
-    [[ -n $base_dir ]] || return 0
     dir=$base_dir
     hash=$( { cat "$dir/Dockerfile" "$dir/entrypoint.sh"; printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1)
     build_args=(${base_args[@]+"${base_args[@]}"})
@@ -737,16 +742,24 @@ build_image() {
   else
     find_variant "${tag#clod-}"
     dir=$REPLY
-    parent=$(awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; exit } }' "$dir/Dockerfile")
-    if [[ $parent == clod ]]; then
-      build_image clod
-    elif [[ $parent == clod-* ]]; then
-      find_variant "${parent#clod-}"
-      [[ -n $REPLY ]] && build_image "$parent"
-    fi
-    hash=$( { docker image inspect -f '{{.Id}}' "$parent" 2>/dev/null; files_hash "$dir"; } | $sum | cut -d' ' -f1)
+    while IFS= read -r parent; do
+      parents+=("$parent")
+    done < <(awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; break } }' "$dir/Dockerfile")
+    for parent in ${parents[@]+"${parents[@]}"}; do
+      if [[ $parent == clod ]]; then
+        build_image clod
+      elif [[ $parent == clod-* ]]; then
+        find_variant "${parent#clod-}"
+        [[ -n $REPLY ]] && build_image "$parent"
+      fi
+    done
+    hash=$( { for parent in ${parents[@]+"${parents[@]}"}; do
+                docker image inspect -f '{{.Id}}' "$parent" 2>/dev/null
+              done
+              files_hash "$dir"; } | $sum | cut -d' ' -f1)
   fi
   build_if_changed "$tag" "$dir" "$hash" ${build_args[@]+"${build_args[@]}"}
+  unset 'building[${#building[@]}-1]'
 }
 
 # Exits with advice when Docker is missing or its daemon isn't running.

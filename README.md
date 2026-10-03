@@ -244,8 +244,8 @@ USER claude
 install; most ship prebuilt binaries and don't need it.
 
 `clod -i mine` builds `clod-go` if needed, then `clod-mine`, and
-rebuilds each whenever a file in its directory or the image it is `FROM`
-changes. A variant in `~/.clod/images` takes precedence over a bundled one of
+rebuilds each whenever a file in its directory or an image it is `FROM`
+(in any stage) changes. A variant in `~/.clod/images` takes precedence over a bundled one of
 the same name, so copying one there is how to customise it. Apt lists are kept
 in the base, so variants can `apt-get install` without `apt-get update`. The
 directory is the build context, so `COPY` works for files beside the
