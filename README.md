@@ -25,6 +25,14 @@ git clone https://github.com/DavidBoone/clod.git ~/.clod/src
 ln -s ~/.clod/src/clod ~/.local/bin/clod
 ```
 
+To update clod, pull the repo; the next `clod` rebuilds the image if
+`Dockerfile` or `entrypoint.sh` changed. Claude Code and Codex update
+themselves.
+
+```bash
+git -C ~/.clod/src pull
+```
+
 Then from any project directory:
 
 ```bash
