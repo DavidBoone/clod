@@ -110,7 +110,7 @@ Everything below is optional. It all lives under `~/.clod`:
 ~/.clod/
   src/                this repo
   homes/<name>/       container homes
-  images/<name>/      image variants
+  images/<name>/      your image variants
   shared/             your shared config, mounted read-only as /etc/claude-code
 ```
 
@@ -144,22 +144,41 @@ to `~/.claude/cache-turns.log`.
 
 ### Image variants
 
-The `clod` image is a generic base: Claude Code, Codex, Python, Node 26,
-Playwright's browser libraries and common CLI tools. Put a stack on top as a
-variant, a directory holding a `Dockerfile` that starts `FROM clod`:
+The `clod` image is a generic base: Claude Code, Codex, git, Python, Node 26
+and small everyday CLI tools. A variant puts more on top. clod comes with
+these, in [`images/`](images):
+
+| Variant  | Built on | Adds |
+|----------|----------|------|
+| `dev`    | `clod`   | compilers and build tools, pip, the GitHub CLI, vim, Playwright's browser libraries |
+| `dotnet` | `dev`    | .NET 10 SDK, from Microsoft's package repository |
+| `go`     | `dev`    | the latest Go release, as of when the image is built |
+| `java`   | `dev`    | OpenJDK 25 and Maven |
+| `rust`   | `dev`    | Rust's stable toolchain, via rustup |
+
+```bash
+CLOD_IMAGE=go clod
+```
+
+The first run builds `clod-dev`, then `clod-go`; later runs reuse them until a
+`Dockerfile` or the image it is built on changes. To pick up a newer Go or Rust, remove the image
+(`docker rmi clod-go`) and the next run rebuilds it.
+
+Your own variants go in `~/.clod/images/<name>/`, a directory holding a
+`Dockerfile` that starts `FROM clod`, or `FROM` another variant:
 
 ```dockerfile
-# ~/.clod/images/dotnet/Dockerfile
-FROM clod
+# ~/.clod/images/mine/Dockerfile
+FROM clod-go
 USER root
-RUN apt-get install -y dotnet-sdk-10.0
+RUN apt-get install -y postgresql-client
 USER claude
 ```
 
-`CLOD_IMAGE=dotnet clod` builds it as `clod-dotnet` on first use and rebuilds it
-whenever a file in that directory or the image it is `FROM` changes. A variant
-can build on another with `FROM clod-<name>`; the launcher builds the chain in
-order. Apt lists are kept in the base, so variants can `apt-get install`
+`CLOD_IMAGE=mine clod` builds `clod-go` if needed, then `clod-mine`, and
+rebuilds each whenever a file in its directory or the image it is `FROM`
+changes. A variant in `~/.clod/images` takes precedence over a bundled one of
+the same name, so copying one there is how to customise it. Apt lists are kept in the base, so variants can `apt-get install`
 without `apt-get update`. The directory is the build context, so `COPY` works
 for files beside the `Dockerfile`.
 
