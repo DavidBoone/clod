@@ -128,11 +128,12 @@ clod -P 5173 -P 8080         # several
 The container is removed when you exit; only the home and the workspace
 persist.
 
-To let the agent build and run containers, run the `docker` variant with
-`--docker`, which mounts your Docker's socket into the container:
+To let the agent build and run containers, it needs two things: the Docker
+CLI, which the `docker` variant has, and your Docker's socket, which
+`--docker` mounts. `--docker` adds only the socket, so use the two together:
 
 ```bash
-clod -i docker --docker
+clod -i docker --docker      # the docker CLI, and the socket to drive it
 ```
 
 **This removes clod's boundary.** The Docker socket is root on the Docker host,
@@ -147,8 +148,8 @@ The containers the agent starts run beside clod's, on your Docker, and outlive
 it. Their bind mounts take paths on your machine, so the container gets the
 project's path as `$CLOD_HOST_WORKSPACE`, and the agent reaches their published
 ports at `host.docker.internal`. The `docker` variant tells Claude all this.
-`--docker` works with any image, such as your own variant `FROM clod-docker`,
-but it needs the Docker CLI in the image to be of use.
+`--docker` works with any image that has the Docker CLI, such as your own
+variant `FROM clod-docker`; with one that doesn't, clod warns at launch.
 
 `clod` refuses to run from your home directory or any directory above it, from
 `~/.clod`, or from `~/.clod/homes` or anything under it, since the agent could
@@ -241,7 +242,7 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 ```bash
 clod -i go             # run the go variant
 clod default image go  # run it from now on
-clod images            # list the base, the bundled variants and yours
+clod images            # list the base, the bundled variants and yours, and which are stale
 ```
 
 The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
