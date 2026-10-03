@@ -50,7 +50,7 @@ jobs:
       - name: Claude Code installs into the home and starts
         run: |
           cd "$(mktemp -d)"
-          clod -- --version | tee out
+          clod claude --version | tee out
           grep -q 'Claude Code' out
           # a symlink into the container's paths, so dangling on the runner
           test -L ~/.clod/homes/default/.local/bin/claude
@@ -101,14 +101,18 @@ jobs:
           CLOD_HOME=borrower CLOD_CREDS=owner clod bash -c 'cat ~/.claude/.credentials.json; touch ~/.claude/written' | tee out
           grep -q '"ci"' out
           test "$(stat -c %u ~/.clod/homes/borrower/.claude)" = "$(id -u)"
-      - name: default sets and resets the default image
+      - name: default sets, shows and resets settings
         run: |
           cd "$(mktemp -d)"
-          if clod default no-such-image; then exit 1; fi
-          clod default python
-          clod default | grep -q 'default image: python'
+          if clod default image no-such-image; then exit 1; fi
+          clod default image python
+          clod default image | grep -q '^image  *python .*config'
+          clod default command bash
+          clod -i clod -- -c 'echo from-default-command' | grep -q from-default-command
+          clod default command --reset
+          clod default command | grep -q '^command  *claude .*built in'
           clod env | grep -q '^image: clod-python'
-          clod default clod
+          clod default image clod
           clod env | grep -q '^image: clod$'
       - name: Command line
         run: |

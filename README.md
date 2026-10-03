@@ -75,18 +75,21 @@ That's the whole setup. Every `clod` from here on starts in seconds with:
 
 ```bash
 clod                 # Claude Code
-clod -- --resume     # Claude Code with its own arguments, after --
+clod claude --resume # Claude Code with its own arguments
 clod codex [args]    # Codex
 clod bash | zsh      # a shell in the container
 clod -i go           # the go image variant (see Image variants)
 clod -H work         # the "work" home (see Homes and logins)
 clod env             # show the home, image, login, ports, envrc and variables that would be used
+clod default         # show your defaults (see Your defaults)
 clod --help          # all commands and options
 ```
 
-clod's options come before the command. Arguments after `--`, or after the
-`claude` or `codex` command, go to the agent unchanged: `clod -- --resume` and
-`clod claude --resume` are the same.
+clod's options come before the command, and a command's own arguments go
+after it, unchanged, options included. With no command, clod runs the default
+command, Claude Code unless you change it. `--` ends clod's options and passes
+the rest to the default command, so `clod -- --resume` is `clod claude
+--resume`.
 
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
 what changed, one line per change. The next `clod` rebuilds the image if it
@@ -124,8 +127,8 @@ then read your credentials and every home's login. `clod --force` runs anyway.
 
 Claude Code runs with `--dangerously-skip-permissions` unless its arguments
 include `--permission-mode`, `--dangerously-skip-permissions` or
-`--allow-dangerously-skip-permissions`, so `clod -- --permission-mode plan`
-brings the prompts back. `clod -- -p "..." | ...` works without a terminal.
+`--allow-dangerously-skip-permissions`, so `clod claude --permission-mode plan`
+brings the prompts back. `clod claude -p "..." | ...` works without a terminal.
 
 ## Going further
 
@@ -185,7 +188,7 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 
 ```bash
 clod -i go             # run the go variant
-clod default go        # run it from now on (clod default alone shows the default)
+clod default image go  # run it from now on
 clod images            # list the base, the bundled variants and yours
 ```
 
@@ -256,20 +259,39 @@ refresh tokens rotate.
 
 Each option has a matching setting, which can come from your shell
 environment, per project from an envrc (below), or as your defaults from
-`~/.clod/config`, as `NAME=value` lines. An option wins over the shell, the
-shell over the envrc, and the envrc over the config file:
+`~/.clod/config` (see Your defaults). An option wins over the shell, the shell
+over the envrc, and the envrc over the config file:
 
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
 | `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory. |
 | `CLOD_IMAGE` | `-i`   | `clod`    | A variant name from `~/.clod/images/`, or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
 | `CLOD_CREDS` | `-c`   | unset     | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
+| `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-p`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), or `host:container`. An entry that starts with an address, as in `docker run -p`, is published there instead. |
 
 In a direnv `.envrc`, `$PWD` is the `.envrc`'s directory, so
 `export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
 project directory is also visible under `/workspace`, login included, so
 gitignore it.
+
+### Your defaults
+
+`clod default` shows and sets your defaults, kept in `~/.clod/config`:
+
+```bash
+clod default                    # show them all, and where each comes from
+clod default image go           # CLOD_IMAGE=go
+clod default command codex      # a bare clod runs Codex
+clod default home work          # CLOD_HOME=work
+clod default ports 5173         # CLOD_PORTS=5173
+clod default image              # show one
+clod default image --reset      # back to the built-in default
+```
+
+The keys are `image`, `command`, `home`, `creds` and `ports`. Values are
+checked when you set them, and a home or login path is stored as an absolute
+path.
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
