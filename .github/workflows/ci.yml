@@ -40,7 +40,7 @@ jobs:
             test "$(cat /workspace/from-host)" = hello
             test -f /etc/claude-code/managed-settings.json
             touch /workspace/from-container
-            git --version; gh --version | head -1; node --version; python3 --version; jq --version
+            git --version; gh --version | head -1; node --version; python3 --version; jq --version; fd --version
           '
           test "$(stat -c %u from-container)" = "$(id -u)"
       - name: Refuses the home directory
