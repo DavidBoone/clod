@@ -29,3 +29,7 @@ The container defines what the agent can reach; within it, the agent runs unrest
 - The container has normal outbound network access and can reach host services via `host.docker.internal`
 - Claude Code installs via `curl https://claude.ai/install.sh | bash` on first run
 - `--rm` discards everything outside the home and workspace mounts after each run
+
+## Docs
+
+`docs/statusline.svg`, shown in the README, is rendered from the real statusline by `docs/statusline-svg.sh > docs/statusline.svg`: it runs `shared/statusline.sh` on sample input and converts the 16-colour output with `docs/ansi2svg.py`. Regenerate it when the statusline's look changes.
