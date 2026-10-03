@@ -25,7 +25,7 @@ On a Linux host, where bind mounts keep host ownership, the launcher builds the 
 The container defines what the agent can reach; within it, the agent runs unrestricted:
 
 - Claude Code runs with `--dangerously-skip-permissions` unless its arguments choose a permission mode, and Codex with `--dangerously-bypass-approvals-and-sandbox`
-- The workspace and the whole home are mounted read-write, so anything in the home (SSH keys, tokens, credentials) is visible to the agent
+- The workspace and the whole container home (`~/.clod/homes/<name>`, not the user's own home) are mounted read-write. A new home starts empty and holds only what the user gives it (logins made in the container, copied keys, a borrowed login), and all of that is visible to the agent; so are the variables passed in from the envrc
 - The container has normal outbound network access and can reach host services via `host.docker.internal`
 - Claude Code installs via `curl https://claude.ai/install.sh | bash` on first run
 - `--rm` discards everything outside the home and workspace mounts after each run

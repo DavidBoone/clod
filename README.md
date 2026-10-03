@@ -7,9 +7,10 @@ browses the web, runs whatever tools it needs and installs packages into its
 home (npm, uv, pip in a venv), while the rest of your machine stays out of
 reach.
 
-> **What the agent can reach:** your project directory, its own home with
-> whatever logins and keys you give it, and the network. Nothing else on your
-> machine. See [What the agent can reach](#what-the-agent-can-reach).
+> **What the agent can reach:** your project directory, its own home, and the
+> network. Nothing else on your machine: a new home starts empty, with none of
+> your keys or logins, and holds only what you give it. See
+> [What the agent can reach](#what-the-agent-can-reach).
 
 ## Quick start
 
@@ -411,11 +412,16 @@ Claude Code runs with `--dangerously-skip-permissions` and Codex with
 without asking:
 
 - **The project directory**, read-write: the agent can change or delete any
-  file in it, and commit and push with whatever git credentials the home
-  holds.
-- **Its home**: the Claude and Codex logins, MCP tokens, and anything else you
-  put there, such as SSH keys or API tokens. Give each home only what its work
-  needs.
+  file in it, including any secrets the project keeps, such as a `.env` file.
+- **Its home**, `~/.clod/homes/<name>` on your machine, not your own home
+  directory. A new home starts empty: no SSH keys, git or GitHub credentials,
+  or cloud logins. It holds only what you give it: the logins you make inside
+  the container (`/login`, `! gh auth login`), files you copy in, and a login
+  borrowed from another home with `--creds`. So the agent can push to git only
+  if you've given that home credentials that allow it. Give each home only
+  what its work needs.
+- **The variables you pass in** from `.clod.envrc` or `.envrc`, tokens
+  included.
 - **The network**, including services on your machine through
   `host.docker.internal`.
 
