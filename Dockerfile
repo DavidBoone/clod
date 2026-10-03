@@ -34,10 +34,11 @@ RUN mkdir -p /etc/apt/keyrings \
 
 # CLI tools
 RUN apt-get install -y \
-       gh vim zsh direnv less tree file jq \
+       gh vim zsh direnv less tree file jq bc gettext-base make \
        ripgrep fd-find \
-       psmisc procps rsync zip unzip \
-       openssh-client dnsutils netcat-openbsd iputils-ping socat \
+       binutils bsdextrautils strace lsof \
+       psmisc procps rsync zip unzip xz-utils \
+       openssh-client dnsutils netcat-openbsd iputils-ping socat iproute2 \
        sqlite3 \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
