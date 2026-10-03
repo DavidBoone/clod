@@ -14,7 +14,7 @@
 #
 # Tests run in the order listed. Each starts in an empty directory; the home is
 # shared, so later tests see the images and variants earlier ones made, but
-# each also runs alone.
+# each also runs alone. A test that can't run here exits 77 and is skipped.
 
 # shellcheck disable=SC2016 # single-quoted scripts expand in the container
 
@@ -23,7 +23,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 lint_tests='lint'
 base_tests='env run-command empty-workspace refuses-home claude codex statusline
   port docker-socket envrc creds default new-shared command-line multi-stage
-  combine rebuild'
+  combine rebuild shared-docker'
 classic_tests='classic'
 variant_names='browser docker dotnet go lamp python rust sudo go+sudo'
 variants_tests=$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)
@@ -63,6 +63,12 @@ has() {
   grep "$@" >/dev/null || return 1
 }
 
+# Prints the docker tag clod gives image $1 for this user: the name itself, or
+# NAME:<uid> for a uid other than 1000.
+tagged() {
+  if [[ $(id -u) == 1000 ]]; then echo "$1"; else echo "$1:$(id -u)"; fi
+}
+
 # Runs a command, failing unless it exits with status $1.
 exits() {
   local want=$1 got=0
@@ -98,7 +104,7 @@ test_empty_workspace() {
   touch file
   clod bash -c true 2>&1 | tee out
   if grep -q 'workspace is empty' out; then false; fi
-  docker run --rm -e CLOD_WORKSPACE_FILES=1 -v "$(mktemp -d):/workspace" clod bash -c true 2>&1 |
+  docker run --rm -e CLOD_WORKSPACE_FILES=1 -v "$(mktemp -d):/workspace" "$(tagged clod)" bash -c true 2>&1 |
     has 'workspace is empty'
 }
 
@@ -153,7 +159,7 @@ test_docker_socket() {
     set -e
     test "$(id -un)" = claude
     docker ps
-    test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
+    test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" '"$(tagged clod)"' /w/from-host)" = sibling
   ' 2>&1 | tee out
   if grep -q 'no docker CLI' out; then false; fi
 }
@@ -297,21 +303,57 @@ test_rebuild() {
   local t i before=() after=()
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
   clod -i first+second bash -c true
-  for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
+  for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$(tagged "$t")")"); done
   clod -i first+second rebuild
-  for t in clod clod-first clod-first.second; do after+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
+  for t in clod clod-first clod-first.second; do after+=("$(docker image inspect -f '{{.Id}}' "$(tagged "$t")")"); done
   for i in 0 1 2; do
     test "${before[i]}" != "${after[i]}"
     if docker image inspect "${before[i]}" >/dev/null 2>&1; then false; fi
   done
 }
 
+# Users sharing a Docker keep their own images: a uid-1000 user gets the plain
+# tags and leaves this user's alone. Needs a uid other than 1000 and
+# passwordless sudo to act as the other user.
+test_shared_docker() {
+  local mine other other_home
+  if [[ $(id -u) == 1000 ]] || ! sudo -n true 2>/dev/null; then
+    echo "needs a uid other than 1000 and passwordless sudo"
+    exit 77
+  fi
+  clod bash -c true
+  clod env | has "^user: .*images tagged :$(id -u)$"
+  mine=$(docker image inspect -f '{{.Id}}' "clod:$(id -u)")
+  other=$(getent passwd 1000 | cut -d: -f1)
+  [[ -n $other ]] || { other=other; sudo useradd -u 1000 "$other"; }
+  sudo usermod -aG docker "$other"
+  sudo rm -rf /opt/clod-test
+  sudo cp -r "$repo" /opt/clod-test
+  sudo chmod -R a+rX /opt/clod-test
+  other_home=$(sudo -u "$other" mktemp -d)
+  sudo -u "$other" env HOME="$other_home" bash -c '
+    set -e
+    cd "$(mktemp -d)"
+    mkdir -p ~/.clod/images/mine
+    printf "ARG BASE=clod\nFROM \$BASE\nRUN touch /tmp/mine\n" > ~/.clod/images/mine/Dockerfile
+    /opt/clod-test/clod env | grep -q "^user: *claude as 1000:[0-9]*$"
+    /opt/clod-test/clod -i mine bash -c "test \$(id -u) = 1000 && test -f /tmp/mine"
+  '
+  docker image inspect clod clod-mine >/dev/null
+  test "$(docker image inspect -f '{{.Id}}' "clod:$(id -u)")" = "$mine"
+  clod bash -c "test \$(id -u) = $(id -u)" 2>&1 | tee out
+  if grep -q building out; then false; fi
+}
+
 # Homebrew's docker on macOS has no buildx, so clod's builds there use the
 # classic builder; the base image, and a variant on top of another through
-# BASE, must build without BuildKit.
+# BASE or from a Dockerfile on stdin (as clod builds one for a uid other than
+# 1000), must build without BuildKit.
 test_classic() {
   DOCKER_BUILDKIT=0 docker build -q -t clod-classic "$repo"
   DOCKER_BUILDKIT=0 docker build -q --build-arg BASE=clod-classic "$repo/images/sudo"
+  sed 's/^FROM .*/FROM clod-classic/' "$repo/images/sudo/Dockerfile" |
+    DOCKER_BUILDKIT=0 docker build -q -f - "$repo/images/sudo"
 }
 
 # Builds variant (or combination) $1 and checks its tools in the container.
@@ -397,7 +439,7 @@ fi
 
 # GitHub Actions folds each test's output into a group.
 github=${GITHUB_ACTIONS:-}
-failed=()
+failed=() skipped=()
 for t in "${selected[@]}"; do
   [[ -n $github ]] && echo "::group::$t"
   dir=$(mktemp -d "$work/$t.XXXX")
@@ -412,7 +454,10 @@ for t in "${selected[@]}"; do
   )
   status=$?
   [[ -n $github ]] && echo "::endgroup::"
-  if (( status )); then
+  if (( status == 77 )); then
+    skipped+=("$t")
+    echo "skip $t"
+  elif (( status )); then
     failed+=("$t")
     if [[ -n $github ]]; then echo "::error::$t failed"; else echo "FAIL $t"; fi
   else
@@ -426,5 +471,6 @@ if (( ${#failed[@]} )); then
   echo "(their directories and the home are in $work)"
   exit 1
 fi
-echo "all ${#selected[@]} passed"
+passed=$(( ${#selected[@]} - ${#skipped[@]} ))
+echo "all $passed passed${skipped[0]+, ${#skipped[@]} skipped: ${skipped[*]}}"
 rm -rf "$work"
