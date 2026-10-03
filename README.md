@@ -33,7 +33,15 @@ clod --resume        # Claude Code with your own args (permission prompts stay o
 clod codex [args]    # Codex
 clod bash | zsh      # a shell
 clod env             # show the home, image, login, envrc and variables that would be used
+clod --force ...     # any of the above, from a directory clod otherwise refuses
 ```
+
+The current directory is mounted read-write as `/workspace`, so `clod` refuses
+to run from your home directory or any directory above it, from `~/.clod`, or
+from `~/.clod/homes` or anything under it: the agent could read your
+credentials and every home's login. `~/.clod/src`, `~/.clod/images/<name>` and
+`~/.clod/shared` are fine. `clod --force` runs anyway; `--force` must be the
+first argument, and later arguments go to the agent unchanged.
 
 The container's entire home directory is persisted on the host, by default in
 `~/.clod/homes/default`. Claude Code and Codex install themselves there on first
@@ -261,7 +269,9 @@ it is a convenience boundary, not a sandbox against a misbehaving agent:
 - Claude Code runs with `--dangerously-skip-permissions` (unless you choose a
   permission mode) and Codex with `--dangerously-bypass-approvals-and-sandbox`.
 - `claude` has passwordless sudo inside the container.
-- The workspace and the whole home are mounted read-write. Anything you keep in
+- The workspace and the whole home are mounted read-write. `clod` refuses
+  workspaces that would expose your host home or the clod homes unless run
+  with `--force`. Anything you keep in
   a home, such as SSH keys or API tokens, is available to the agent.
 - The container has normal outbound network access and can reach services on
   the host through `host.docker.internal`.
