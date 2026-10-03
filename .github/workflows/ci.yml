@@ -197,9 +197,11 @@ jobs:
       - name: Variants combine, each built on the one before
         run: |
           cd "$(mktemp -d)"
-          mkdir -p ~/.clod/images/first ~/.clod/images/second ~/.clod/images/fixed
+          mkdir -p ~/.clod/images/first ~/.clod/images/second ~/.clod/images/third ~/.clod/images/fixed
           printf 'ARG BASE=clod\nFROM $BASE\nRUN echo first > /tmp/order\n' > ~/.clod/images/first/Dockerfile
           printf 'ARG BASE=clod\nFROM $BASE\nRUN echo second >> /tmp/order\n' > ~/.clod/images/second/Dockerfile
+          # braces, and no default: it only ever goes on top of another
+          printf 'ARG BASE\nFROM ${BASE}\nRUN echo third >> /tmp/order\n' > ~/.clod/images/third/Dockerfile
           printf 'FROM clod\n' > ~/.clod/images/fixed/Dockerfile
           clod -i first+second env | grep -q '^image: *clod-first.second '
           clod -i first+second bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
@@ -211,18 +213,41 @@ jobs:
           set +e
           clod -i first+fixed env 2>&1 | grep -q "fixed can't go on top"; test "${PIPESTATUS[0]}" = 1 || exit 1
           clod -i first+nope env; test $? = 1 || exit 1
+          for name in first+ +first first++second; do
+            clod -i "$name" env 2>&1 | grep -q 'invalid image name'; test "${PIPESTATUS[0]}" = 1 || exit 1
+          done
+          clod default image first+nope; test $? = 1 || exit 1
           set -e
           clod -i fixed+first env | grep -q '^image: *clod-fixed.first '
+          clod -i first.second env | grep -q '^image: *clod-first.second '
+          # three: third is built on the combination clod-first.second
+          clod -i first+second+third bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond\nthird")"'
+          clod images | grep -q '^  first.second.third  *built'
+          clod default image first+second
+          clod env | grep -q '^image: *clod-first.second '
+          clod images | grep -q '^\* first.second  *built'
+          clod default image --reset
+          # a variant on a combination rebuilds when a variant in it changes
           clod new-image ontop first+second
           grep -q '^FROM clod-first.second$' ~/.clod/images/ontop/Dockerfile
           clod -i ontop bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
-      - name: rebuild replaces the image and prunes the old one
+          clod images | grep -q '^  ontop  *built'
+          echo 'RUN true' >> ~/.clod/images/second/Dockerfile
+          clod images | grep -q '^  ontop  *stale'
+          clod -i ontop bash -c true 2>&1 | tee out
+          grep -q 'building clod-first.second' out
+          grep -q 'building clod-ontop' out
+      - name: rebuild replaces every image in the chain and prunes the old ones
         run: |
-          before=$(docker image inspect -f '{{.Id}}' clod)
-          clod rebuild
-          after=$(docker image inspect -f '{{.Id}}' clod)
-          test "$before" != "$after"
-          if docker image inspect "$before" >/dev/null 2>&1; then exit 1; fi
+          cd "$(mktemp -d)"
+          before=() after=()
+          for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
+          clod -i first+second rebuild
+          for t in clod clod-first clod-first.second; do after+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
+          for i in 0 1 2; do
+            test "${before[i]}" != "${after[i]}"
+            if docker image inspect "${before[i]}" >/dev/null 2>&1; then exit 1; fi
+          done
 
   # Homebrew's docker on macOS has no buildx, so clod's builds there use the
   # classic builder; the base image, and a variant on top of another through
