@@ -52,13 +52,16 @@ ARG CLOD_GID=1000
 RUN groupadd -o -g $CLOD_GID claude \
     && useradd -l -m -o -u $CLOD_UID -g claude -s /bin/bash claude
 
+# A separate chmod rather than COPY --chmod, which needs BuildKit; Homebrew's
+# docker on macOS has no buildx, so it builds with the classic builder.
+COPY entrypoint.sh /usr/local/bin/clod-entrypoint
+RUN chmod 755 /usr/local/bin/clod-entrypoint
+
 USER claude
 ENV PATH="$PATH:/home/claude/.local/bin"
 ENV NPM_CONFIG_PREFIX=/home/claude/.local
 ENV CLAUDE_CONFIG_DIR=/home/claude/.claude
 ENV CODEX_HOME=/home/claude/.codex
-
-COPY --chmod=755 entrypoint.sh /usr/local/bin/clod-entrypoint
 
 WORKDIR /workspace
 ENTRYPOINT ["clod-entrypoint"]

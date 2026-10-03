@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude Code statusline for clod homes. Copy into ~/.clod/shared (see README).
+# Claude Code statusline for clod homes, part of the starter shared config.
 # `↑` = rolling total of uncached input + cache creation tokens (the tokens you actually pay premium for).
 # `↓` = rolling total of output tokens (as reported by Claude Code).
 # Cache reads are intentionally omitted from `↑` — they're cheap and mostly mirror the ◔ context meter.
