@@ -6,7 +6,7 @@
 # anything under ~/.clod/homes as /workspace, since the agent could then read
 # your credentials and every home's login.
 #
-# Launcher settings come from the command line (-i, -H, -c, -p) or else the
+# Launcher settings come from the command line (-i, -H, --creds, -P) or else the
 # calling shell's environment:
 #
 #   CLOD_HOME   container home: a name (~/.clod/homes/<name>) or, if it contains a
@@ -19,8 +19,8 @@
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
 #               (default), codex, bash or zsh
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
-#               space-separated: 8080 (the same on both sides) or host:container
-#               (an address first, as in docker run -p, publishes there instead)
+#               space-separated: 8080 (the same on both sides), host:container,
+#               or address:host:container to publish on another address
 #
 # The envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
@@ -97,10 +97,10 @@ Commands:
 Options (before the command):
   -i, --image NAME       image or variant to run            (CLOD_IMAGE)
   -H, --home NAME|PATH   container home                     (CLOD_HOME)
-  -c, --creds HOME       borrow another home's login        (CLOD_CREDS)
-  -p, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
-                           -p 5173       localhost:5173 -> container port 5173
-                           -p 3000:5173  localhost:3000 -> container port 5173
+      --creds HOME       borrow another home's login        (CLOD_CREDS)
+  -P, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
+                           -P 5173       localhost:5173 -> container port 5173
+                           -P 3000:5173  localhost:3000 -> container port 5173
   -f, --force            run from a directory clod otherwise refuses; replace
                          an existing clod (install) or shared config (new-shared)
       --skip-build       run the image as built, even if its files have changed
@@ -115,7 +115,7 @@ unchanged, options included.
 Examples:
   clod                     Claude Code
   clod -- --resume         Claude Code with its own arguments
-  clod -i go -p 5173       the go variant, with port 5173 published
+  clod -i go -P 5173       the go variant, with port 5173 published
   clod -H work codex       Codex in the "work" home
 USAGE
 }
@@ -130,13 +130,13 @@ force='' skip_build='' command='' dashdash=''
 opt_image='' opt_home='' opt_creds='' opt_ports=()
 while (( $# )); do
   case $1 in
-    -i|--image|-H|--home|-c|--creds|-p|--port)
+    -i|--image|-H|--home|--creds|-P|--port)
       [[ $# -ge 2 ]] || usage_error "$1 needs a value"
       case $1 in
         -i|--image) opt_image=$2 ;;
         -H|--home) opt_home=$2 ;;
-        -c|--creds) opt_creds=$2 ;;
-        -p|--port) opt_ports+=("$2") ;;
+        --creds) opt_creds=$2 ;;
+        -P|--port) opt_ports+=("$2") ;;
       esac
       shift 2
       ;;
@@ -152,6 +152,8 @@ while (( $# )); do
       exit 0
       ;;
     --) shift; dashdash=1; break ;;
+    # Claude Code's -p (print) and -c (continue), typed as if clod were claude.
+    -p|-c) usage_error "unknown option $1; for Claude Code's $1, use: clod claude $1 ..." ;;
     -*) usage_error "unknown option $1; a command's own options go after it, or after --" ;;
     *) break ;;
   esac
@@ -172,7 +174,7 @@ fi
 (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
 
 name_re='^[A-Za-z0-9_-]+$'
-port_re='^([0-9.]+:|\[[0-9a-fA-F:]+\]:)?([0-9]+:)?[0-9]+(/(tcp|udp))?$'
+port_re='^((([0-9.]+|\[[0-9a-fA-F:]+\]):)?[0-9]+:)?[0-9]+(/(tcp|udp))?$'
 
 # Prints path $1 with a leading $HOME shown as ~.
 tildify() {
@@ -302,7 +304,7 @@ if [[ $command == update ]]; then
   fi
   before=$(git -C "$script_dir" rev-parse HEAD)
   if ! git -C "$script_dir" pull --ff-only --quiet; then
-    echo "clod: couldn't fast-forward $(tildify "$script_dir"); update it with git there" >&2
+    echo "clod: git pull failed in $(tildify "$script_dir") (git's message is above); sort it out with git there" >&2
     exit 1
   fi
   after=$(git -C "$script_dir" rev-parse HEAD)
@@ -504,6 +506,11 @@ if [[ $image == *[[:space:]]* ]]; then
   echo "clod: invalid CLOD_IMAGE '$image'" >&2
   exit 1
 fi
+# clod-NAME, the tag a variant is built as, names variant NAME too.
+if [[ $image == clod-* ]]; then
+  find_variant "${image#clod-}"
+  [[ -n $REPLY ]] && image=${image#clod-}
+fi
 find_variant "$image"
 variant_dir=$REPLY
 if [[ -n $variant_dir ]]; then
@@ -521,7 +528,7 @@ shared_dir=$clod_dir/shared
 port_args=() container_ports=()
 for p in ${CLOD_PORTS//,/ }; do
   if [[ ! $p =~ $port_re ]]; then
-    echo "clod: invalid CLOD_PORTS entry '$p'" >&2
+    echo "clod: invalid port '$p' (use PORT, HOST:CONTAINER or ADDRESS:HOST:CONTAINER)" >&2
     exit 1
   fi
   case $p in
@@ -742,7 +749,20 @@ build_image() {
   build_if_changed "$tag" "$dir" "$hash" ${build_args[@]+"${build_args[@]}"}
 }
 
+# Exits with advice when Docker is missing or its daemon isn't running.
+need_docker() {
+  if ! command -v docker >/dev/null; then
+    echo "clod: docker isn't installed (see the README's quick start)" >&2
+    exit 1
+  fi
+  if ! docker version -f '{{.Server.Version}}' >/dev/null 2>&1; then
+    echo "clod: can't reach Docker; start it (colima start, or open Docker Desktop) and try again" >&2
+    exit 1
+  fi
+}
+
 if [[ -n $rebuild ]]; then
+  need_docker
   if [[ $tag != clod && -z $variant_dir ]]; then
     echo "clod: $tag is not a clod image or variant, so there is nothing to rebuild" >&2
     exit 1
@@ -752,12 +772,32 @@ if [[ -n $rebuild ]]; then
   exit 0
 fi
 
-workspace=$(pwd -P) host_home=$(realdir "$HOME") clod_real=$(realdir "$clod_dir")
-if [[ -z $force ]] && [[ $workspace == / || $host_home == "$workspace" || $host_home == "$workspace"/* ||
-      $workspace == "$clod_real" || $workspace == "$clod_real/homes" || $workspace == "$clod_real/homes"/* ]]; then
-  echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
-  exit 1
+host_home=$(realdir "$HOME") clod_real=$(realdir "$clod_dir")
+# True when directory $1 is /, your home directory or one above it, ~/.clod or
+# ~/.clod/homes: mounting it would show the agent your credentials and every
+# home's login.
+holds_secrets() {
+  local d
+  d=$(realdir "$1")
+  [[ $d == / || $host_home == "$d" || $host_home == "$d"/* ||
+     $d == "$clod_real" || $d == "$clod_real/homes" ]]
+}
+if [[ -z $force ]]; then
+  workspace=$(pwd -P)
+  if holds_secrets "$workspace" || [[ $workspace == "$clod_real/homes"/* ]]; then
+    echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
+    exit 1
+  fi
+  if holds_secrets "$home"; then
+    echo "clod: refusing to use $(tildify "$home") as the container's home: it holds your credentials or every home's login (clod --force to run anyway)" >&2
+    exit 1
+  fi
+  if [[ -n $creds ]] && holds_secrets "$creds_home"; then
+    echo "clod: refusing to borrow the login in $(tildify "$creds_home"): it isn't a clod home (clod --force to run anyway)" >&2
+    exit 1
+  fi
 fi
+need_docker
 
 mkdir -p "$home"
 

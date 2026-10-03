@@ -76,7 +76,7 @@ jobs:
         run: |
           cd "$(mktemp -d)"
           echo served > index.html
-          clod -p 8000 bash -c 'timeout 60 python3 -m http.server 8000 --bind 0.0.0.0' &
+          clod -P 8000 bash -c 'timeout 60 python3 -m http.server 8000 --bind 0.0.0.0' &
           for _ in $(seq 30); do
             curl -fs http://127.0.0.1:8000/index.html > out && break
             sleep 2
@@ -131,13 +131,18 @@ jobs:
       - name: Command line
         run: |
           cd "$(mktemp -d)"
+          set +e
+          clod -p 'a prompt'; test $? = 2 || exit 1
+          clod -H ~ bash -c true; test $? = 1 || exit 1
+          set -e
+          clod -i clod-python env | grep -q '^image: clod-python (.*images/python)'
           clod --help | grep -q '^Usage: clod'
           clod --version | grep -q '^clod '
           set +e
           clod --resume; test $? = 2 || exit 1
           clod 'a prompt'; test $? = 2 || exit 1
           set -e
-          clod -H other -i python -p 3000:8080 env | tee out
+          clod -H other -i python -P 3000:8080 env | tee out
           grep -q '^home:  other' out
           grep -q '^image: clod-python' out
           grep -q '127.0.0.1:3000:8080' out
@@ -155,6 +160,14 @@ jobs:
           after=$(docker image inspect -f '{{.Id}}' clod)
           test "$before" != "$after"
           if docker image inspect "$before" >/dev/null 2>&1; then exit 1; fi
+
+  # Homebrew's docker on macOS has no buildx, so clod's builds there use the
+  # classic builder; the base image must build without BuildKit.
+  classic-builder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: DOCKER_BUILDKIT=0 docker build -q -t clod-classic .
 
   variant:
     runs-on: ubuntu-latest

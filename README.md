@@ -2,9 +2,10 @@
 
 Run Claude Code or Codex with no permission prompts, safely. `clod` starts the
 agent in a throwaway Docker container that sees only the directory you run it
-from and a home of its own. Inside, it's unrestricted: it browses the web,
-installs packages and runs whatever tools it needs without stopping to ask,
-while the rest of your machine stays out of reach.
+from and a home of its own. Inside, it works without stopping to ask: it
+browses the web, runs whatever tools it needs and installs packages into its
+home (npm, uv, pip in a venv), while the rest of your machine stays out of
+reach.
 
 > **What the agent can reach:** your project directory, its own home with
 > whatever logins and keys you give it, and the network. Nothing else on your
@@ -23,7 +24,10 @@ colima start --cpu 4 --memory 8
 brew services start colima      # optional: start it at login
 ```
 
-Docker Desktop works too.
+Docker Desktop works too. Colima shares your home folder with the containers
+by default, so keep projects under it, or add other folders with
+`colima start --mount /path:w`. A project outside the shared folders appears
+as an empty `/workspace`.
 
 **Linux:** install Docker Engine with Docker's convenience script, then add
 yourself to the `docker` group and log in again:
@@ -33,7 +37,8 @@ curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 ```
 
-Check with `docker run --rm hello-world`. You also need git.
+Check with `docker run --rm hello-world`. You also need git; clod itself is a
+bash script and runs with the bash that macOS and Linux include.
 
 ### 2. Install clod
 
@@ -113,9 +118,9 @@ your machine's localhost, and the server must listen on all interfaces
 (`0.0.0.0`) inside the container:
 
 ```bash
-clod -p 5173                 # localhost:5173 -> port 5173 in the container
-clod -p 3000:5173            # localhost:3000 -> port 5173 in the container
-clod -p 5173 -p 8080         # several
+clod -P 5173                 # localhost:5173 -> port 5173 in the container
+clod -P 3000:5173            # localhost:3000 -> port 5173 in the container
+clod -P 5173 -P 8080         # several
 ```
 
 The container is removed when you exit; only the home and the workspace
@@ -143,6 +148,19 @@ Everything below is optional. It all lives under `~/.clod`:
   shared/             your shared config, mounted read-only as /etc/claude-code
 ```
 
+### Git and GitHub
+
+A new home has no git identity or GitHub login, so the agent's first commit
+fails until you set them up. Do it once per home, in a shell in the container;
+both persist in the home:
+
+```bash
+clod bash
+git config --global user.name "Your Name"
+git config --global user.email you@example.com
+gh auth login            # then: gh auth setup-git, so git pushes use it
+```
+
 ### Your own shared config
 
 Claude Code reads managed settings and a managed `CLAUDE.md` from
@@ -165,7 +183,8 @@ since that's what tells Claude about the container. Updates to the repo's
 `shared/` reach you only when you merge them in. Run `clod new-shared` again
 to compare: it lists the starter's files that yours is missing or differs on,
 with the `diff` command to see them, and `clod --force new-shared` replaces
-yours with the starter, keeping yours as a backup. Add your own instructions to its `CLAUDE.md`, and any other
+yours with the starter, keeping yours as a backup. Add your own instructions
+to its `CLAUDE.md`, and any other
 [managed settings](https://code.claude.com/docs/en/settings) to
 `managed-settings.json` or `managed-settings.d/*.json`. Managed settings take
 precedence over a home's own settings, so keep per-client config in the homes.
@@ -253,7 +272,7 @@ again when the login expires (about monthly).
 
 ```bash
 clod -H work                    # ~/.clod/homes/work, created on first use
-clod -H work-scratch -c work    # a scratch home borrowing work's login
+clod -H work-scratch --creds work  # a scratch home borrowing work's login
 clod homes                      # list the homes and which have logins
 ```
 
@@ -269,10 +288,10 @@ over the envrc, and the envrc over the config file:
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
 | `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory. |
-| `CLOD_IMAGE` | `-i`   | `clod`    | A variant name from `~/.clod/images/`, or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
-| `CLOD_CREDS` | `-c`   | unset     | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
+| `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod images` lists them), named `NAME` or `clod-NAME`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
+| `CLOD_CREDS` | `--creds` | unset  | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
-| `CLOD_PORTS` | `-p`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), or `host:container`. An entry that starts with an address, as in `docker run -p`, is published there instead. |
+| `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 
 In a direnv `.envrc`, `$PWD` is the `.envrc`'s directory, so
 `export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
@@ -284,7 +303,7 @@ gitignore it.
 `clod default` shows and sets your defaults, kept in `~/.clod/config`:
 
 ```bash
-clod default                    # show them all, and where each comes from
+clod default                    # show them all: yours, or built in
 clod default image go           # CLOD_IMAGE=go
 clod default command codex      # a bare clod runs Codex
 clod default home work          # CLOD_HOME=work
@@ -295,7 +314,8 @@ clod default image --reset      # back to the built-in default
 
 The keys are `image`, `command`, `home`, `creds` and `ports`. Values are
 checked when you set them, and a home or login path is stored as an absolute
-path.
+path. Your shell's settings and a project's envrc win over these defaults;
+`clod env` shows what a run will actually use.
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
@@ -330,7 +350,8 @@ PGHOST=host.docker.internal    # but reach the host's Postgres from the containe
 Values are evaluated on the host but used in the container, so write them for
 the container (`host.docker.internal`, not `localhost` or a host socket path).
 `PATH` is never passed in. Launcher settings (`CLOD_HOME`, `CLOD_IMAGE`,
-`CLOD_CREDS`) set by the envrc aren't passed in either; they act as defaults
+`CLOD_CREDS`, `CLOD_PORTS`, `CLOD_COMMAND`) set by the envrc aren't passed in
+either; they act as defaults
 for the launcher, and the same variable set in your shell wins. So a
 `.clod.envrc` can pick the home and image for a project whose `.envrc` you
 can't change. `--env-file` can't carry multi-line values, so variables holding
@@ -373,17 +394,14 @@ The images run without the script too, for docker options clod doesn't
 cover:
 
 ```bash
-docker run -it --rm -v ~/.clod/homes/default:/home/claude -v .:/workspace clod
+docker run -it --rm -v ~/.clod/homes/default:/home/claude -v .:/workspace \
+  -v ~/.clod/src/shared:/etc/claude-code:ro clod
 ```
+
+Use `~/.clod/shared` instead of `~/.clod/src/shared` once you have your own.
 
 On Linux, add `--add-host=host.docker.internal:host-gateway` to reach host
 services.
-
-## Requirements
-
-- macOS with Colima or Docker Desktop, or Linux with Docker Engine
-- Docker 23 or newer (BuildKit)
-- bash 3.2 or newer, and `shasum` or `sha1sum`, which macOS and Linux include
 
 ## What the agent can reach
 
@@ -402,10 +420,12 @@ without asking:
   `host.docker.internal`.
 
 Everything else on your machine is out of reach: your own home directory,
-other projects, host processes and system files. The container's system is
-discarded on exit, so whatever the agent installs or breaks there goes with
-it. `clod` refuses to mount your home directory, `~/.clod` or the homes as the
-project, unless run with `--force`.
+other projects, host processes and system files. In the container the agent
+runs as an ordinary user, `claude`, so the image's system files are out of its
+reach too, and anything it changes outside the home and project is discarded
+on exit. `clod` refuses to use your home directory, `~/.clod` or the homes
+directory as the project or as the container's home, unless run with
+`--force`.
 
 Claude Code installs on first run with
 `curl -fsSL https://claude.ai/install.sh | bash`, and Codex from npm.
