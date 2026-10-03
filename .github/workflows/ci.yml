@@ -145,7 +145,10 @@ jobs:
       matrix:
         include:
           - image: browser
-            check: dpkg -s libnss3 libgbm1 >/dev/null
+            check: >-
+              echo '<h1>clod</h1>' > /tmp/page.html &&
+              chromium --headless --screenshot=/tmp/shot.png --window-size=800,600 file:///tmp/page.html &&
+              test -s /tmp/shot.png
           - image: dotnet
             check: dotnet --version
           - image: go

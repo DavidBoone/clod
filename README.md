@@ -176,7 +176,7 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 
 | Variant   | Adds |
 |-----------|------|
-| `browser` | the system libraries Playwright's Chromium needs |
+| `browser` | Chromium, fonts, and the system libraries Playwright's browsers need |
 | `dotnet`  | .NET 10 SDK, from Microsoft's package repository |
 | `go`      | the latest Go release, as of when the image is built |
 | `lamp`    | PHP with common extensions, Composer, Apache and MariaDB |
