@@ -39,12 +39,13 @@ Check with `docker run --rm hello-world`. You also need git.
 
 ```bash
 git clone https://github.com/DavidBoone/clod.git ~/.clod/src
-mkdir -p ~/.local/bin
-ln -s ~/.clod/src/clod ~/.local/bin/clod
+~/.clod/src/clod install
 ```
 
-`~/.local/bin` must be on your `PATH`. On macOS it isn't by default; add
-`export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc` and open a new terminal.
+`install` links `clod` into the first of `~/.local/bin`, `~/bin`,
+`/opt/homebrew/bin` and `/usr/local/bin` that's on your `PATH` and writable,
+or else creates `~/.local/bin` and prints the line that adds it to your
+`PATH`. `clod install DIR` links it into a directory of your choice.
 
 ### 3. Run it
 
@@ -88,12 +89,8 @@ clod's options come before the command. Arguments after `--`, or after the
 `claude` or `codex` command, go to the agent unchanged: `clod -- --resume` and
 `clod claude --resume` are the same.
 
-To update clod, pull the repo. The next `clod` rebuilds the image if it
-changed.
-
-```bash
-git -C ~/.clod/src pull
-```
+To update clod, `clod update` pulls its checkout in `~/.clod/src`. The next
+`clod` rebuilds the image if it changed.
 
 An image is otherwise kept as built. To refresh its system packages, Node and
 whatever its variant downloads, rebuild it from scratch. When an image's files
@@ -101,7 +98,8 @@ have changed but you'd rather not wait for the build, `--skip-build` runs it
 as it is:
 
 ```bash
-clod --rebuild        # rebuild the image from scratch, then exit
+clod update           # update clod
+clod rebuild          # rebuild the image from scratch
 clod --skip-build     # run the image as built
 ```
 
@@ -187,13 +185,13 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 
 ```bash
 clod -i go             # run the go variant
-clod --default go      # run it from now on (--default alone shows the default)
+clod default go        # run it from now on (clod default alone shows the default)
 clod images            # list the base, the bundled variants and yours
 ```
 
 The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
 the base image changes. To pick up a newer Go or Rust, rebuild it with
-`clod -i go --rebuild`. Rebuilding the base makes every variant rebuild on its
+`clod -i go rebuild`. Rebuilding the base makes every variant rebuild on its
 next use.
 
 Your own variants go in `~/.clod/images/<name>/`, a directory holding a
