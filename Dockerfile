@@ -1,8 +1,7 @@
 FROM debian:trixie
 
-# Generic base for running Claude Code and Codex, with small everyday tools.
-# Heavier development tooling is in the bundled dev variant, and stacks go in
-# variants built FROM clod or clod-dev (see README). Layers are ordered rarely-changed
+# Generic base for running Claude Code and Codex, with everyday CLI tools.
+# Languages, compilers and browsers go in variants built FROM clod (see README). Layers are ordered rarely-changed
 # first. Apt lists are kept so variants can `apt-get install` without
 # re-running update.
 
@@ -35,7 +34,7 @@ RUN mkdir -p /etc/apt/keyrings \
 
 # CLI tools
 RUN apt-get install -y \
-       zsh direnv less tree file jq \
+       gh vim zsh direnv less tree file jq \
        ripgrep fd-find \
        psmisc procps rsync zip unzip \
        openssh-client dnsutils netcat-openbsd iputils-ping socat \

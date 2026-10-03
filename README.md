@@ -144,24 +144,24 @@ to `~/.claude/cache-turns.log`.
 
 ### Image variants
 
-The `clod` image is a generic base: Claude Code, Codex, git, Python, Node 26
-and small everyday CLI tools. A variant puts more on top. clod comes with
-these, in [`images/`](images):
+The `clod` image is a generic base: Claude Code, Codex, git, the GitHub CLI,
+Python, Node 26, vim and everyday CLI tools. A variant puts a language,
+compiler or browser on top. clod comes with these, in [`images/`](images):
 
-| Variant  | Built on | Adds |
-|----------|----------|------|
-| `dev`    | `clod`   | compilers and build tools, pip, the GitHub CLI, vim, Playwright's browser libraries |
-| `dotnet` | `dev`    | .NET 10 SDK, from Microsoft's package repository |
-| `go`     | `dev`    | the latest Go release, as of when the image is built |
-| `java`   | `dev`    | OpenJDK 25 and Maven |
-| `rust`   | `dev`    | Rust's stable toolchain, via rustup |
+| Variant   | Adds |
+|-----------|------|
+| `browser` | the system libraries Playwright's Chromium needs |
+| `dotnet`  | .NET 10 SDK, from Microsoft's package repository |
+| `go`      | the latest Go release, as of when the image is built |
+| `java`    | OpenJDK 25 and Maven |
+| `rust`    | Rust's stable toolchain, via rustup, and the C toolchain |
 
 ```bash
 CLOD_IMAGE=go clod
 ```
 
-The first run builds `clod-dev`, then `clod-go`; later runs reuse them until a
-`Dockerfile` or the image it is built on changes. To pick up a newer Go or Rust, remove the image
+The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
+the base image changes. To pick up a newer Go or Rust, remove the image
 (`docker rmi clod-go`) and the next run rebuilds it.
 
 Your own variants go in `~/.clod/images/<name>/`, a directory holding a
@@ -171,16 +171,20 @@ Your own variants go in `~/.clod/images/<name>/`, a directory holding a
 # ~/.clod/images/mine/Dockerfile
 FROM clod-go
 USER root
-RUN apt-get install -y postgresql-client
+RUN apt-get install -y postgresql-client build-essential
 USER claude
 ```
+
+`build-essential` is there for npm or pip packages that compile native code on
+install; most ship prebuilt binaries and don't need it.
 
 `CLOD_IMAGE=mine clod` builds `clod-go` if needed, then `clod-mine`, and
 rebuilds each whenever a file in its directory or the image it is `FROM`
 changes. A variant in `~/.clod/images` takes precedence over a bundled one of
-the same name, so copying one there is how to customise it. Apt lists are kept in the base, so variants can `apt-get install`
-without `apt-get update`. The directory is the build context, so `COPY` works
-for files beside the `Dockerfile`.
+the same name, so copying one there is how to customise it. Apt lists are kept
+in the base, so variants can `apt-get install` without `apt-get update`. The
+directory is the build context, so `COPY` works for files beside the
+`Dockerfile`.
 
 Images are never pulled at launch, so `CLOD_IMAGE` must name a variant or an
 image already built locally.
