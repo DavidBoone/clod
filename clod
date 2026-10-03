@@ -7,11 +7,13 @@
 #   clod zsh [args]        zsh
 #   clod env               show the home, image, envrc and variables that would be passed in
 #   clod --force ...       any of the above, from a directory clod otherwise refuses
+#   clod --rebuild         rebuild the image and the images it builds on from scratch
+#   clod --default <image> make <image> the default CLOD_IMAGE (--default alone shows it)
 #
 # clod refuses to mount your home directory, a directory above it, ~/.clod or
 # anything under ~/.clod/homes as /workspace, since the agent could then read
-# your credentials and every home's login. --force must come first; later
-# arguments go to the agent unchanged.
+# your credentials and every home's login. Options must come before the
+# command; later arguments go to the agent unchanged.
 #
 # Launcher settings come from the calling shell's environment:
 #
@@ -22,8 +24,12 @@
 #               clod-<name>, or any local docker image
 #   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME);
 #               unset = the home keeps its own
+#   CLOD_PORTS  container ports to publish on the host's 127.0.0.1, comma- or
+#               space-separated: 8080 or host:container (an address first, as
+#               in docker run -p, publishes there instead)
 #
-# The envrc (below) can set these too, as defaults for the shell's.
+# The envrc (below) can set these too, as defaults for the shell's, and
+# ~/.clod/config (NAME=value lines, written by --default) as defaults for both.
 #
 # The clod image is built from this script's directory, and a variant from its
 # directory, whenever their files (or, for a variant, the image it is FROM)
@@ -34,7 +40,8 @@
 # starter set in this script's shared/ directory is mounted instead.
 #
 # Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
-# hold the home label, image tag and login source this run resolved to.
+# hold the home label, image tag and login source this run resolved to, and
+# CLOD_PORTS the published container ports.
 #
 # On a Linux host the clod image's claude user is built with the host user's
 # uid and gid, and host.docker.internal is mapped to the host.
@@ -48,11 +55,23 @@
 
 # Written for bash 3.2, the /bin/bash macOS ships.
 
-force=
-if [[ $1 == --force ]]; then
-  force=1
-  shift
-fi
+force='' rebuild='' set_default='' show_default=''
+while :; do
+  case $1 in
+    --force) force=1; shift ;;
+    --rebuild) rebuild=1; shift ;;
+    --default)
+      if [[ -n $2 && $2 != -* ]]; then
+        set_default=$2
+        shift 2
+      else
+        show_default=1
+        shift
+      fi
+      ;;
+    *) break ;;
+  esac
+done
 
 name_re='^[A-Za-z0-9_-]+$'
 
@@ -116,6 +135,7 @@ envrc_vars() {
   [[ -n $XDG_DATA_HOME ]] && clean+=(XDG_DATA_HOME="$XDG_DATA_HOME")
   base=$("${clean[@]}" awk "$dump")
   if [[ $1 == */.clod.envrc ]]; then
+    # shellcheck disable=SC2016 # the script expands its own arguments
     out=$("${clean[@]}" bash -c '
       command -v direnv >/dev/null && eval "$(direnv stdlib)"
       cd "${1%/*}" || exit
@@ -150,7 +170,7 @@ fi
 container_vars=()
 for v in ${vars[@]+"${vars[@]}"}; do
   case $v in
-    CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*)
+    CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*)
       name=${v%%=*}
       [[ -n ${!name} ]] || printf -v "$name" '%s' "${v#*=}"
       ;;
@@ -160,6 +180,19 @@ done
 vars=(${container_vars[@]+"${container_vars[@]}"})
 
 clod_dir=$HOME/.clod
+config=$clod_dir/config
+# ~/.clod/config holds launcher settings as NAME=value lines, defaults for both
+# the shell's and the envrc's.
+if [[ -f $config ]]; then
+  while IFS= read -r line || [[ -n $line ]]; do
+    case $line in
+      CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*)
+        name=${line%%=*}
+        [[ -n ${!name} ]] || printf -v "$name" '%s' "${line#*=}"
+        ;;
+    esac
+  done < "$config"
+fi
 command -v shasum >/dev/null && sum=shasum || sum=sha1sum
 
 # Docker Engine on Linux keeps bind-mount ownership as is, so claude gets the
@@ -232,6 +265,27 @@ find_variant() {
   done
 }
 
+if [[ -n $show_default ]]; then
+  current=$(sed -n 's/^CLOD_IMAGE=//p' "$config" 2>/dev/null | tail -1)
+  echo "default image: ${current:-clod}"
+  exit 0
+fi
+if [[ -n $set_default ]]; then
+  find_variant "$set_default"
+  if [[ -z $REPLY && $set_default != clod ]] && ! docker image inspect "$set_default" >/dev/null 2>&1; then
+    echo "clod: no variant or local image named '$set_default'" >&2
+    exit 1
+  fi
+  mkdir -p "$clod_dir"
+  rest=$(grep -v '^CLOD_IMAGE=' "$config" 2>/dev/null)
+  {
+    if [[ -n $rest ]]; then printf '%s\n' "$rest"; fi
+    if [[ $set_default != clod ]]; then echo "CLOD_IMAGE=$set_default"; fi
+  } > "$config.tmp" && mv "$config.tmp" "$config"
+  echo "default image: $set_default"
+  exit 0
+fi
+
 find_variant "$image"
 variant_dir=$REPLY
 if [[ -n $variant_dir ]]; then
@@ -243,6 +297,22 @@ fi
 shared_dir=$clod_dir/shared
 [[ -d $shared_dir ]] || shared_dir=$script_dir/shared
 [[ -d $shared_dir ]] || shared_dir=
+
+# Publishes each CLOD_PORTS entry on the host's 127.0.0.1 unless it names an
+# address, and collects the container ports for the container's CLOD_PORTS.
+port_args=() container_ports=()
+for p in ${CLOD_PORTS//,/ }; do
+  if [[ ! $p =~ ^([0-9.]+:|\[[0-9a-fA-F:]+\]:)?([0-9]+:)?[0-9]+(/(tcp|udp))?$ ]]; then
+    echo "clod: invalid CLOD_PORTS entry '$p'" >&2
+    exit 1
+  fi
+  case $p in
+    *.*:*|\[*) port_args+=(-p "$p") ;;
+    *:*) port_args+=(-p "127.0.0.1:$p") ;;
+    *) port_args+=(-p "127.0.0.1:$p:$p") ;;
+  esac
+  container_ports+=("${p##*:}")
+done
 
 tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
 tz=${tz##*zoneinfo/}
@@ -264,28 +334,30 @@ if [[ $1 == env ]]; then
   [[ -n $envrc ]] && echo "envrc: $(tildify "$envrc")"
   [[ $OSTYPE == linux* ]] && echo "user:  claude as $(id -u):$(id -g)"
   [[ -n $shared_dir ]] && echo "shared: $(tildify "$shared_dir")"
+  (( ${#port_args[@]} )) && echo "ports: ${port_args[*]}"
+  [[ -f $config ]] && echo "config: $(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
   exit 0
 fi
 
-workspace=$(pwd -P) host_home=$(realdir "$HOME") clod_real=$(realdir "$clod_dir")
-if [[ -z $force ]] && [[ $workspace == / || $host_home == "$workspace" || $host_home == "$workspace"/* ||
-      $workspace == "$clod_real" || $workspace == "$clod_real/homes" || $workspace == "$clod_real/homes"/* ]]; then
-  echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
-  exit 1
-fi
-
-mkdir -p "$home"
 # Builds $1 from directory $2, with any further docker build arguments, unless
-# the image is already labelled with hash $3.
+# the image is already labelled with hash $3. With --rebuild it always builds,
+# without the layer cache.
+built=
 build_if_changed() {
-  [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$3" ]] && return
+  local no_cache=()
+  if [[ -n $rebuild ]]; then
+    no_cache=(--no-cache)
+  else
+    [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$3" ]] && return
+  fi
   echo "clod: building $1..." >&2
-  docker build -t "$1" --label "clod.hash=$3" "${@:4}" "$2" || exit 1
+  docker build -t "$1" --label "clod.hash=$3" ${no_cache[@]+"${no_cache[@]}"} "${@:4}" "$2" || exit 1
+  built=1
 }
 
 files_hash() {
-  (cd "$1" && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 $sum) | $sum | cut -d' ' -f1
+  (cd "$1" && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 "$sum") | $sum | cut -d' ' -f1
 }
 
 # Builds clod or clod-<variant> $1, first building the clod image it is FROM.
@@ -304,6 +376,7 @@ build_image() {
     dir=$base_dir
     hash=$( { cat "$dir/Dockerfile" "$dir/entrypoint.sh"; printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1)
     build_args=(${base_args[@]+"${base_args[@]}"})
+    [[ -n $rebuild ]] && build_args+=(--pull)
   else
     find_variant "${tag#clod-}"
     dir=$REPLY
@@ -319,6 +392,25 @@ build_image() {
   build_if_changed "$tag" "$dir" "$hash" ${build_args[@]+"${build_args[@]}"}
 }
 
+if [[ -n $rebuild ]]; then
+  if [[ $tag != clod && -z $variant_dir ]]; then
+    echo "clod: $tag is not a clod image or variant, so there is nothing to rebuild" >&2
+    exit 1
+  fi
+  build_image "$tag"
+  docker image prune -f --filter label=clod.hash >/dev/null
+  exit 0
+fi
+
+workspace=$(pwd -P) host_home=$(realdir "$HOME") clod_real=$(realdir "$clod_dir")
+if [[ -z $force ]] && [[ $workspace == / || $host_home == "$workspace" || $host_home == "$workspace"/* ||
+      $workspace == "$clod_real" || $workspace == "$clod_real/homes" || $workspace == "$clod_real/homes"/* ]]; then
+  echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
+  exit 1
+fi
+
+mkdir -p "$home"
+
 if [[ $tag == clod || -n $variant_dir ]]; then
   build_image "$tag"
 elif ! docker image inspect "$tag" >/dev/null 2>&1; then
@@ -328,6 +420,8 @@ elif ! docker image inspect "$tag" >/dev/null 2>&1; then
   echo "clod: no variant or local image named '$image'${variants:+ (variants: ${variants% })}" >&2
   exit 1
 fi
+# Images replaced by a build are left untagged; remove them.
+[[ -n $built ]] && docker image prune -f --filter label=clod.hash >/dev/null
 
 # Docker creates a missing mount target as root, which on a Linux host leaves
 # the home's .claude unwritable for claude, so the borrowed login's target is
@@ -341,6 +435,9 @@ echo "clod · $home_label · $tag · ${#vars[@]} vars" >&2
 args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
 [[ -n $creds ]] && args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
 [[ -n $tz ]] && args+=(-e "TZ=$tz")
+if (( ${#port_args[@]} )); then
+  args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
+fi
 [[ -n $shared_dir ]] && args+=(-v "$shared_dir:/etc/claude-code:ro")
 # Docker Engine on Linux has no built-in host.docker.internal.
 [[ $OSTYPE == linux* ]] && args+=(--add-host=host.docker.internal:host-gateway)

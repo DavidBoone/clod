@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "0 6 * * 1"   # weekly, to catch upstream changes (Debian, NodeSource, vendor repos)
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck clod entrypoint.sh shared/statusline.sh
+
+  # Builds the base image through the launcher, as a Linux user would, and
+  # checks the container's user, mounts and tools.
+  base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clod
+        run: |
+          mkdir -p ~/.local/bin
+          ln -s "$GITHUB_WORKSPACE/clod" ~/.local/bin/clod
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: clod env
+        run: cd "$(mktemp -d)" && clod env
+      - name: Run a command in the container
+        run: |
+          cd "$(mktemp -d)"
+          echo hello > from-host
+          # shellcheck disable=SC2016 # the quoted script expands in the container
+          clod bash -c '
+            set -e
+            test "$(id -u)" = "'"$(id -u)"'"
+            test "$(cat /workspace/from-host)" = hello
+            test -f /etc/claude-code/managed-settings.json
+            touch /workspace/from-container
+            git --version; gh --version | head -1; node --version; python3 --version; jq --version
+          '
+          test "$(stat -c %u from-container)" = "$(id -u)"
+      - name: Refuses the home directory
+        run: |
+          cd ~
+          if clod bash -c true; then exit 1; fi
+      - name: Claude Code installs into the home and starts
+        run: |
+          cd "$(mktemp -d)"
+          clod --version | tee out
+          grep -q 'Claude Code' out
+          # a symlink into the container's paths, so dangling on the runner
+          test -L ~/.clod/homes/default/.local/bin/claude
+      - name: Codex installs into the home and starts
+        run: |
+          cd "$(mktemp -d)"
+          clod codex --version | tee out
+          grep -qi codex out
+      - name: Statusline renders
+        run: |
+          cd "$(mktemp -d)"
+          echo '{"model":{"display_name":"Opus"},"effort":{"level":"high"},"session_id":"ci","prompt_id":"p1",
+                 "context_window":{"total_input_tokens":48200,"total_output_tokens":12100,"used_percentage":42,
+                   "current_usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},
+                 "cost":{"total_lines_added":120,"total_lines_removed":35},
+                 "rate_limits":{"five_hour":{"used_percentage":12}}}' > input.json
+          clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+            sed 's/\x1b\[[0-9;]*m//g' | tee out
+          grep -q 'default@clod' out
+          grep -q 'Opus' out
+          grep -q '42%' out
+      - name: CLOD_PORTS publishes a server's port on localhost
+        run: |
+          cd "$(mktemp -d)"
+          echo served > index.html
+          CLOD_PORTS=8000 clod bash -c 'timeout 60 python3 -m http.server 8000 --bind 0.0.0.0' &
+          for _ in $(seq 30); do
+            curl -fs http://127.0.0.1:8000/index.html > out && break
+            sleep 2
+          done
+          grep -q served out
+          kill %1 2>/dev/null || true
+      - name: .clod.envrc variables and launcher settings
+        run: |
+          cd "$(mktemp -d)"
+          printf 'FOO=bar\nMULTI="a\nb"\nCLOD_HOME=from-envrc\n' > .clod.envrc
+          clod env 2>&1 | tee out
+          grep -q '^FOO=bar$' out
+          grep -q 'skipping multi-line variable MULTI' out
+          grep -q '^home:  from-envrc' out
+          # shellcheck disable=SC2016 # the quoted script expands in the container
+          clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc'
+      - name: CLOD_CREDS borrows another home's login
+        run: |
+          mkdir -p ~/.clod/homes/owner/.claude
+          echo '{"token":"ci"}' > ~/.clod/homes/owner/.claude/.credentials.json
+          cd "$(mktemp -d)"
+          CLOD_HOME=borrower CLOD_CREDS=owner clod bash -c 'cat ~/.claude/.credentials.json; touch ~/.claude/written' | tee out
+          grep -q '"ci"' out
+          test "$(stat -c %u ~/.clod/homes/borrower/.claude)" = "$(id -u)"
+      - name: --default sets and resets the default image
+        run: |
+          cd "$(mktemp -d)"
+          if clod --default no-such-image; then exit 1; fi
+          clod --default python
+          clod --default | grep -q 'default image: python'
+          clod env | grep -q '^image: clod-python'
+          clod --default clod
+          clod env | grep -q '^image: clod$'
+      - name: --rebuild replaces the image and prunes the old one
+        run: |
+          before=$(docker image inspect -f '{{.Id}}' clod)
+          clod --rebuild
+          after=$(docker image inspect -f '{{.Id}}' clod)
+          test "$before" != "$after"
+          if docker image inspect "$before" >/dev/null 2>&1; then exit 1; fi
+
+  variant:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: browser
+            check: dpkg -s libnss3 libgbm1 >/dev/null
+          - image: dotnet
+            check: dotnet --version
+          - image: go
+            check: go version
+          - image: lamp
+            check: php -v && composer --version && apache2 -v && mariadb --version
+          - image: python
+            check: uv --version && gcc --version | head -1 && python3-config --includes
+          - image: rust
+            check: cargo new -q /tmp/hello && cd /tmp/hello && cargo run -q
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clod
+        run: |
+          mkdir -p ~/.local/bin
+          ln -s "$GITHUB_WORKSPACE/clod" ~/.local/bin/clod
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build and check ${{ matrix.image }}
+        env:
+          CLOD_IMAGE: ${{ matrix.image }}
+        run: cd "$(mktemp -d)" && clod bash -c 'set -e; ${{ matrix.check }}'
