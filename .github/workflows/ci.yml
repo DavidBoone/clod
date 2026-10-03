@@ -146,7 +146,7 @@ jobs:
         include:
           - image: browser
             check: >-
-              echo '<h1>clod</h1>' > /tmp/page.html &&
+              echo "<h1>clod</h1>" > /tmp/page.html &&
               chromium --headless --screenshot=/tmp/shot.png --window-size=800,600 file:///tmp/page.html &&
               test -s /tmp/shot.png &&
               test -s /etc/clod/.claude/rules/browser.md
