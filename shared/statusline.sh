@@ -16,9 +16,10 @@
 # Subscription sessions use a 1-hour cache TTL (refreshed every request), so the
 # idle timer (⏱) turns into a red 💤 at 60 min.
 #
-# Every detected turn is appended to cache-turns.log in the Claude config dir
-# (ts, session, idle-gap-before-turn, cache_read, cache_created) to build an
-# empirical picture of when misses actually happen vs idle time.
+# If cache-turns.log exists in the Claude config dir, every detected turn is
+# appended to it (ts, session, idle-gap-before-turn, cache_read, cache_created)
+# to build an empirical picture of when misses actually happen vs idle time.
+# Create the file to start logging; delete it to stop.
 #
 # Since cache_creation_input_tokens is only reported per-turn (no rolling total),
 # we accumulate it ourselves in a per-session state file, using total_output_tokens
@@ -50,7 +51,6 @@ state_dir="${TMPDIR:-/tmp}/claude-statusline"
 mkdir -p "$state_dir"
 state_file="$state_dir/$session_id"
 turn_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/cache-turns.log"
-mkdir -p "${turn_log%/*}"
 
 # ANSI helpers (statusline renders escape codes). Basic/bright 16 colors only:
 # truecolor gets approximated by the statusline renderer.
@@ -123,7 +123,9 @@ if [ "$total_out" != "$prev_out" ]; then
             miss_kind="partial"
         fi
 
-        echo "$(date -d "@$now" '+%F %T') $session_id idle=${idle_gap}s read=$cache_read created=$cache_create" >> "$turn_log"
+        if [ -f "$turn_log" ]; then
+            echo "$(date -d "@$now" '+%F %T') $session_id idle=${idle_gap}s read=$cache_read created=$cache_create" >> "$turn_log"
+        fi
     fi
 
     echo "$total_out $cum_cache $last_activity $last_miss $miss_ts $miss_prompt $miss_kind $cache_read $cache_create" > "$state_file"

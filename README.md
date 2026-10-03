@@ -191,8 +191,9 @@ precedence over a home's own settings, so keep per-client config in the homes.
 
 Changes to `statusline.sh` show up on its next refresh. To turn it off, remove
 `statusLine` from `managed-settings.json`; homes can then set their own in
-`~/.claude/settings.json`. The script logs each turn's cache reads and writes
-to `~/.claude/cache-turns.log`.
+`~/.claude/settings.json`. To log each turn's cache reads and writes, create
+`~/.claude/cache-turns.log` in a home (`touch`); the script appends to it
+while it exists.
 
 ### Image variants
 
