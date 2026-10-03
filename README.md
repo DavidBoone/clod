@@ -88,8 +88,9 @@ clod's options come before the command. Arguments after `--`, or after the
 `claude` or `codex` command, go to the agent unchanged: `clod -- --resume` and
 `clod claude --resume` are the same.
 
-To update clod, `clod update` pulls its checkout in `~/.clod/src`. The next
-`clod` rebuilds the image if it changed.
+To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
+what changed, one line per change. The next `clod` rebuilds the image if it
+changed.
 
 An image is otherwise kept as built. To refresh its system packages, Node and
 whatever its variant downloads, rebuild it from scratch. When an image's files
