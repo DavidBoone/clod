@@ -28,8 +28,9 @@
 # images/ directory, whenever their files (or, for a variant, the image it is
 # FROM) change. A variant can build on another as FROM clod-<name>.
 #
-# ~/.clod/shared, if present, is mounted read-only as /etc/claude-code, where
-# Claude Code reads managed settings and CLAUDE.md for every home.
+# ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
+# reads managed settings and CLAUDE.md for every home. Until you create it, the
+# starter set in this script's shared/ directory is mounted instead.
 #
 # Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
 # hold the home label, image tag and login source this run resolved to.
@@ -219,8 +220,12 @@ while [[ -L $script ]]; do
     *) script=$(dirname "$script")/$link ;;
   esac
 done
-base_dir=$(cd "$(dirname "$script")" && pwd -P)
+script_dir=$(cd "$(dirname "$script")" && pwd -P)
+base_dir=$script_dir
 [[ -f $base_dir/Dockerfile ]] || base_dir=
+shared_dir=$clod_dir/shared
+[[ -d $shared_dir ]] || shared_dir=$script_dir/shared
+[[ -d $shared_dir ]] || shared_dir=
 
 tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
 tz=${tz##*zoneinfo/}
@@ -241,7 +246,7 @@ if [[ $1 == env ]]; then
   echo "tz:    ${tz:-UTC}"
   [[ -n $envrc ]] && echo "envrc: $(tildify "$envrc")"
   [[ $OSTYPE == linux* ]] && echo "user:  claude as $(id -u):$(id -g)"
-  [[ -d $clod_dir/shared ]] && echo "shared: $(tildify "$clod_dir")/shared"
+  [[ -n $shared_dir ]] && echo "shared: $(tildify "$shared_dir")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
   exit 0
 fi
@@ -309,7 +314,7 @@ echo "clod · $home_label · $tag · ${#vars[@]} vars" >&2
 args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
 [[ -n $creds ]] && args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
 [[ -n $tz ]] && args+=(-e "TZ=$tz")
-[[ -d $clod_dir/shared ]] && args+=(-v "$clod_dir/shared:/etc/claude-code:ro")
+[[ -n $shared_dir ]] && args+=(-v "$shared_dir:/etc/claude-code:ro")
 # Docker Engine on Linux has no built-in host.docker.internal.
 [[ $OSTYPE == linux* ]] && args+=(--add-host=host.docker.internal:host-gateway)
 [[ -t 0 && -t 1 ]] && args+=(-t)

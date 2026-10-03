@@ -1,102 +1,145 @@
 # clod
 
-A Docker image for running Claude Code or Codex CLI in an ephemeral container,
-and `clod`, a launcher script that builds it and runs it on the current
-directory. Claude Code is the default.
+Run Claude Code or Codex in a throwaway Docker container, on whatever directory
+you're in. `clod` builds the image, mounts your project and a persistent home,
+and starts Claude Code with its permission prompts off, so it can work without
+asking at every step while staying out of the rest of your machine.
 
 > **The container is not a sandbox.** Both agents run with their permission
-> prompts disabled, and the agent can read and write everything in the mounted home and workspace and reach the
-> network. See [Security](#security).
+> prompts disabled, and the agent can read and write everything in the mounted
+> home and workspace and reach the network. See [Security](#security).
 
-## Requirements
+## Quick start
 
-- macOS with [Colima](https://github.com/abiosoft/colima) or Docker Desktop, or
-  Linux with Docker Engine (rootful; rootless Docker and Podman are untested)
-- Docker 23 or newer (BuildKit)
-- bash 3.2 or newer (the `/bin/bash` macOS ships is fine), and `shasum` or `sha1sum`
+### 1. Get Docker running
 
-## Usage
+**macOS:** [Colima](https://github.com/abiosoft/colima) is a lightweight Docker
+runtime from Homebrew:
 
-Clone this repo and symlink the [`clod`](clod) script onto your `PATH`:
+```bash
+brew install colima docker
+colima start --cpu 4 --memory 8
+brew services start colima      # optional: start it at login
+```
+
+Docker Desktop works too.
+
+**Linux:** install Docker Engine with Docker's convenience script, then add
+yourself to the `docker` group and log in again:
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+```
+
+Check with `docker run --rm hello-world`. You also need git.
+
+### 2. Install clod
 
 ```bash
 git clone https://github.com/DavidBoone/clod.git ~/.clod/src
+mkdir -p ~/.local/bin
 ln -s ~/.clod/src/clod ~/.local/bin/clod
 ```
 
-To update clod, pull the repo; the next `clod` rebuilds the image if
-`Dockerfile` or `entrypoint.sh` changed. Claude Code and Codex update
-themselves.
+`~/.local/bin` must be on your `PATH`. On macOS it isn't by default; add
+`export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc` and open a new terminal.
+
+### 3. Run it
+
+```bash
+cd ~/code/some-project
+clod
+```
+
+The first run builds the image, which takes a few minutes, and installs Claude
+Code into the container's home. Claude Code then asks you to `/login`: open the
+printed URL in your browser and paste the code back. Both happen once.
+
+That's the whole setup. Every `clod` from here on starts in seconds with:
+
+- your project mounted read-write at `/workspace`
+- a home that persists between runs (`~/.clod/homes/default`), holding the
+  login, settings, history and Claude Code itself, which updates itself
+- Claude Code running with `--dangerously-skip-permissions`
+- a statusline showing the home, image, model, tokens, context use, cache idle
+  time and rate limits:
+  ```
+  ⌂ default@clod  ✦ Opus ⚡high  ↑48.2k ↓12.1k  +120/-35  ◔ ▰▰▰▱▱ 42%  ⏱ 3:07  5h ▰▱▱▱▱ 12%/40%
+  ```
+- instructions telling Claude about the container: what's mounted where and
+  what persists
+
+## Everyday use
+
+```bash
+clod                 # Claude Code
+clod --resume        # Claude Code with your own args (permission prompts stay off)
+clod codex [args]    # Codex
+clod bash | zsh      # a shell in the container
+clod env             # show the home, image, login, envrc and variables that would be used
+```
+
+To update clod, pull the repo. The next `clod` rebuilds the image if it
+changed.
 
 ```bash
 git -C ~/.clod/src pull
 ```
 
-Then from any project directory:
+The container is removed when you exit; only the home and the workspace
+persist.
 
-```bash
-clod                 # Claude Code, with --dangerously-skip-permissions
-clod --resume        # Claude Code with your own args (permission prompts stay off)
-clod codex [args]    # Codex
-clod bash | zsh      # a shell
-clod env             # show the home, image, login, envrc and variables that would be used
-clod --force ...     # any of the above, from a directory clod otherwise refuses
-```
-
-The current directory is mounted read-write as `/workspace`, so `clod` refuses
-to run from your home directory or any directory above it, from `~/.clod`, or
-from `~/.clod/homes` or anything under it: the agent could read your
-credentials and every home's login. `~/.clod/src`, `~/.clod/images/<name>` and
-`~/.clod/shared` are fine. `clod --force` runs anyway; `--force` must be the
-first argument, and later arguments go to the agent unchanged.
-
-The container's entire home directory is persisted on the host, by default in
-`~/.clod/homes/default`. Claude Code and Codex install themselves there on first
-run and keep their config and updates there. On the first run Claude Code asks
-you to `/login`; open the printed URL in your host browser.
-
-A fresh home skips Claude Code's first-run prompts (onboarding, folder trust,
-bypass-permissions warning); the entrypoint seeds `.claude.json` and
-`settings.json` when they are missing.
+`clod` refuses to run from your home directory or any directory above it, from
+`~/.clod`, or from `~/.clod/homes` or anything under it, since the agent could
+then read your credentials and every home's login. `clod --force` runs anyway;
+`--force` must be the first argument, and later arguments go to the agent
+unchanged.
 
 Claude Code runs with `--dangerously-skip-permissions` unless its arguments
 include `--permission-mode`, `--dangerously-skip-permissions` or
 `--allow-dangerously-skip-permissions`, so `clod --permission-mode plan` brings
-the prompts back. Without a terminal (`clod -p "..." | ...`) the container runs
-without a TTY.
+the prompts back. `clod -p "..." | ...` works without a terminal.
 
-The launcher builds the `clod` image itself from the script's directory (follow
-the symlink back to this repo), and rebuilds it when `Dockerfile` or
-`entrypoint.sh` change.
+## Going further
+
+Everything below is optional. It all lives under `~/.clod`:
 
 ```
 ~/.clod/
+  src/                this repo
   homes/<name>/       container homes
   images/<name>/      image variants
-  shared/             mounted read-only as /etc/claude-code in every container
+  shared/             your shared config, mounted read-only as /etc/claude-code
 ```
 
-### Homes, images and logins
+### Your own shared config
 
-The launcher reads these from your shell environment, for a one-off
-(`CLOD_HOME=work clod`) or per project via a host-side direnv `.envrc`
-(`export CLOD_IMAGE=dotnet`):
+Claude Code reads managed settings and a managed `CLAUDE.md` from
+`/etc/claude-code`, for every home. Until `~/.clod/shared` exists, clod mounts
+this repo's [`shared/`](shared) there, which updates with `git pull`:
 
-| Variable     | Default                    | Meaning |
-|--------------|----------------------------|---------|
-| `CLOD_HOME`  | `default`                  | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory. |
-| `CLOD_IMAGE` | `clod`                     | A variant name from `~/.clod/images/`, or any docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
-| `CLOD_CREDS` | unset                      | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
+- `CLAUDE.md` tells Claude about the clod container.
+- `statusline.sh` is the statusline.
+- `managed-settings.json` turns that statusline on.
 
-In a direnv `.envrc`, `$PWD` is the `.envrc`'s directory, so
-`export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside
-the project directory is also visible under `/workspace`, login included, so
-gitignore it.
+To customise them, copy them out and edit your copy:
 
-Inside the container the same variables hold what the launch resolved to:
-`CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
-tag (`clod`, `clod-<variant>`), and `CLOD_CREDS`, set only when a login is
-borrowed, the home it came from.
+```bash
+cp -R ~/.clod/src/shared ~/.clod/shared
+```
+
+From then on clod mounts `~/.clod/shared`, and updates to the repo's `shared/`
+reach you only when you merge them in (`diff -r ~/.clod/src/shared
+~/.clod/shared`). Add your own instructions to its `CLAUDE.md`, and any other
+[managed settings](https://code.claude.com/docs/en/settings) to
+`managed-settings.json` or `managed-settings.d/*.json`. Managed settings take
+precedence over a home's own settings, so keep per-client config in the homes.
+
+Changes to `statusline.sh` show up on its next refresh. To turn it off, remove
+`statusLine` from `managed-settings.json`; homes can then set their own in
+`~/.claude/settings.json`. The script logs each turn's cache reads and writes
+to `~/.claude/cache-turns.log`.
 
 ### Image variants
 
@@ -122,80 +165,40 @@ for files beside the `Dockerfile`.
 Images are never pulled at launch, so `CLOD_IMAGE` must name a variant or an
 image already built locally.
 
-### Logins
+### Homes and logins
 
 Each home holds its own Claude login (`~/.claude/.credentials.json`), and that
 file also stores the OAuth tokens of MCP servers logged into from the home. Use
 one home per client or context to keep those apart: `/login` once in each, and
 again when the login expires (about monthly).
 
-For a scratch home, borrow an existing login instead of logging in again:
-
 ```bash
-CLOD_HOME=work-scratch CLOD_CREDS=work clod
+CLOD_HOME=work clod                          # ~/.clod/homes/work
+CLOD_HOME=work-scratch CLOD_CREDS=work clod  # a scratch home borrowing work's login
 ```
 
-The owner's credentials file is mounted live, so token refreshes from either
-home reach both. A copy would not work: refresh tokens rotate, so a copied
-login goes stale at the next refresh.
+A borrowed login's credentials file is mounted live, so token refreshes from
+either home reach both. A copy would go stale at the next refresh, since
+refresh tokens rotate.
 
-### Shared config
+The launcher reads these settings from your shell environment, for a one-off
+as above, or per project from an envrc (below):
 
-`~/.clod/shared/` is mounted read-only at `/etc/claude-code`, where Claude Code
-reads managed settings (`managed-settings.json`, `managed-settings.d/*.json`)
-and a managed `CLAUDE.md`. Use it for config every home should have.
+| Variable     | Default   | Meaning |
+|--------------|-----------|---------|
+| `CLOD_HOME`  | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory. |
+| `CLOD_IMAGE` | `clod`    | A variant name from `~/.clod/images/`, or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
+| `CLOD_CREDS` | unset     | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
 
-```
-~/.clod/shared/
-  managed-settings.json   settings for every home
-  statusline.sh           the statusline those settings run
-  CLAUDE.md               instructions for every home
-```
+In a direnv `.envrc`, `$PWD` is the `.envrc`'s directory, so
+`export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
+project directory is also visible under `/workspace`, login included, so
+gitignore it.
 
-The repo's [`shared/`](shared) folder is a starter set of these files:
-
-- `CLAUDE.md` tells Claude about the clod container: what's mounted where and
-  what persists.
-- `statusline.sh` is a statusline (below).
-- `managed-settings.json` turns that statusline on for every home.
-
-Copy them into your shared config on the host, from this repo (`-n` keeps any
-files you already have):
-
-```bash
-mkdir -p ~/.clod/shared && cp -n shared/* ~/.clod/shared/
-```
-
-The copies are yours to customize, and later changes in this repo don't reach
-them.
-
-#### Statusline
-
-The starter statusline shows the clod home, borrowed login and
-image, then model and effort, tokens in and out, lines changed, context use,
-idle time against the prompt cache's one-hour lifetime, 5-hour and 7-day rate
-limits, and a warning when a turn missed the prompt cache:
-
-```
-⌂ work@clod-dotnet  ✦ Opus ⚡high  ↑48.2k ↓12.1k  +120/-35  ◔ ▰▰▰▱▱ 42%  ⏱ 3:07  5h ▰▱▱▱▱ 12%/40%
-```
-
-Changes to `~/.clod/shared/statusline.sh` show up on the next refresh. To turn it
-off, remove `statusLine` from `managed-settings.json`. To let homes choose their
-own statusline instead, leave it out of managed settings and set `statusLine` in
-a home's `~/.claude/settings.json`. The script needs `jq` (in the image) and
-logs each turn's cache reads and writes to `~/.claude/cache-turns.log`.
-
-Managed settings take precedence over a home's own settings, so keep
-per-client config in the homes.
-
-### Linux hosts
-
-Docker Engine on Linux keeps bind-mount ownership as is, so on a Linux host
-`clod` builds the image with `claude` given your uid and gid, and files written
-to the home and workspace belong to you. The image is therefore specific to the
-user who built it. The launcher also maps `host.docker.internal` to the host,
-which Docker Desktop and Colima provide on their own.
+Inside the container the same variables hold what the launch resolved to:
+`CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
+tag (`clod`, `clod-<variant>`), and `CLOD_CREDS`, set only when a login is
+borrowed, the home it came from.
 
 ### Per-project environment
 
@@ -228,11 +231,39 @@ the container (`host.docker.internal`, not `localhost` or a host socket path).
 `CLOD_CREDS`) set by the envrc aren't passed in either; they act as defaults
 for the launcher, and the same variable set in your shell wins. So a
 `.clod.envrc` can pick the home and image for a project whose `.envrc` you
-can't change.
-`--env-file` can't carry multi-line values, so variables holding one are
-skipped with a warning. Changes take effect on the next `clod` launch.
+can't change. `--env-file` can't carry multi-line values, so variables holding
+one are skipped with a warning. Changes take effect on the next `clod` launch.
 
 The container also gets the host's timezone (`$TZ`, else `/etc/localtime`).
+
+### Codex
+
+Codex CLI installs from the official `@openai/codex` npm package into the home
+the first time `codex` runs, and updates itself. Its login is per home.
+
+```bash
+clod codex login --device-auth  # first-time login
+clod codex                      # start Codex
+clod codex resume               # resume a session
+```
+
+Open the printed link in your browser and enter the code. Device code login
+must be enabled in your ChatGPT security settings or by your workspace admin.
+See [OpenAI's authentication documentation](https://learn.chatgpt.com/docs/auth).
+
+Codex runs with `--dangerously-bypass-approvals-and-sandbox`, which turns off
+its own sandbox and approval prompts inside the container, including for
+resumed sessions.
+
+### Linux hosts
+
+Docker Engine on Linux keeps bind-mount ownership as is, so on a Linux host
+`clod` builds the image with `claude` given your uid and gid, and files written
+to the home and workspace belong to you. The image is therefore specific to the
+user who built it. The launcher also maps `host.docker.internal` to the host,
+which Docker Desktop and Colima provide on their own.
+
+Rootless Docker and Podman are untested.
 
 ### Plain docker run
 
@@ -245,28 +276,11 @@ docker run -it --rm -p 5206:5206 -v ~/.clod/homes/default:/home/claude -v .:/wor
 On Linux, add `--add-host=host.docker.internal:host-gateway` to reach host
 services.
 
-## Codex
+## Requirements
 
-Codex CLI is installed from the official `@openai/codex` npm package into
-`~/.local` the first time `codex` runs, so it can update itself.
-
-```bash
-clod codex login --device-auth  # First-time login
-clod codex                      # Start Codex
-clod codex resume               # Resume a session
-```
-
-Open the printed link in your host browser and enter the code. Device code login
-must be enabled in your ChatGPT security settings or by your workspace admin.
-No callback port is needed. See [OpenAI's authentication documentation](https://learn.chatgpt.com/docs/auth).
-
-Arguments after `codex` are passed directly to Codex.
-Codex runs with `--dangerously-bypass-approvals-and-sandbox`, disabling its internal
-sandbox and approval prompts inside the Docker container, including resumed sessions.
-It can modify everything writable inside the container, including bind mounts.
-
-Both agents share the home. Codex login is per home. The workspace and home mounts persist
-after `--rm`; other container changes do not.
+- macOS with Colima or Docker Desktop, or Linux with Docker Engine
+- Docker 23 or newer (BuildKit)
+- bash 3.2 or newer, and `shasum` or `sha1sum`, which macOS and Linux include
 
 ## Security
 
@@ -275,10 +289,8 @@ it is a convenience boundary, not a sandbox against a misbehaving agent:
 
 - Claude Code runs with `--dangerously-skip-permissions` (unless you choose a
   permission mode) and Codex with `--dangerously-bypass-approvals-and-sandbox`.
-- The workspace and the whole home are mounted read-write. `clod` refuses
-  workspaces that would expose your host home or the clod homes unless run
-  with `--force`. Anything you keep in a home, such as SSH keys or API
-  tokens, is available to the agent.
+- The workspace and the whole home are mounted read-write. Anything you keep
+  in a home, such as SSH keys or API tokens, is available to the agent.
 - The container has normal outbound network access and can reach services on
   the host through `host.docker.internal`.
 - Claude Code is installed on first run with
