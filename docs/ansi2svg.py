@@ -20,21 +20,23 @@ FONT_SIZE, CHAR_W, LINE_H, PAD = 14, 8.4, 22, 18
 
 
 def spans(line):
-    """Yields (text, fill, bold, dim) runs for one line."""
-    fill, bold, dim = FG, False, False
+    """Yields (text, fill, bold, dim, underline) runs for one line."""
+    fill, bold, dim, under = FG, False, False, False
     for part in re.split(r"(\x1b\[[0-9;]*m)", line):
         m = re.fullmatch(r"\x1b\[([0-9;]*)m", part)
         if not m:
             if part:
-                yield part, fill, bold, dim
+                yield part, fill, bold, dim, under
             continue
         for code in (int(c) for c in (m.group(1) or "0").split(";")):
             if code == 0:
-                fill, bold, dim = FG, False, False
+                fill, bold, dim, under = FG, False, False, False
             elif code == 1:
                 bold = True
             elif code == 2:
                 dim = True
+            elif code == 4:
+                under = True
             elif code in COLORS:
                 fill = COLORS[code]
 
@@ -57,8 +59,9 @@ def main():
             f'<tspan fill="{fill}"'
             + (' font-weight="bold"' if bold else "")
             + (' opacity="0.5"' if dim else "")
+            + (' text-decoration="underline"' if under else "")
             + f">{html.escape(text)}</tspan>"
-            for text, fill, bold, dim in spans(line)
+            for text, fill, bold, dim, under in spans(line)
         )
         length = round(len(plain[i]) * CHAR_W)
         out.append(f'<text x="{PAD}" y="{y}" textLength="{length}" '

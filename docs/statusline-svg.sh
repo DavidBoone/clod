@@ -22,5 +22,5 @@ JSON
   CLOD_HOME=work CLOD_IMAGE=clod-go TMPDIR=$tmp CLAUDE_CONFIG_DIR=$tmp \
     bash "$docs/../shared/statusline.sh" < "$tmp/input.json"
   # Claude Code's own mode line, which it shows below the statusline
-  printf '\033[91m⏵⏵ bypass permissions on\033[0m\033[2m · PR #8 · 1 shell · ← for agents\033[0m\n'
+  printf '\033[95m⏵⏵ bypass permissions on\033[0m \033[2m·\033[0m PR \033[4;93m#9\033[0m \033[2m·\033[0m \033[96m1 shell\033[0m \033[2m· ← for agents\033[0m\n'
 } | python3 "$docs/ansi2svg.py"
