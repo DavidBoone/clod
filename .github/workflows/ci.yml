@@ -210,6 +210,10 @@ jobs:
             check: uv --version && gcc --version | head -1 && python3-config --includes
           - image: rust
             check: cargo new -q /tmp/hello && cd /tmp/hello && cargo run -q
+          - image: sudo
+            check: >-
+              test "$(sudo -n whoami)" = root &&
+              test -s /etc/clod/.claude/rules/sudo.md
     steps:
       - uses: actions/checkout@v4
       - name: Install clod
