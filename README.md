@@ -14,7 +14,7 @@ directory. Claude Code is the default.
 - macOS with [Colima](https://github.com/abiosoft/colima) or Docker Desktop, or
   Linux with Docker Engine (rootful; rootless Docker and Podman are untested)
 - Docker 23 or newer (BuildKit)
-- zsh, and `shasum` or `sha1sum`
+- bash 3.2 or newer (the `/bin/bash` macOS ships is fine), and `shasum` or `sha1sum`
 
 ## Usage
 

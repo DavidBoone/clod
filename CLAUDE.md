@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-A Docker image for running Claude Code or Codex in ephemeral containers, plus the `clod` launcher (zsh). Supported hosts: macOS (Colima or Docker Desktop) and Linux (rootful Docker Engine). No compose, no persistent containers - just `docker run` with `--rm`.
+A Docker image for running Claude Code or Codex in ephemeral containers, plus the `clod` launcher (bash, kept compatible with the bash 3.2 macOS ships). Supported hosts: macOS (Colima or Docker Desktop) and Linux (rootful Docker Engine). No compose, no persistent containers - just `docker run` with `--rm`.
 
 ## Build & Run
 
