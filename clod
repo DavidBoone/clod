@@ -36,7 +36,8 @@
 #
 # Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
 # hold the home label, image tag and login source this run resolved to, and
-# CLOD_PORTS the published container ports.
+# CLOD_PORTS the published container ports. CLOD_WORKSPACE_FILES is set when the
+# current directory has files, so the container can warn if it sees none.
 #
 # On a Linux host the clod image's claude user is built with the host user's
 # uid and gid, and host.docker.internal is mapped to the host.
@@ -830,6 +831,9 @@ echo "clod · $home_label · $tag · ${#vars[@]} vars" >&2
 args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
 [[ -n $creds ]] && args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
 [[ -n $tz ]] && args+=(-e "TZ=$tz")
+# A folder Docker doesn't share (outside Colima's mounts, say) shows up empty;
+# the entrypoint warns when it sees nothing where this says there are files.
+[[ -n $(ls -A 2>/dev/null) ]] && args+=(-e CLOD_WORKSPACE_FILES=1)
 if (( ${#port_args[@]} )); then
   args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
 fi
