@@ -239,6 +239,8 @@ test_multi_stage() {
   grep -q 'building clod-one' out
   grep -q 'building clod-stages' out
   clod images | has '^  stages  *built'
+  clod images stages | has '^stages  *built  *debian:trixie, clod-one  '
+  clod images stages | has '^one  *built  *clod  '
 }
 
 # Writes variants first and second, which take their base as BASE and record
@@ -275,6 +277,12 @@ test_combine() {
   # three: third is built on the combination clod-first.second
   clod -i first+second+third bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond\nthird")"'
   clod images | has '^  first.second.third  *built'
+  clod images first+second+third > out
+  test "$(awk 'NR > 1 { print $1 }' out)" = "$(printf 'first.second.third\nfirst.second\nfirst\nclod')"
+  has '^first.second  *built  *clod-first  ' < out
+  has '^first.second.third  .*/images/third/Dockerfile$' < out
+  exits 1 clod images nope
+  exits 2 clod images first second
   clod default image first+second
   clod env | has '^image: *clod-first.second '
   clod images | has '^\* first.second  *built'
@@ -297,6 +305,7 @@ test_rebuild() {
   local t i before=() after=()
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
   clod -i first+second bash -c true
+  test "$(clod -i first+second build 2>&1)" = 'clod: first.second is up to date'
   for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
   clod -i first+second rebuild
   for t in clod clod-first clod-first.second; do after+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
@@ -304,6 +313,13 @@ test_rebuild() {
     test "${before[i]}" != "${after[i]}"
     if docker image inspect "${before[i]}" >/dev/null 2>&1; then false; fi
   done
+  # build rebuilds only what changed, and prunes what it replaced
+  echo 'RUN true' >> ~/.clod/images/second/Dockerfile
+  clod -i first+second build 2>&1 | tee out
+  if grep -q 'building clod-first\.\.\.' out; then false; fi
+  grep -q 'building clod-first.second' out
+  test "$(docker image inspect -f '{{.Id}}' clod-first)" = "${after[1]}"
+  if docker image inspect "${after[2]}" >/dev/null 2>&1; then false; fi
 }
 
 # Tab completion: clod __complete's candidates, and the shim it prints, in bash
@@ -313,6 +329,7 @@ test_completion() {
   printf 'FROM clod\n' > ~/.clod/images/plain/Dockerfile
   test "$(clod __complete 'new-')" = "$(printf 'new-image\nnew-shared')"
   test "$(clod __complete --sk)" = --skip-build
+  clod __complete images '' | has -x plain
   clod __complete -i '' | has -x go
   clod __complete -i '' | has -x clod
   test "$(clod __complete -i go+su)" = go+sudo
