@@ -49,7 +49,7 @@ jobs:
       - name: Claude Code installs into the home and starts
         run: |
           cd "$(mktemp -d)"
-          clod --version | tee out
+          clod -- --version | tee out
           grep -q 'Claude Code' out
           # a symlink into the container's paths, so dangling on the runner
           test -L ~/.clod/homes/default/.local/bin/claude
@@ -71,11 +71,11 @@ jobs:
           grep -q 'default@clod' out
           grep -q 'Opus' out
           grep -q '42%' out
-      - name: CLOD_PORTS publishes a server's port on localhost
+      - name: --port publishes a server's port on localhost
         run: |
           cd "$(mktemp -d)"
           echo served > index.html
-          CLOD_PORTS=8000 clod bash -c 'timeout 60 python3 -m http.server 8000 --bind 0.0.0.0' &
+          clod -p 8000 bash -c 'timeout 60 python3 -m http.server 8000 --bind 0.0.0.0' &
           for _ in $(seq 30); do
             curl -fs http://127.0.0.1:8000/index.html > out && break
             sleep 2
@@ -109,6 +109,26 @@ jobs:
           clod env | grep -q '^image: clod-python'
           clod --default clod
           clod env | grep -q '^image: clod$'
+      - name: Command line
+        run: |
+          cd "$(mktemp -d)"
+          clod --help | grep -q '^Usage: clod'
+          clod --version | grep -q '^clod '
+          set +e
+          clod --resume; test $? = 2 || exit 1
+          clod 'a prompt'; test $? = 2 || exit 1
+          set -e
+          clod -H other -i python -p 3000:8080 env | tee out
+          grep -q '^home:  other' out
+          grep -q '^image: clod-python' out
+          grep -q '127.0.0.1:3000:8080' out
+          clod images | grep -q '^\* clod  *built'
+          clod homes | grep -q '^\* default'
+          clod new-image mine go
+          grep -q '^FROM clod$' ~/.clod/images/mine/Dockerfile
+          clod new-image starter
+          clod images | grep -q 'starter .*~/.clod/images/starter'
+          clod --skip-build bash -c true 2>&1 | grep -q 'running clod as built'
       - name: --rebuild replaces the image and prunes the old one
         run: |
           before=$(docker image inspect -f '{{.Id}}' clod)

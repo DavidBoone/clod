@@ -1,21 +1,13 @@
 #!/bin/bash
-# Run Claude Code (default), Codex, bash or zsh in the clod container on the current directory.
-#
-#   clod [claude args]     Claude Code
-#   clod codex [args]      Codex
-#   clod bash [args]       bash
-#   clod zsh [args]        zsh
-#   clod env               show the home, image, envrc and variables that would be passed in
-#   clod --force ...       any of the above, from a directory clod otherwise refuses
-#   clod --rebuild         rebuild the image and the images it builds on from scratch
-#   clod --default <image> make <image> the default CLOD_IMAGE (--default alone shows it)
+# clod: run Claude Code, Codex or a shell in a throwaway Docker container on the
+# current directory. `clod --help` describes the commands and options.
 #
 # clod refuses to mount your home directory, a directory above it, ~/.clod or
 # anything under ~/.clod/homes as /workspace, since the agent could then read
-# your credentials and every home's login. Options must come before the
-# command; later arguments go to the agent unchanged.
+# your credentials and every home's login.
 #
-# Launcher settings come from the calling shell's environment:
+# Launcher settings come from the command line (-i, -H, -c, -p) or else the
+# calling shell's environment:
 #
 #   CLOD_HOME   container home: a name (~/.clod/homes/<name>) or, if it contains a
 #               slash, a host path relative to the current directory (default: default)
@@ -24,9 +16,9 @@
 #               clod-<name>, or any local docker image
 #   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME);
 #               unset = the home keeps its own
-#   CLOD_PORTS  container ports to publish on the host's 127.0.0.1, comma- or
-#               space-separated: 8080 or host:container (an address first, as
-#               in docker run -p, publishes there instead)
+#   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
+#               space-separated: 8080 (the same on both sides) or host:container
+#               (an address first, as in docker run -p, publishes there instead)
 #
 # The envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by --default) as defaults for both.
@@ -55,13 +47,89 @@
 
 # Written for bash 3.2, the /bin/bash macOS ships.
 
-force='' rebuild='' set_default='' show_default=''
-while :; do
+# This script's directory, found by following symlinks to it (macOS readlink
+# has no -f before 12.3), holds the base image's files, the bundled variants
+# and the starter shared config.
+script=$0
+while [[ -L $script ]]; do
+  link=$(readlink "$script")
+  case $link in
+    /*) script=$link ;;
+    *) script=$(dirname "$script")/$link ;;
+  esac
+done
+script_dir=$(cd "$(dirname "$script")" && pwd -P)
+base_dir=$script_dir
+[[ -f $base_dir/Dockerfile ]] || base_dir=
+
+usage() {
+  cat <<'USAGE'
+Usage: clod [options] [command] [args...]
+
+Runs an agent or a shell in a throwaway container on the current directory.
+
+Commands:
+  claude [args]          Claude Code (the default); args go to it
+  codex [args]           Codex; args go to it
+  bash|zsh [args]        a shell in the container
+  env                    show the home, image, login, ports, envrc and variables
+  images                 list the base image and the variants
+  homes                  list the homes and their logins
+  new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
+                         of the bundled variant NAME, or as a starter
+
+Options (before the command):
+  -i, --image NAME       image or variant to run            (CLOD_IMAGE)
+  -H, --home NAME|PATH   container home                     (CLOD_HOME)
+  -c, --creds HOME       borrow another home's login        (CLOD_CREDS)
+  -p, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
+                           -p 5173       localhost:5173 -> container port 5173
+                           -p 3000:5173  localhost:3000 -> container port 5173
+  -f, --force            run from a directory clod otherwise refuses
+      --rebuild          rebuild the image and its bases from scratch, then exit
+      --skip-build       run the image as built, even if its files have changed
+      --default [IMAGE]  set the default image, or show it
+  -h, --help             show this help
+      --version          show clod's version
+  --                     end of options: the rest goes to Claude Code
+
+Examples:
+  clod                     Claude Code
+  clod -- --resume         Claude Code with its own arguments
+  clod -i go -p 5173       the go variant, with port 5173 published
+  clod -H work codex       Codex in the "work" home
+USAGE
+}
+
+# Exits with error message $1 and a pointer to --help.
+usage_error() {
+  echo "clod: $1 (see clod --help)" >&2
+  exit 2
+}
+
+force='' rebuild='' skip_build='' set_default='' show_default='' command=''
+opt_image='' opt_home='' opt_creds='' opt_ports=()
+while (( $# )); do
   case $1 in
-    --force) force=1; shift ;;
+    -i|--image|-H|--home|-c|--creds|-p|--port)
+      [[ $# -ge 2 ]] || usage_error "$1 needs a value"
+      case $1 in
+        -i|--image) opt_image=$2 ;;
+        -H|--home) opt_home=$2 ;;
+        -c|--creds) opt_creds=$2 ;;
+        -p|--port) opt_ports+=("$2") ;;
+      esac
+      shift 2
+      ;;
+    --image=*) opt_image=${1#*=}; shift ;;
+    --home=*) opt_home=${1#*=}; shift ;;
+    --creds=*) opt_creds=${1#*=}; shift ;;
+    --port=*) opt_ports+=("${1#*=}"); shift ;;
+    -f|--force) force=1; shift ;;
     --rebuild) rebuild=1; shift ;;
+    --skip-build) skip_build=1; shift ;;
     --default)
-      if [[ -n $2 && $2 != -* ]]; then
+      if [[ $# -ge 2 && $2 != -* ]]; then
         set_default=$2
         shift 2
       else
@@ -69,9 +137,31 @@ while :; do
         shift
       fi
       ;;
+    --default=*) set_default=${1#*=}; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --version)
+      echo "clod $(git -C "$script_dir" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+      exit 0
+      ;;
+    --) shift; command=claude; break ;;
+    -*) usage_error "unknown option $1; Claude Code's arguments go after --" ;;
     *) break ;;
   esac
 done
+if [[ -z $command ]]; then
+  case ${1:-claude} in
+    claude|codex|bash|zsh|env|images|homes|new-image)
+      command=${1:-claude}
+      [[ $# -gt 0 ]] && shift
+      ;;
+    *) usage_error "unknown command '$1'; Claude Code's arguments go after --" ;;
+  esac
+fi
+# Options win over the environment, the envrc and ~/.clod/config.
+[[ -n $opt_image ]] && CLOD_IMAGE=$opt_image
+[[ -n $opt_home ]] && CLOD_HOME=$opt_home
+[[ -n $opt_creds ]] && CLOD_CREDS=$opt_creds
+(( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
 
 name_re='^[A-Za-z0-9_-]+$'
 
@@ -236,21 +326,6 @@ if [[ $image == *[[:space:]]* ]]; then
   echo "clod: invalid CLOD_IMAGE '$image'" >&2
   exit 1
 fi
-# This script's directory, found by following symlinks to it (macOS readlink
-# has no -f before 12.3), holds the base image's files, the bundled variants
-# and the starter shared config.
-script=$0
-while [[ -L $script ]]; do
-  link=$(readlink "$script")
-  case $link in
-    /*) script=$link ;;
-    *) script=$(dirname "$script")/$link ;;
-  esac
-done
-script_dir=$(cd "$(dirname "$script")" && pwd -P)
-base_dir=$script_dir
-[[ -f $base_dir/Dockerfile ]] || base_dir=
-
 # Sets REPLY to the directory of variant $1, from ~/.clod/images or else this
 # script's images/, or to nothing if there is none.
 find_variant() {
@@ -317,7 +392,97 @@ done
 tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
 tz=${tz##*zoneinfo/}
 
-if [[ $1 == env ]]; then
+if [[ $command == images ]]; then
+  built=$(docker image ls --format '{{.Repository}}' 2>/dev/null | sort -u)
+  # Prints a row for image $1, tagged $2, from source $3.
+  image_row() {
+    local mark=' ' state=-
+    [[ $1 == "$image" ]] && mark='*'
+    grep -qx "$2" <<< "$built" && state=built
+    printf '%s %-12s %-7s %s\n' "$mark" "$1" "$state" "$3"
+  }
+  printf '  %-12s %-7s %s\n' NAME STATE SOURCE
+  image_row clod clod "$(tildify "$script_dir") (base)"
+  names=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
+    [[ -f $f ]] && basename "$(dirname "$f")"
+  done | sort -u)
+  for n in $names; do
+    if [[ -f $clod_dir/images/$n/Dockerfile ]]; then
+      src=$(tildify "$clod_dir/images/$n")
+      [[ -f $script_dir/images/$n/Dockerfile ]] && src="$src (overrides bundled)"
+    else
+      src=bundled
+    fi
+    image_row "$n" "clod-$n" "$src"
+  done
+  echo
+  echo "* runs here by default; clod -i NAME runs another"
+  exit 0
+fi
+
+if [[ $command == homes ]]; then
+  # Prints a row for home directory $1, labelled $2.
+  home_row() {
+    local mark=' ' claude=- codex=-
+    [[ $1 == "$home" ]] && mark='*'
+    [[ -s $1/.claude/.credentials.json ]] && claude=yes
+    [[ -s $1/.codex/auth.json ]] && codex=yes
+    printf '%s %-20s %-7s %s\n' "$mark" "$2" "$claude" "$codex"
+  }
+  printf '  %-20s %-7s %s\n' HOME CLAUDE CODEX
+  listed=''
+  for d in "$clod_dir"/homes/*; do
+    [[ -d $d ]] || continue
+    home_row "$d" "$(basename "$d")"
+    [[ $d == "$home" ]] && listed=1
+  done
+  [[ -n $listed ]] || home_row "$home" "$home_label"
+  echo
+  echo "* used here; clod -H NAME uses another, and a new name creates it"
+  exit 0
+fi
+
+if [[ $command == new-image ]]; then
+  name=$1 from=$2
+  [[ -n $name ]] || usage_error "new-image needs a NAME"
+  [[ $name =~ $name_re ]] || usage_error "invalid image name '$name'"
+  target=$clod_dir/images/$name
+  if [[ -e $target ]]; then
+    echo "clod: $(tildify "$target") already exists" >&2
+    exit 1
+  fi
+  src=''
+  if [[ -n $from ]]; then
+    find_variant "$from"
+    src=$REPLY
+    if [[ -z $src ]]; then
+      echo "clod: no variant named '$from' (clod images lists them)" >&2
+      exit 1
+    fi
+  elif [[ -f $script_dir/images/$name/Dockerfile ]]; then
+    src=$script_dir/images/$name
+  fi
+  mkdir -p "$clod_dir/images"
+  if [[ -n $src ]]; then
+    cp -R "$src" "$target"
+    echo "clod: created $(tildify "$target") from $(tildify "$src")"
+  else
+    mkdir "$target"
+    cat > "$target/Dockerfile" <<STARTER
+# Built as clod-$name and run with \`clod -i $name\`. It rebuilds whenever a
+# file in this directory or the image it is FROM changes.
+FROM clod
+USER root
+# RUN apt-get install -y postgresql-client
+USER claude
+STARTER
+    echo "clod: created $(tildify "$target") with a starter Dockerfile"
+  fi
+  echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
+  exit 0
+fi
+
+if [[ $command == env ]]; then
   home_path=$(tildify "$home")
   if [[ $home_label == "$home_path" ]]; then
     echo "home:  $home_label"
@@ -411,7 +576,9 @@ fi
 
 mkdir -p "$home"
 
-if [[ $tag == clod || -n $variant_dir ]]; then
+if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
+  echo "clod: running $tag as built" >&2
+elif [[ $tag == clod || -n $variant_dir ]]; then
   build_image "$tag"
 elif ! docker image inspect "$tag" >/dev/null 2>&1; then
   variants=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
@@ -443,4 +610,4 @@ fi
 [[ $OSTYPE == linux* ]] && args+=(--add-host=host.docker.internal:host-gateway)
 [[ -t 0 && -t 1 ]] && args+=(-t)
 # Images are local: clod builds them, so a mistyped name must not pull one.
-exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${args[@]}" "$tag" "$@"
+exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${args[@]}" "$tag" "$command" "$@"
