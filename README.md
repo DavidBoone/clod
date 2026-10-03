@@ -8,8 +8,9 @@ home (npm, uv, pip in a venv), while the rest of your machine stays out of
 reach.
 
 > **What the agent can reach:** your project directory, its own home, and the
-> network. Nothing else on your machine: a new home starts empty, with none of
-> your keys or logins, and holds only what you give it. See
+> network. Nothing else on your machine unless you pass `--docker`. A new home
+> starts empty, with none of your keys or logins, and holds only what you give
+> it. See
 > [What the agent can reach](#what-the-agent-can-reach).
 
 ## Quick start
@@ -127,6 +128,28 @@ clod -P 5173 -P 8080         # several
 The container is removed when you exit; only the home and the workspace
 persist.
 
+To let the agent build and run containers, run the `docker` variant with
+`--docker`, which mounts your Docker's socket into the container:
+
+```bash
+clod -i docker --docker
+```
+
+**This removes clod's boundary.** The Docker socket is root on the Docker host,
+so the agent can start a container that mounts any folder there and read or
+change everything clod otherwise keeps out of reach (see
+[What the agent can reach](#what-the-agent-can-reach)). Use it only with work
+you'd let run on your machine unconfined. `--docker` is an option only, with no
+setting in the environment, an envrc or your defaults, so a project can't turn
+it on.
+
+The containers the agent starts run beside clod's, on your Docker, and outlive
+it. Their bind mounts take paths on your machine, so the container gets the
+project's path as `$CLOD_HOST_WORKSPACE`, and the agent reaches their published
+ports at `host.docker.internal`. The `docker` variant tells Claude all this.
+`--docker` works with any image, such as your own variant `FROM clod-docker`,
+but it needs the Docker CLI in the image to be of use.
+
 `clod` refuses to run from your home directory or any directory above it, from
 `~/.clod`, or from `~/.clod/homes` or anything under it, since the agent could
 then read your credentials and every home's login. `clod --force` runs anyway.
@@ -207,6 +230,7 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 | Variant   | Adds |
 |-----------|------|
 | `browser` | Chromium, fonts, and the system libraries Playwright's browsers need |
+| `docker`  | the Docker CLI, with buildx and compose, for use with `--docker` |
 | `dotnet`  | .NET 10 SDK, from Microsoft's package repository |
 | `go`      | the latest Go release, as of when the image is built |
 | `lamp`    | PHP with common extensions, Composer, Apache and MariaDB |
@@ -426,14 +450,20 @@ without asking:
   included.
 - **The network**, including services on your machine through
   `host.docker.internal`.
+- **With `--docker`, everything.** The Docker socket is root on the Docker
+  host. On Linux that is your machine; on macOS it is Colima's or Docker
+  Desktop's VM, which has your home folder mounted, so the agent can start a
+  container that mounts `~` and read your credentials, other projects and every
+  clod home. It can also stop, change or remove any of your containers and
+  images.
 
-Everything else on your machine is out of reach: your own home directory,
-other projects, host processes and system files. In the container the agent
-runs as an ordinary user, `claude`, so the image's system files are out of its
-reach too, and anything it changes outside the home and project is discarded
-on exit. `clod` refuses to use your home directory, `~/.clod` or the homes
-directory as the project or as the container's home, unless run with
-`--force`.
+Without `--docker`, everything else on your machine is out of reach: your own
+home directory, other projects, host processes and system files. In the
+container the agent runs as an ordinary user, `claude`, so the image's system
+files are out of its reach too, and anything it changes outside the home and
+project is discarded on exit. `clod` refuses to use your home directory,
+`~/.clod` or the homes directory as the project or as the container's home,
+unless run with `--force`.
 
 Claude Code installs on first run with
 `curl -fsSL https://claude.ai/install.sh | bash`, and Codex from npm.
