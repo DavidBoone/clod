@@ -79,6 +79,7 @@ clod --resume        # Claude Code with your own args (permission prompts stay o
 clod codex [args]    # Codex
 clod bash | zsh      # a shell in the container
 clod env             # show the home, image, login, envrc and variables that would be used
+clod --default go    # run the go variant from now on (--default alone shows the current one)
 ```
 
 To update clod, pull the repo. The next `clod` rebuilds the image if it
@@ -88,14 +89,30 @@ changed.
 git -C ~/.clod/src pull
 ```
 
+An image is otherwise kept as built. To refresh its system packages, Node and
+whatever its variant downloads, rebuild it from scratch:
+
+```bash
+clod --rebuild
+```
+
+To reach a server the agent starts, such as a dev server on port 5173, publish
+its port when you launch. It's published on your machine's localhost, and the
+server must listen on all interfaces (`0.0.0.0`) inside the container:
+
+```bash
+CLOD_PORTS=5173 clod                  # http://localhost:5173
+CLOD_PORTS=8080,3000:5173 clod        # several; host:container to use a different host port
+```
+
 The container is removed when you exit; only the home and the workspace
 persist.
 
 `clod` refuses to run from your home directory or any directory above it, from
 `~/.clod`, or from `~/.clod/homes` or anything under it, since the agent could
-then read your credentials and every home's login. `clod --force` runs anyway;
-`--force` must be the first argument, and later arguments go to the agent
-unchanged.
+then read your credentials and every home's login. `clod --force` runs anyway.
+clod's own options (`--force`, `--rebuild`, `--default`) come before
+everything else; later arguments go to the agent unchanged.
 
 Claude Code runs with `--dangerously-skip-permissions` unless its arguments
 include `--permission-mode`, `--dangerously-skip-permissions` or
@@ -109,6 +126,7 @@ Everything below is optional. It all lives under `~/.clod`:
 ```
 ~/.clod/
   src/                this repo
+  config              defaults for the launcher settings, written by clod --default
   homes/<name>/       container homes
   images/<name>/      your image variants
   shared/             your shared config, mounted read-only as /etc/claude-code
@@ -162,8 +180,9 @@ CLOD_IMAGE=go clod
 ```
 
 The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
-the base image changes. To pick up a newer Go or Rust, remove the image
-(`docker rmi clod-go`) and the next run rebuilds it.
+the base image changes. To pick up a newer Go or Rust, rebuild it with
+`CLOD_IMAGE=go clod --rebuild`. Rebuilding the base makes every variant
+rebuild on its next use.
 
 Your own variants go in `~/.clod/images/<name>/`, a directory holding a
 `Dockerfile` that starts `FROM clod`, or `FROM` another variant:
@@ -207,13 +226,16 @@ either home reach both. A copy would go stale at the next refresh, since
 refresh tokens rotate.
 
 The launcher reads these settings from your shell environment, for a one-off
-as above, or per project from an envrc (below):
+as above, or per project from an envrc (below), or as your defaults from
+`~/.clod/config`, as `NAME=value` lines. The shell wins over the envrc, and
+both win over the config file:
 
 | Variable     | Default   | Meaning |
 |--------------|-----------|---------|
 | `CLOD_HOME`  | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory. |
 | `CLOD_IMAGE` | `clod`    | A variant name from `~/.clod/images/`, or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
 | `CLOD_CREDS` | unset     | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
+| `CLOD_PORTS` | unset     | Container ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080`, or `host:container`. An entry that starts with an address, as in `docker run -p`, is published there instead. |
 
 In a direnv `.envrc`, `$PWD` is the `.envrc`'s directory, so
 `export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
@@ -292,10 +314,11 @@ Rootless Docker and Podman are untested.
 
 ### Plain docker run
 
-Without the script, e.g. to expose a port for a dev server:
+The images run without the script too, for docker options clod doesn't
+cover:
 
 ```bash
-docker run -it --rm -p 5206:5206 -v ~/.clod/homes/default:/home/claude -v .:/workspace clod
+docker run -it --rm -v ~/.clod/homes/default:/home/claude -v .:/workspace clod
 ```
 
 On Linux, add `--add-host=host.docker.internal:host-gateway` to reach host

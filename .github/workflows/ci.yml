@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "0 6 * * 1"   # weekly, to catch upstream changes (Debian, NodeSource, vendor repos)
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck clod entrypoint.sh shared/statusline.sh
+
+  # Builds the base image through the launcher, as a Linux user would, and
+  # checks the container's user, mounts and tools.
+  base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clod
+        run: |
+          mkdir -p ~/.local/bin
+          ln -s "$GITHUB_WORKSPACE/clod" ~/.local/bin/clod
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: clod env
+        run: cd "$(mktemp -d)" && clod env
+      - name: Run a command in the container
+        run: |
+          cd "$(mktemp -d)"
+          echo hello > from-host
+          # shellcheck disable=SC2016 # the quoted script expands in the container
+          clod bash -c '
+            set -e
+            test "$(id -u)" = "'"$(id -u)"'"
+            test "$(cat /workspace/from-host)" = hello
+            test -f /etc/claude-code/managed-settings.json
+            touch /workspace/from-container
+            git --version; gh --version | head -1; node --version; python3 --version; jq --version
+          '
+          test "$(stat -c %u from-container)" = "$(id -u)"
+      - name: Refuses the home directory
+        run: cd ~ && ! clod bash -c true
+
+  variant:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: browser
+            check: dpkg -s libnss3 libgbm1 >/dev/null
+          - image: dotnet
+            check: dotnet --version
+          - image: go
+            check: go version
+          - image: lamp
+            check: php -v && composer --version && apache2 -v && mariadb --version
+          - image: python
+            check: uv --version && gcc --version | head -1 && python3-config --includes
+          - image: rust
+            check: cargo new -q /tmp/hello && cd /tmp/hello && cargo run -q
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clod
+        run: |
+          mkdir -p ~/.local/bin
+          ln -s "$GITHUB_WORKSPACE/clod" ~/.local/bin/clod
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build and check ${{ matrix.image }}
+        env:
+          CLOD_IMAGE: ${{ matrix.image }}
+        run: cd "$(mktemp -d)" && clod bash -c 'set -e; ${{ matrix.check }}'
