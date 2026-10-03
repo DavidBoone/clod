@@ -16,12 +16,15 @@
 #               clod-<name>, or any local docker image
 #   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME);
 #               unset = the home keeps its own
+#   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
+#               (default), codex, bash or zsh
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
 #               space-separated: 8080 (the same on both sides) or host:container
 #               (an address first, as in docker run -p, publishes there instead)
 #
 # The envrc (below) can set these too, as defaults for the shell's, and
-# ~/.clod/config (NAME=value lines, written by `clod default`) as defaults for both.
+# ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
+# defaults for both.
 #
 # The clod image is built from this script's directory, and a variant from its
 # directory, whenever their files (or, for a variant, the image it is FROM)
@@ -74,15 +77,16 @@ Usage: clod [options] [command] [args...]
 Runs an agent or a shell in a throwaway container on the current directory.
 
 Commands:
-  claude [args]          Claude Code (the default); args go to it
-  codex [args]           Codex; args go to it
+  claude [args]          Claude Code
+  codex [args]           Codex
   bash|zsh [args]        a shell in the container
   env                    show the home, image, login, ports, envrc and variables
   images                 list the base image and the variants
   homes                  list the homes and their logins
   new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
                          of the bundled variant NAME, or as a starter
-  default [IMAGE]        set the default image, or show it
+  default [KEY [VALUE]]  show or set your defaults: image, command, home,
+                         creds, ports (VALUE --reset removes one)
   rebuild                rebuild the image and its bases from scratch
   update                 update clod itself (git pull in its checkout)
   install [DIR]          link clod into DIR, or a directory on your PATH
@@ -98,7 +102,11 @@ Options (before the command):
       --skip-build       run the image as built, even if its files have changed
   -h, --help             show this help
       --version          show clod's version
-  --                     end of options: the rest goes to Claude Code
+  --                     end of options: the rest goes to the default command
+
+With no command, clod runs the default command: claude, unless CLOD_COMMAND
+or `clod default command` says otherwise. A command's own args go after it,
+unchanged, options included.
 
 Examples:
   clod                     Claude Code
@@ -114,7 +122,7 @@ usage_error() {
   exit 2
 }
 
-force='' skip_build='' command=''
+force='' skip_build='' command='' dashdash=''
 opt_image='' opt_home='' opt_creds='' opt_ports=()
 while (( $# )); do
   case $1 in
@@ -139,18 +147,18 @@ while (( $# )); do
       echo "clod $(clod_version)"
       exit 0
       ;;
-    --) shift; command=claude; break ;;
-    -*) usage_error "unknown option $1; Claude Code's arguments go after --" ;;
+    --) shift; dashdash=1; break ;;
+    -*) usage_error "unknown option $1; a command's own options go after it, or after --" ;;
     *) break ;;
   esac
 done
-if [[ -z $command ]]; then
-  case ${1:-claude} in
+if [[ -z $dashdash && $# -gt 0 ]]; then
+  case $1 in
     claude|codex|bash|zsh|env|images|homes|new-image|default|rebuild|update|install)
-      command=${1:-claude}
-      [[ $# -gt 0 ]] && shift
+      command=$1
+      shift
       ;;
-    *) usage_error "unknown command '$1'; Claude Code's arguments go after --" ;;
+    *) usage_error "unknown command '$1'; the default command's args go after --" ;;
   esac
 fi
 # Options win over the environment, the envrc and ~/.clod/config.
@@ -160,6 +168,7 @@ fi
 (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
 
 name_re='^[A-Za-z0-9_-]+$'
+port_re='^([0-9.]+:|\[[0-9a-fA-F:]+\]:)?([0-9]+:)?[0-9]+(/(tcp|udp))?$'
 
 # Prints path $1 with a leading $HOME shown as ~.
 tildify() {
@@ -322,7 +331,7 @@ fi
 container_vars=()
 for v in ${vars[@]+"${vars[@]}"}; do
   case $v in
-    CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*)
+    CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*|CLOD_COMMAND=*)
       name=${v%%=*}
       [[ -n ${!name} ]] || printf -v "$name" '%s' "${v#*=}"
       ;;
@@ -338,7 +347,7 @@ config=$clod_dir/config
 if [[ -f $config ]]; then
   while IFS= read -r line || [[ -n $line ]]; do
     case $line in
-      CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*)
+      CLOD_HOME=*|CLOD_IMAGE=*|CLOD_CREDS=*|CLOD_PORTS=*|CLOD_COMMAND=*)
         name=${line%%=*}
         [[ -n ${!name} ]] || printf -v "$name" '%s' "${line#*=}"
         ;;
@@ -365,6 +374,109 @@ resolve_home() {
   fi
 }
 
+# Sets REPLY to the directory of variant $1, from ~/.clod/images or else this
+# script's images/, or to nothing if there is none.
+find_variant() {
+  local d
+  REPLY=
+  [[ $1 =~ $name_re ]] || return 0
+  for d in "$clod_dir/images/$1" "$script_dir/images/$1"; do
+    if [[ -f $d/Dockerfile ]]; then
+      REPLY=$d
+      return 0
+    fi
+  done
+}
+
+# `clod default`: shows and edits the launcher settings in ~/.clod/config.
+# Prints the variable and built-in value of setting $1, or fails.
+setting_of() {
+  case $1 in
+    image) echo "CLOD_IMAGE clod" ;;
+    command) echo "CLOD_COMMAND claude" ;;
+    home) echo "CLOD_HOME default" ;;
+    creds) echo "CLOD_CREDS -" ;;
+    ports) echo "CLOD_PORTS -" ;;
+    *) return 1 ;;
+  esac
+}
+# Prints setting $1 with its value in the config file, or its built-in value.
+show_setting() {
+  local var builtin value
+  read -r var builtin <<< "$(setting_of "$1")"
+  value=$(sed -n "s/^$var=//p" "$config" 2>/dev/null | tail -1)
+  if [[ -n $value ]]; then
+    printf '%-8s %-14s (%s)\n' "$1" "$value" "$(tildify "$config")"
+  else
+    printf '%-8s %-14s (built in)\n' "$1" "$builtin"
+  fi
+}
+if [[ $command == default ]]; then
+  keys='image command home creds ports'
+  if [[ $# -eq 0 ]]; then
+    for k in $keys; do show_setting "$k"; done
+    echo
+    echo "clod default KEY VALUE sets one; clod default KEY --reset removes it"
+    exit 0
+  fi
+  key=$1 value=$2
+  setting_of "$key" >/dev/null || usage_error "unknown setting '$key' (one of: ${keys// /, })"
+  if [[ $# -eq 1 ]]; then
+    show_setting "$key"
+    exit 0
+  fi
+  [[ $# -eq 2 ]] || usage_error "default takes a setting and one value"
+  read -r var builtin <<< "$(setting_of "$key")"
+  [[ $value == --reset || $value == "$builtin" ]] && value=''
+  if [[ -n $value ]]; then
+    case $key in
+      image)
+        find_variant "$value"
+        if [[ -z $REPLY ]] && ! docker image inspect "$value" >/dev/null 2>&1; then
+          echo "clod: no variant or local image named '$value' (clod images lists them)" >&2
+          exit 1
+        fi
+        ;;
+      command)
+        case $value in
+          claude|codex|bash|zsh) ;;
+          *) usage_error "the default command is one of claude, codex, bash, zsh" ;;
+        esac
+        ;;
+      home|creds)
+        # A path is stored absolute, since the config applies everywhere.
+        resolve_home "$var" "$value"
+        [[ $value == */* ]] && value=$REPLY
+        ;;
+      ports)
+        for p in ${value//,/ }; do
+          [[ $p =~ $port_re ]] || usage_error "invalid port '$p'"
+        done
+        ;;
+    esac
+  fi
+  mkdir -p "$clod_dir"
+  rest=$(grep -v "^$var=" "$config" 2>/dev/null)
+  {
+    if [[ -n $rest ]]; then printf '%s\n' "$rest"; fi
+    if [[ -n $value ]]; then echo "$var=$value"; fi
+  } > "$config.tmp" && mv "$config.tmp" "$config"
+  show_setting "$key"
+  exit 0
+fi
+
+# With no command, the default command runs.
+if [[ -z $command ]]; then
+  command=${CLOD_COMMAND:-claude}
+  case $command in
+    claude|codex|bash|zsh) ;;
+    *)
+      echo "clod: CLOD_COMMAND is '$command'; it must be claude, codex, bash or zsh" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 resolve_home CLOD_HOME "${CLOD_HOME:-default}"
 home=$REPLY
 home_label=$(tildify "${home#"$clod_dir/homes/"}")
@@ -388,42 +500,6 @@ if [[ $image == *[[:space:]]* ]]; then
   echo "clod: invalid CLOD_IMAGE '$image'" >&2
   exit 1
 fi
-# Sets REPLY to the directory of variant $1, from ~/.clod/images or else this
-# script's images/, or to nothing if there is none.
-find_variant() {
-  local d
-  REPLY=
-  [[ $1 =~ $name_re ]] || return 0
-  for d in "$clod_dir/images/$1" "$script_dir/images/$1"; do
-    if [[ -f $d/Dockerfile ]]; then
-      REPLY=$d
-      return 0
-    fi
-  done
-}
-
-if [[ $command == default && -z $1 ]]; then
-  current=$(sed -n 's/^CLOD_IMAGE=//p' "$config" 2>/dev/null | tail -1)
-  echo "default image: ${current:-clod}"
-  exit 0
-fi
-if [[ $command == default ]]; then
-  set_default=$1
-  find_variant "$set_default"
-  if [[ -z $REPLY && $set_default != clod ]] && ! docker image inspect "$set_default" >/dev/null 2>&1; then
-    echo "clod: no variant or local image named '$set_default'" >&2
-    exit 1
-  fi
-  mkdir -p "$clod_dir"
-  rest=$(grep -v '^CLOD_IMAGE=' "$config" 2>/dev/null)
-  {
-    if [[ -n $rest ]]; then printf '%s\n' "$rest"; fi
-    if [[ $set_default != clod ]]; then echo "CLOD_IMAGE=$set_default"; fi
-  } > "$config.tmp" && mv "$config.tmp" "$config"
-  echo "default image: $set_default"
-  exit 0
-fi
-
 find_variant "$image"
 variant_dir=$REPLY
 if [[ -n $variant_dir ]]; then
@@ -440,7 +516,7 @@ shared_dir=$clod_dir/shared
 # address, and collects the container ports for the container's CLOD_PORTS.
 port_args=() container_ports=()
 for p in ${CLOD_PORTS//,/ }; do
-  if [[ ! $p =~ ^([0-9.]+:|\[[0-9a-fA-F:]+\]:)?([0-9]+:)?[0-9]+(/(tcp|udp))?$ ]]; then
+  if [[ ! $p =~ $port_re ]]; then
     echo "clod: invalid CLOD_PORTS entry '$p'" >&2
     exit 1
   fi
@@ -555,6 +631,7 @@ if [[ $command == env ]]; then
     echo "home:  $home_label ($home_path)"
   fi
   echo "image: $tag${variant_dir:+ ($(tildify "$variant_dir"))}"
+  echo "command: ${CLOD_COMMAND:-claude} (what a bare clod runs)"
   if [[ -n $creds ]]; then
     echo "login: borrowed from $creds_label"
   else
