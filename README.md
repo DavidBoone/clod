@@ -209,6 +209,7 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 | `lamp`    | PHP with common extensions, Composer, Apache and MariaDB |
 | `python`  | uv, and the C toolchain and headers for native extensions |
 | `rust`    | Rust's stable toolchain, via rustup, and the C toolchain |
+| `sudo`    | passwordless `sudo`, for installing packages mid-session (gone when the container exits) |
 
 ```bash
 clod -i go             # run the go variant
