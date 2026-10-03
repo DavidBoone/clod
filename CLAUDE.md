@@ -20,6 +20,10 @@ The command line is strict (`clod --help`): clod's options come before the comma
 
 On a Linux host, where bind mounts keep host ownership, the launcher builds the base image with `--build-arg CLOD_UID/CLOD_GID` set to the host user's ids (folded into the build hash) so `claude` owns its files, and maps `host.docker.internal` to the host gateway. On macOS the VM's file sharing handles ownership, so `claude` keeps uid 1000.
 
+## Tests
+
+`test/run.sh` is the test suite: shellcheck (`lint`), the launcher's behaviour end to end (`base`), builds without BuildKit (`classic`), and each bundled variant plus a combination (`variant-NAME`). CI runs one group or variant per job on a fresh GitHub runner. It needs Linux and a Docker it can have to itself, since it builds, replaces and prunes the clod images and mounts the socket into containers, so outside CI it runs only on a throwaway VM, with `--yes`; `test/run.sh lint` runs anywhere. Each run gets a fresh `HOME`. A new feature gets a `test_*` function in its group's list.
+
 ## Security
 
 The container defines what the agent can reach; within it, the agent runs unrestricted:
