@@ -388,20 +388,19 @@ which Docker Desktop and Colima provide on their own.
 
 Rootless Docker and Podman are untested.
 
-### Plain docker run
+### Without the script
 
-The images run without the script too, for docker options clod doesn't
-cover:
+The images run with plain `docker build` and `docker run` too, for docker
+options clod doesn't cover or to skip the script altogether:
 
 ```bash
-docker run -it --rm -v ~/.clod/homes/default:/home/claude -v .:/workspace \
+docker run -it --rm -v ~/.clod/homes/default:/home/claude -v "$PWD":/workspace \
   -v ~/.clod/src/shared:/etc/claude-code:ro clod
 ```
 
-Use `~/.clod/shared` instead of `~/.clod/src/shared` once you have your own.
-
-On Linux, add `--add-host=host.docker.internal:host-gateway` to reach host
-services.
+[Running the image without clod](docs/without-clod.md) covers building it,
+each piece of that command, a shell function to use in its place, variants,
+and what you give up without the script.
 
 ## What the agent can reach
 
