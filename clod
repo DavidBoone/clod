@@ -6,6 +6,12 @@
 #   clod bash [args]       bash
 #   clod zsh [args]        zsh
 #   clod env               show the home, image, envrc and variables that would be passed in
+#   clod --force ...       any of the above, from a directory clod otherwise refuses
+#
+# clod refuses to mount your home directory, a directory above it, ~/.clod or
+# anything under ~/.clod/homes as /workspace, since the agent could then read
+# your credentials and every home's login. --force must come first; later
+# arguments go to the agent unchanged.
 #
 # Launcher settings come from the calling shell's environment:
 #
@@ -40,6 +46,12 @@
 
 emulate -L zsh
 setopt extended_glob
+
+force=
+if [[ $1 == --force ]]; then
+  force=1
+  shift
+fi
 
 # Sets REPLY to the nearest .clod.envrc or .envrc from $PWD up, or to nothing.
 find_envrc() {
@@ -173,6 +185,13 @@ if [[ $1 == env ]]; then
   [[ -d $clod_dir/shared ]] && print "shared: ${clod_dir/#$HOME/~}/shared"
   (( ${#vars} )) && print -rl -- $vars
   exit 0
+fi
+
+workspace=${PWD:A} host_home=${HOME:A} clod_real=${clod_dir:A}
+if [[ -z $force && ( $workspace == / || $host_home == $workspace || $host_home == $workspace/* ||
+      $workspace == $clod_real || $workspace == $clod_real/homes || $workspace == $clod_real/homes/* ) ]]; then
+  print -u2 "clod: refusing to mount ${PWD/#$HOME/~} as /workspace: it holds your credentials or a home's login (clod --force to run anyway)"
+  exit 1
 fi
 
 mkdir -p $home
