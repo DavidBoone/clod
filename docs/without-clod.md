@@ -179,7 +179,8 @@ rebuilding the base.
 
 The agent runs with its permission prompts off. What it can reach is what you
 mount and the network, so the mounts are the whole of its limits: anything in
-the home or workspace, such as SSH keys or tokens, is open to it.
+the mounted home or workspace, such as keys or tokens you've put there, is open
+to it. A new home starts empty, so it holds only what you give it.
 
 Without the script:
 
