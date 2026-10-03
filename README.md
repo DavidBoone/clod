@@ -66,9 +66,8 @@ That's the whole setup. Every `clod` from here on starts in seconds with:
 - Claude Code running with `--dangerously-skip-permissions`
 - a statusline showing the home, image, model, tokens, context use, cache idle
   time and rate limits:
-  ```
-  ⌂ default@clod  ✦ Opus ⚡high  ↑48.2k ↓12.1k  +120/-35  ◔ ▰▰▰▱▱ 42%  ⏱ 3:07  5h ▰▱▱▱▱ 12%/40%
-  ```
+
+  ![The clod statusline: home and image, model and effort, tokens, lines changed, context use, idle time, and 5-hour and 7-day rate limits](docs/statusline.svg)
 - instructions telling Claude about the container: what's mounted where and
   what persists
 

@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck clod entrypoint.sh shared/statusline.sh
+      - run: shellcheck clod entrypoint.sh shared/statusline.sh docs/statusline-svg.sh
 
   # Builds the base image through the launcher, as a Linux user would, and
   # checks the container's user, mounts and tools.
