@@ -1,0 +1,7 @@
+# uv, and the C toolchain and Python headers for packages that build native
+# extensions. Python versions uv installs and its cache go to the home.
+FROM clod
+USER root
+RUN apt-get install -y build-essential python3-dev
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+USER claude

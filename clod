@@ -18,15 +18,16 @@
 #   CLOD_HOME   container home: a name (~/.clod/homes/<name>) or, if it contains a
 #               slash, a host path relative to the current directory (default: default)
 #   CLOD_IMAGE  image to run (default clod): a variant name, built from
-#               ~/.clod/images/<name>/ as clod-<name>, or any docker image
+#               ~/.clod/images/<name>/ or else this script's images/<name>/ as
+#               clod-<name>, or any local docker image
 #   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME);
 #               unset = the home keeps its own
 #
 # The envrc (below) can set these too, as defaults for the shell's.
 #
 # The clod image is built from this script's directory, and a variant from its
-# images/ directory, whenever their files (or, for a variant, the image it is
-# FROM) change. A variant can build on another as FROM clod-<name>.
+# directory, whenever their files (or, for a variant, the image it is FROM)
+# change. A variant can build on another as FROM clod-<name>.
 #
 # ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
 # reads managed settings and CLAUDE.md for every home. Until you create it, the
@@ -202,16 +203,9 @@ if [[ $image == *[[:space:]]* ]]; then
   echo "clod: invalid CLOD_IMAGE '$image'" >&2
   exit 1
 fi
-variant_dir=$clod_dir/images/$image
-if [[ $image =~ $name_re && -f $variant_dir/Dockerfile ]]; then
-  tag=clod-$image
-else
-  variant_dir=
-  tag=$image
-fi
-
-# The base image builds from the directory this script lives in, following
-# symlinks to it (macOS readlink has no -f before 12.3).
+# This script's directory, found by following symlinks to it (macOS readlink
+# has no -f before 12.3), holds the base image's files, the bundled variants
+# and the starter shared config.
 script=$0
 while [[ -L $script ]]; do
   link=$(readlink "$script")
@@ -223,6 +217,29 @@ done
 script_dir=$(cd "$(dirname "$script")" && pwd -P)
 base_dir=$script_dir
 [[ -f $base_dir/Dockerfile ]] || base_dir=
+
+# Sets REPLY to the directory of variant $1, from ~/.clod/images or else this
+# script's images/, or to nothing if there is none.
+find_variant() {
+  local d
+  REPLY=
+  [[ $1 =~ $name_re ]] || return 0
+  for d in "$clod_dir/images/$1" "$script_dir/images/$1"; do
+    if [[ -f $d/Dockerfile ]]; then
+      REPLY=$d
+      return 0
+    fi
+  done
+}
+
+find_variant "$image"
+variant_dir=$REPLY
+if [[ -n $variant_dir ]]; then
+  tag=clod-$image
+else
+  tag=$image
+fi
+
 shared_dir=$clod_dir/shared
 [[ -d $shared_dir ]] || shared_dir=$script_dir/shared
 [[ -d $shared_dir ]] || shared_dir=
@@ -288,10 +305,14 @@ build_image() {
     hash=$( { cat "$dir/Dockerfile" "$dir/entrypoint.sh"; printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1)
     build_args=(${base_args[@]+"${base_args[@]}"})
   else
-    dir=$clod_dir/images/${tag#clod-}
+    find_variant "${tag#clod-}"
+    dir=$REPLY
     parent=$(awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; exit } }' "$dir/Dockerfile")
-    if [[ $parent == clod || ( $parent == clod-* && -f $clod_dir/images/${parent#clod-}/Dockerfile ) ]]; then
-      build_image "$parent"
+    if [[ $parent == clod ]]; then
+      build_image clod
+    elif [[ $parent == clod-* ]]; then
+      find_variant "${parent#clod-}"
+      [[ -n $REPLY ]] && build_image "$parent"
     fi
     hash=$( { docker image inspect -f '{{.Id}}' "$parent" 2>/dev/null; files_hash "$dir"; } | $sum | cut -d' ' -f1)
   fi
@@ -300,6 +321,12 @@ build_image() {
 
 if [[ $tag == clod || -n $variant_dir ]]; then
   build_image "$tag"
+elif ! docker image inspect "$tag" >/dev/null 2>&1; then
+  variants=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
+    [[ -f $f ]] && basename "$(dirname "$f")"
+  done | sort -u | tr '\n' ' ')
+  echo "clod: no variant or local image named '$image'${variants:+ (variants: ${variants% })}" >&2
+  exit 1
 fi
 
 # Docker creates a missing mount target as root, which on a Linux host leaves

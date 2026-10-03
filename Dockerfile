@@ -1,7 +1,7 @@
 FROM debian:trixie
 
-# Generic base for running Claude Code and Codex. Personal stacks go in image
-# variants built FROM clod (see README). Layers are ordered rarely-changed
+# Generic base for running Claude Code and Codex, with everyday CLI tools.
+# Languages, compilers and browsers go in variants built FROM clod (see README). Layers are ordered rarely-changed
 # first. Apt lists are kept so variants can `apt-get install` without
 # re-running update.
 
@@ -9,7 +9,7 @@ FROM debian:trixie
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y \
        curl wget ca-certificates \
-       git build-essential \
+       git \
        locales
 
 # Culture (the clod launcher passes the host's TZ)
@@ -29,11 +29,8 @@ RUN mkdir -p /etc/apt/keyrings \
        > /etc/apt/sources.list.d/nodesource.sources \
     && apt-get update \
     && apt-get install -y \
-       python3 python3-pip python3-venv \
+       python3 python3-venv \
        nodejs
-
-# Browser system libraries for Playwright's Chromium
-RUN npx --yes playwright install-deps chromium && rm -rf /root/.npm
 
 # CLI tools
 RUN apt-get install -y \
