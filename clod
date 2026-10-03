@@ -86,7 +86,8 @@ Commands:
   new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
                          of the bundled variant NAME, or as a starter
   new-shared             create ~/.clod/shared as a copy of the starter shared
-                         config, to customise
+                         config, to customise; if it exists, compare it with the
+                         starter (--force replaces it, keeping a backup)
   default [KEY [VALUE]]  show or set your defaults: image, command, home,
                          creds, ports (VALUE --reset removes one)
   rebuild                rebuild the image and its bases from scratch
@@ -100,7 +101,8 @@ Options (before the command):
   -p, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
                            -p 5173       localhost:5173 -> container port 5173
                            -p 3000:5173  localhost:3000 -> container port 5173
-  -f, --force            run from a directory clod otherwise refuses
+  -f, --force            run from a directory clod otherwise refuses; replace
+                         an existing clod (install) or shared config (new-shared)
       --skip-build       run the image as built, even if its files have changed
   -h, --help             show this help
       --version          show clod's version
@@ -584,18 +586,39 @@ if [[ $command == homes ]]; then
 fi
 
 if [[ $command == new-shared ]]; then
-  target=$clod_dir/shared
-  if [[ -e $target ]]; then
-    echo "clod: $(tildify "$target") already exists" >&2
-    exit 1
-  fi
-  if [[ ! -d $script_dir/shared ]]; then
+  target=$clod_dir/shared starter=$script_dir/shared
+  if [[ ! -d $starter ]]; then
     echo "clod: there's no starter shared config in $(tildify "$script_dir")" >&2
     exit 1
   fi
+  if [[ -e $target && -z $force ]]; then
+    # Compares the starter's files with yours; files only you have aren't listed.
+    report=$(cd "$starter" && find . -type f | sort | while IFS= read -r f; do
+      f=${f#./}
+      if [[ ! -f $target/$f ]]; then
+        printf '  missing    %s\n' "$f"
+      elif ! cmp -s "$f" "$target/$f"; then
+        printf '  different  %s\n' "$f"
+      fi
+    done)
+    if [[ -z $report ]]; then
+      echo "clod: $(tildify "$target") has everything in the starter, unchanged"
+      exit 0
+    fi
+    echo "clod: $(tildify "$target") already exists. Compared with the starter in $(tildify "$starter"):"
+    echo "$report"
+    echo "See the differences: diff -ru $(tildify "$starter") $(tildify "$target")"
+    echo "Replace yours with the starter (yours is kept as a backup): clod --force new-shared"
+    exit 0
+  fi
   mkdir -p "$clod_dir"
-  cp -R "$script_dir/shared" "$target"
-  echo "clod: created $(tildify "$target") from $(tildify "$script_dir/shared")"
+  if [[ -e $target ]]; then
+    backup=$target.bak-$(date +%Y%m%d-%H%M%S)
+    mv "$target" "$backup"
+    echo "clod: moved your shared config to $(tildify "$backup")"
+  fi
+  cp -R "$starter" "$target"
+  echo "clod: created $(tildify "$target") from $(tildify "$starter")"
   echo "Edit the files there; every clod from now on mounts it instead of the starter."
   exit 0
 fi
