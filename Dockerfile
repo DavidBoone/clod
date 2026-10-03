@@ -38,7 +38,8 @@ RUN apt-get install -y \
        ripgrep fd-find \
        psmisc procps rsync zip unzip \
        openssh-client dnsutils netcat-openbsd iputils-ping socat \
-       sqlite3
+       sqlite3 \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
 # Bind mounts can report owners git doesn't trust (macOS file sharing), and
 # the container has no other users to guard against.
