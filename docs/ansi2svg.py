@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Renders terminal text with 16-colour ANSI escapes (from stdin) as an SVG
-terminal panel (to stdout), for pictures in the README."""
+terminal panel (to stdout), for pictures in the README.
+
+Each line is drawn with textLength, so viewers fit it to the panel's width
+whatever monospace font they have; glyph widths vary between fonts."""
 import html
 import re
 import sys
@@ -38,16 +41,16 @@ def spans(line):
 
 def main():
     lines = sys.stdin.read().rstrip("\n").split("\n")
-    longest = max(len(re.sub(r"\x1b\[[0-9;]*m", "", l)) for l in lines)
-    width = round(longest * CHAR_W + 2 * PAD)
+    plain = [re.sub(r"\x1b\[[0-9;]*m", "", l) for l in lines]
+    width = round(max(len(l) for l in plain) * CHAR_W + 2 * PAD)
     height = len(lines) * LINE_H + 2 * PAD - (LINE_H - FONT_SIZE)
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}">',
         f'<rect width="{width}" height="{height}" rx="8" fill="{BG}"/>',
-        f'<text font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" '
-        f'font-size="{FONT_SIZE}" xml:space="preserve">',
     ]
+    font = ('font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" '
+            f'font-size="{FONT_SIZE}" xml:space="preserve"')
     for i, line in enumerate(lines):
         y = PAD + FONT_SIZE + i * LINE_H - 3
         runs = "".join(
@@ -57,8 +60,10 @@ def main():
             + f">{html.escape(text)}</tspan>"
             for text, fill, bold, dim in spans(line)
         )
-        out.append(f'<tspan x="{PAD}" y="{y}">{runs}</tspan>')
-    out += ["</text>", "</svg>"]
+        length = round(len(plain[i]) * CHAR_W)
+        out.append(f'<text x="{PAD}" y="{y}" textLength="{length}" '
+                   f'lengthAdjust="spacingAndGlyphs" {font}>{runs}</text>')
+    out.append("</svg>")
     print("\n".join(out))
 
 

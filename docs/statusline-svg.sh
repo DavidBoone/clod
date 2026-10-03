@@ -18,5 +18,9 @@ cat > "$tmp/input.json" <<JSON
  "rate_limits":{"five_hour":{"used_percentage":19,"resets_at":$((now + 18000 * 13 / 100))},
                 "seven_day":{"used_percentage":32,"resets_at":$((now + 604800 * 46 / 100))}}}
 JSON
-CLOD_HOME=work CLOD_IMAGE=clod-go TMPDIR=$tmp CLAUDE_CONFIG_DIR=$tmp \
-  bash "$docs/../shared/statusline.sh" < "$tmp/input.json" | python3 "$docs/ansi2svg.py"
+{
+  CLOD_HOME=work CLOD_IMAGE=clod-go TMPDIR=$tmp CLAUDE_CONFIG_DIR=$tmp \
+    bash "$docs/../shared/statusline.sh" < "$tmp/input.json"
+  # Claude Code's own mode line, which it shows below the statusline
+  printf '\033[91m⏵⏵ bypass permissions on\033[0m\033[2m · PR #8 · 1 shell · ← for agents\033[0m\n'
+} | python3 "$docs/ansi2svg.py"
