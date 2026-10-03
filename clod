@@ -111,9 +111,10 @@ Options (before the command):
   -f, --force            run from a directory clod otherwise refuses; replace
                          an existing clod (install) or shared config (new-shared)
       --skip-build       run the image as built, even if its files have changed
-      --docker           mount the host's Docker socket (for the docker
-                         variant). WARNING: that is root on the Docker host,
-                         which can mount and read anything on your machine
+      --docker           mount the host's Docker socket. Only the socket: the
+                         docker CLI comes from the image (clod -i docker
+                         --docker). WARNING: the socket is root on the Docker
+                         host, which can mount and read anything on your machine
   -h, --help             show this help
       --version          show clod's version
   --                     end of options: the rest goes to the default command
@@ -405,6 +406,32 @@ find_variant() {
   done
 }
 
+files_hash() {
+  (cd "$1" && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 "$sum") | $sum | cut -d' ' -f1
+}
+
+# Prints the hash the clod image is labelled with when built from its files.
+base_hash() {
+  { cat "$base_dir/Dockerfile" "$base_dir/entrypoint.sh" "$base_dir/container.md"
+    printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1
+}
+
+# Prints the images variant directory $1's Dockerfile is FROM, one per line.
+variant_parents() {
+  awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; break } }' "$1/Dockerfile"
+}
+
+# Prints the hash a variant from directory $1, FROM images $2..., is labelled
+# with when built on those images as they are now.
+variant_hash() {
+  local dir=$1 parent
+  shift
+  { for parent in "$@"; do
+      docker image inspect -f '{{.Id}}' "$parent" 2>/dev/null
+    done
+    files_hash "$dir"; } | $sum | cut -d' ' -f1
+}
+
 # `clod default`: shows and edits the launcher settings in ~/.clod/config.
 # Prints the variable and built-in value of setting $1, or fails.
 setting_of() {
@@ -554,16 +581,48 @@ tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
 tz=${tz##*zoneinfo/}
 
 if [[ $command == images ]]; then
-  built=$(docker image ls --format '{{.Repository}}' 2>/dev/null | sort -u)
+  # Sets REPLY to the state of clod image $1: - when it isn't built, stale when
+  # its next run rebuilds it (its files or an image it is FROM changed), or else
+  # built. An image clod has no files for is built or -.
+  checking=()
+  image_state() {
+    local tag=$1 dir label hash parent parents=() stale='' c
+    REPLY=-
+    label=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$tag" 2>/dev/null) || return 0
+    REPLY=built
+    for c in ${checking[@]+"${checking[@]}"}; do
+      [[ $c == "$tag" ]] && return 0
+    done
+    if [[ $tag == clod ]]; then
+      [[ -z $base_dir ]] && return 0
+      hash=$(base_hash)
+    else
+      find_variant "${tag#clod-}"
+      dir=$REPLY
+      [[ -z $dir ]] && { REPLY=built; return 0; }
+      checking+=("$tag")
+      while IFS= read -r parent; do
+        parents+=("$parent")
+        if [[ $parent == clod || $parent == clod-* ]]; then
+          image_state "$parent"
+          [[ $REPLY == built ]] || stale=1
+        fi
+      done < <(variant_parents "$dir")
+      unset 'checking[${#checking[@]}-1]'
+      hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
+    fi
+    REPLY=built
+    [[ -n $stale || $label != "$hash" ]] && REPLY=stale
+  }
   # Prints a row for image $1, tagged $2, from source $3.
   image_row() {
-    local mark=' ' state=-
+    local mark=' '
     [[ $1 == "$image" ]] && mark='*'
-    grep -qx "$2" <<< "$built" && state=built
-    printf '%s %-12s %-7s %s\n' "$mark" "$1" "$state" "$3"
+    image_state "$2"
+    printf '%s %-12s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
   }
   printf '  %-12s %-7s %s\n' NAME STATE SOURCE
-  image_row clod clod "$(tildify "$script_dir") (base)"
+  image_row clod clod "$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)"
   names=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
     [[ -f $f ]] && basename "$(dirname "$f")"
   done | sort -u)
@@ -578,6 +637,7 @@ if [[ $command == images ]]; then
   done
   echo
   echo "* runs here by default; clod -i NAME runs another"
+  echo "bundled: $(tildify "$script_dir"); stale: rebuilt on its next run"
   exit 0
 fi
 
@@ -729,10 +789,6 @@ build_if_changed() {
   built=1
 }
 
-files_hash() {
-  (cd "$1" && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 "$sum") | $sum | cut -d' ' -f1
-}
-
 # Builds clod or clod-<variant> $1, first building the clod images it is FROM:
 # every stage's, so a multi-stage Dockerfile can name one in any stage.
 building=() done_images=()
@@ -752,7 +808,7 @@ build_image() {
   building+=("$tag")
   if [[ $tag == clod ]]; then
     dir=$base_dir
-    hash=$( { cat "$dir/Dockerfile" "$dir/entrypoint.sh" "$dir/container.md"; printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1)
+    hash=$(base_hash)
     build_args=(${base_args[@]+"${base_args[@]}"})
     [[ -n $rebuild ]] && build_args+=(--pull)
   else
@@ -760,7 +816,7 @@ build_image() {
     dir=$REPLY
     while IFS= read -r parent; do
       parents+=("$parent")
-    done < <(awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; break } }' "$dir/Dockerfile")
+    done < <(variant_parents "$dir")
     for parent in ${parents[@]+"${parents[@]}"}; do
       if [[ $parent == clod ]]; then
         build_image clod
@@ -769,10 +825,7 @@ build_image() {
         [[ -n $REPLY ]] && build_image "$parent"
       fi
     done
-    hash=$( { for parent in ${parents[@]+"${parents[@]}"}; do
-                docker image inspect -f '{{.Id}}' "$parent" 2>/dev/null
-              done
-              files_hash "$dir"; } | $sum | cut -d' ' -f1)
+    hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
   fi
   build_if_changed "$tag" "$dir" "$hash" ${build_args[@]+"${build_args[@]}"}
   unset 'building[${#building[@]}-1]'
@@ -867,7 +920,8 @@ fi
 # --docker mounts the socket of the Docker that runs clod, which must be local:
 # the path is the same on Linux, in Colima's VM and in Docker Desktop's. The
 # socket's group, as a container sees it, lets claude use it. --mount, unlike
-# -v, fails rather than creating a missing source.
+# -v, fails rather than creating a missing source. The same throwaway container
+# checks the image has the docker CLI.
 if [[ -n $docker_socket ]]; then
   endpoint=${DOCKER_HOST:-$(docker context inspect -f '{{.Endpoints.docker.Host}}' 2>/dev/null)}
   case $endpoint in
@@ -879,10 +933,16 @@ if [[ -n $docker_socket ]]; then
   esac
   sock=/var/run/docker.sock
   mount=(--mount "type=bind,src=$sock,dst=$sock")
-  sock_stat=$(docker run --rm --pull=never "${mount[@]}" --entrypoint stat "$tag" -c '%F %g' "$sock" 2>&1)
+  # shellcheck disable=SC2016 # the quoted script runs in the container
+  probe=$(docker run --rm --pull=never "${mount[@]}" --entrypoint sh "$tag" \
+    -c 'stat -c "%F %g" "$1" && { command -v docker >/dev/null || echo no-cli; }' sh "$sock" 2>&1)
+  sock_stat=${probe%%$'\n'*}
   if [[ ! $sock_stat =~ ^socket\ [0-9]+$ ]]; then
-    echo "clod: --docker: can't find Docker's socket at $sock on the Docker host: $sock_stat" >&2
+    echo "clod: --docker: can't find Docker's socket at $sock on the Docker host: $probe" >&2
     exit 1
+  fi
+  if [[ $probe == *no-cli ]]; then
+    echo "clod: --docker: $tag has no docker CLI, so only the socket is there; the docker variant has it (clod -i docker --docker)" >&2
   fi
   args+=("${mount[@]}" --group-add "${sock_stat#socket }" -e "CLOD_HOST_WORKSPACE=$PWD")
 fi

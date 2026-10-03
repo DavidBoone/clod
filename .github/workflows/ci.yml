@@ -99,13 +99,15 @@ jobs:
           clod bash -c 'test ! -e /var/run/docker.sock'
           if clod env | grep -q '^docker:'; then exit 1; fi
           clod --docker env | grep -q '^docker:'
+          clod --docker bash -c true 2>&1 | grep -q 'clod has no docker CLI'
           # shellcheck disable=SC2016 # the quoted script expands in the container
           clod -i docker --docker bash -c '
             set -e
             test "$(id -un)" = claude
             docker ps
             test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
-          '
+          ' 2>&1 | tee out
+          if grep -q 'no docker CLI' out; then exit 1; fi
       - name: .clod.envrc variables and launcher settings
         run: |
           cd "$(mktemp -d)"
@@ -184,10 +186,14 @@ jobs:
           printf 'FROM clod\n' > ~/.clod/images/one/Dockerfile
           printf 'FROM debian:trixie AS build\nFROM clod-one\n' > ~/.clod/images/stages/Dockerfile
           clod -i stages bash -c true
+          clod images | grep -q '^  stages  *built'
           echo 'RUN true' >> ~/.clod/images/one/Dockerfile
+          clod images | grep -q '^  one  *stale'
+          clod images | grep -q '^  stages  *stale'
           clod -i stages bash -c true 2>&1 | tee out
           grep -q 'building clod-one' out
           grep -q 'building clod-stages' out
+          clod images | grep -q '^  stages  *built'
       - name: rebuild replaces the image and prunes the old one
         run: |
           before=$(docker image inspect -f '{{.Id}}' clod)
