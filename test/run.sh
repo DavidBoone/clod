@@ -56,6 +56,21 @@ list() {
 # The tests. Each runs in a subshell with -e and pipefail, in an empty
 # directory, with clod on PATH.
 
+# Matches its input like grep -q, but reads all of it: grep -q exits at the
+# first match, and a command still writing into the pipe then fails. The
+# helpers return their failure, so a failed test names the line calling them.
+has() {
+  grep "$@" >/dev/null || return 1
+}
+
+# Runs a command, failing unless it exits with status $1.
+exits() {
+  local want=$1 got=0
+  shift
+  "$@" || got=$?
+  [[ $got == "$want" ]] || return 1
+}
+
 test_lint() {
   cd "$repo"
   shellcheck clod entrypoint.sh shared/statusline.sh docs/statusline-svg.sh test/run.sh
@@ -82,14 +97,14 @@ test_run_command() {
 test_empty_workspace() {
   touch file
   clod bash -c true 2>&1 | tee out
-  if grep -q 'workspace is empty' out; then exit 1; fi
+  if grep -q 'workspace is empty' out; then false; fi
   docker run --rm -e CLOD_WORKSPACE_FILES=1 -v "$(mktemp -d):/workspace" clod bash -c true 2>&1 |
-    grep -q 'workspace is empty'
+    has 'workspace is empty'
 }
 
 test_refuses_home() {
   cd ~
-  if clod bash -c true; then exit 1; fi
+  exits 1 clod bash -c true
 }
 
 test_claude() {
@@ -131,16 +146,16 @@ test_port() {
 test_docker_socket() {
   echo sibling > from-host
   clod bash -c 'test ! -e /var/run/docker.sock'
-  if clod env | grep -q '^docker:'; then exit 1; fi
-  clod --docker env | grep -q '^docker:'
-  clod --docker bash -c true 2>&1 | grep -q 'clod has no docker CLI'
+  if clod env | has '^docker:'; then false; fi
+  clod --docker env | has '^docker:'
+  clod --docker bash -c true 2>&1 | has 'clod has no docker CLI'
   clod -i docker --docker bash -c '
     set -e
     test "$(id -un)" = claude
     docker ps
     test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
   ' 2>&1 | tee out
-  if grep -q 'no docker CLI' out; then exit 1; fi
+  if grep -q 'no docker CLI' out; then false; fi
 }
 
 test_envrc() {
@@ -161,27 +176,27 @@ test_creds() {
 }
 
 test_default() {
-  if clod default image no-such-image; then exit 1; fi
+  exits 1 clod default image no-such-image
   clod default image python
-  clod default image | grep -q '^image  *python .*config'
+  clod default image | has '^image  *python .*config'
   clod default command bash
-  clod -i clod -- -c 'echo from-default-command' | grep -q from-default-command
+  clod -i clod -- -c 'echo from-default-command' | has from-default-command
   clod default command --reset
-  clod default command | grep -q '^command  *claude .*built in'
-  clod env | grep -q '^image: *clod-python'
+  clod default command | has '^command  *claude .*built in'
+  clod env | has '^image: *clod-python'
   clod default image clod
-  clod env | grep -q '^image: *clod$'
+  clod env | has '^image: *clod$'
 }
 
 test_new_shared() {
   clod new-shared
   test -f ~/.clod/shared/statusline.sh
-  clod new-shared | grep -q 'has everything in the starter'
-  clod env | grep -q '^shared: *~/.clod/shared'
+  clod new-shared | has 'has everything in the starter'
+  clod env | has '^shared: *~/.clod/shared'
   rm ~/.clod/shared/statusline.sh
-  clod new-shared | grep -q 'missing  *statusline.sh'
+  clod new-shared | has 'missing  *statusline.sh'
   cp "$repo/container.md" ~/.clod/shared/CLAUDE.md
-  clod new-shared | grep -q 'describes the container'
+  clod new-shared | has 'describes the container'
   clod --force new-shared
   test -f ~/.clod/shared/statusline.sh
   ls -d ~/.clod/shared.bak-*
@@ -189,28 +204,26 @@ test_new_shared() {
 }
 
 test_command_line() {
-  set +e
-  clod -p 'a prompt'; test $? = 2 || exit 1
-  clod -H ~ bash -c true; test $? = 1 || exit 1
-  clod --resume; test $? = 2 || exit 1
-  clod 'a prompt'; test $? = 2 || exit 1
-  set -e
-  clod -i clod-python env | grep -q '^image: *clod-python (.*images/python)'
-  clod --help | grep -q '^Usage: clod'
-  clod --version | grep -q '^clod '
+  exits 2 clod -p 'a prompt'
+  exits 1 clod -H ~ bash -c true
+  exits 2 clod --resume
+  exits 2 clod 'a prompt'
+  clod -i clod-python env | has '^image: *clod-python (.*images/python)'
+  clod --help | has '^Usage: clod'
+  clod --version | has '^clod '
   clod -H other -i python -P 3000:8080 env | tee out
   grep -q '^home: *other' out
   grep -q '^image: *clod-python' out
   grep -q '^ports: *127.0.0.1:3000 → 8080$' out
   clod bash -c true
-  clod images | grep -q '^\* clod  *built'
-  clod homes | grep -q '^\* default'
+  clod images | has '^\* clod  *built'
+  clod homes | has '^\* default'
   rm -rf ~/.clod/images/mine ~/.clod/images/starter
   clod new-image mine go
   grep -q '^FROM \$BASE$' ~/.clod/images/mine/Dockerfile
   clod new-image starter
-  clod images | grep -q 'starter .*~/.clod/images/starter'
-  clod --skip-build bash -c true 2>&1 | grep -q 'running clod as built'
+  clod images | has 'starter .*~/.clod/images/starter'
+  clod --skip-build bash -c true 2>&1 | has 'running clod as built'
 }
 
 test_multi_stage() {
@@ -218,14 +231,14 @@ test_multi_stage() {
   printf 'FROM clod\n' > ~/.clod/images/one/Dockerfile
   printf 'FROM debian:trixie AS build\nFROM clod-one\n' > ~/.clod/images/stages/Dockerfile
   clod -i stages bash -c true
-  clod images | grep -q '^  stages  *built'
+  clod images | has '^  stages  *built'
   echo 'RUN true' >> ~/.clod/images/one/Dockerfile
-  clod images | grep -q '^  one  *stale'
-  clod images | grep -q '^  stages  *stale'
+  clod images | has '^  one  *stale'
+  clod images | has '^  stages  *stale'
   clod -i stages bash -c true 2>&1 | tee out
   grep -q 'building clod-one' out
   grep -q 'building clod-stages' out
-  clod images | grep -q '^  stages  *built'
+  clod images | has '^  stages  *built'
 }
 
 # Writes variants first and second, which take their base as BASE and record
@@ -242,38 +255,38 @@ test_combine() {
   # braces, and no default: it only ever goes on top of another
   printf 'ARG BASE\nFROM ${BASE}\nRUN echo third >> /tmp/order\n' > ~/.clod/images/third/Dockerfile
   printf 'FROM clod\n' > ~/.clod/images/fixed/Dockerfile
-  clod -i first+second env | grep -q '^image: *clod-first.second '
+  clod -i first+second env | has '^image: *clod-first.second '
   clod -i first+second bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
-  clod images | grep -q '^  first.second  *built'
+  clod images | has '^  first.second  *built'
   clod -i clod-first.second --skip-build bash -c true
   echo 'RUN true' >> ~/.clod/images/first/Dockerfile
-  clod images | grep -q '^  first.second  *stale'
-  clod -i first+second bash -c true 2>&1 | grep -q 'building clod-first.second'
-  set +e
-  clod -i first+fixed env 2>&1 | grep -q "fixed can't go on top"; test "${PIPESTATUS[0]}" = 1 || exit 1
-  clod -i first+nope env; test $? = 1 || exit 1
+  clod images | has '^  first.second  *stale'
+  clod -i first+second bash -c true 2>&1 | has 'building clod-first.second'
+  exits 1 clod -i first+fixed env 2>out
+  grep -q "fixed can't go on top" out
+  exits 1 clod -i first+nope env
   for name in first+ +first first++second; do
-    clod -i "$name" env 2>&1 | grep -q 'invalid image name'; test "${PIPESTATUS[0]}" = 1 || exit 1
+    exits 1 clod -i "$name" env 2>out
+    grep -q 'invalid image name' out
   done
-  clod default image first+nope; test $? = 1 || exit 1
-  set -e
-  clod -i fixed+first env | grep -q '^image: *clod-fixed.first '
-  clod -i first.second env | grep -q '^image: *clod-first.second '
+  exits 1 clod default image first+nope
+  clod -i fixed+first env | has '^image: *clod-fixed.first '
+  clod -i first.second env | has '^image: *clod-first.second '
   # three: third is built on the combination clod-first.second
   clod -i first+second+third bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond\nthird")"'
-  clod images | grep -q '^  first.second.third  *built'
+  clod images | has '^  first.second.third  *built'
   clod default image first+second
-  clod env | grep -q '^image: *clod-first.second '
-  clod images | grep -q '^\* first.second  *built'
+  clod env | has '^image: *clod-first.second '
+  clod images | has '^\* first.second  *built'
   clod default image --reset
   # a variant on a combination rebuilds when a variant in it changes
   rm -rf ~/.clod/images/ontop
   clod new-image ontop first+second
   grep -q '^FROM clod-first.second$' ~/.clod/images/ontop/Dockerfile
   clod -i ontop bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
-  clod images | grep -q '^  ontop  *built'
+  clod images | has '^  ontop  *built'
   echo 'RUN true' >> ~/.clod/images/second/Dockerfile
-  clod images | grep -q '^  ontop  *stale'
+  clod images | has '^  ontop  *stale'
   clod -i ontop bash -c true 2>&1 | tee out
   grep -q 'building clod-first.second' out
   grep -q 'building clod-ontop' out
@@ -289,7 +302,7 @@ test_rebuild() {
   for t in clod clod-first clod-first.second; do after+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
   for i in 0 1 2; do
     test "${before[i]}" != "${after[i]}"
-    if docker image inspect "${before[i]}" >/dev/null 2>&1; then exit 1; fi
+    if docker image inspect "${before[i]}" >/dev/null 2>&1; then false; fi
   done
 }
 
@@ -389,7 +402,8 @@ for t in "${selected[@]}"; do
   [[ -n $github ]] && echo "::group::$t"
   dir=$(mktemp -d "$work/$t.XXXX")
   (
-    set -eo pipefail
+    set -eEo pipefail
+    trap 'echo "$t failed at line $LINENO:$(sed -n "${LINENO}p" "$repo/test/run.sh")" >&2' ERR
     cd "$dir"
     case $t in
       variant-*) test_variant "${t#variant-}" ;;
