@@ -88,7 +88,7 @@ base_dir=$script_dir
 
 # The commands, and the ones among them that run in the container.
 run_commands='claude codex bash zsh'
-commands="$run_commands env images homes new-image new-shared default rebuild update install completion"
+commands="$run_commands env images homes new-image new-shared default build rebuild update install completion"
 # The long options parse_args takes, for tab completion.
 options='--image --home --creds --port --force --skip-build --docker --help --version'
 
@@ -125,7 +125,8 @@ Commands:
   codex [args]           Codex
   bash|zsh [args]        a shell in the container
   env                    show the home, image, login, ports, envrc and variables
-  images                 list the base image and the variants
+  images [NAME]          list the base image and the variants, or show how
+                         image NAME is built: the images it is FROM
   homes                  list the homes and their logins
   new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
                          a starter on combination FROM (A+B), a copy of the
@@ -135,6 +136,7 @@ Commands:
                          starter (--force replaces it, keeping a backup)
   default [KEY [VALUE]]  show or set your defaults: image, command, home,
                          creds, ports (VALUE --reset removes one)
+  build                  build the image and its bases where they're stale
   rebuild                rebuild the image and its bases from scratch
   update                 update clod itself (git pull in its checkout)
   install [DIR]          link clod into DIR, or a directory on your PATH
@@ -842,6 +844,8 @@ cmd_complete() {
       1:home|1:creds) offer $homes --reset ;;
       1:ports) offer --reset ;;
     esac
+  elif [[ $cmd == images && ${#cmd_args[@]} == 0 ]]; then
+    offer_images
   elif [[ $cmd == new-image && ${#cmd_args[@]} == 1 ]]; then
     offer_images variants
   fi
@@ -949,8 +953,71 @@ image_row() {
   printf '%s %-16s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
 }
 
+# Adds a row for clod image $1 to the chain_* arrays, then the rows of the clod
+# images it is FROM, in any stage, each once.
+chain_seen=() chain_rows=()
+image_chain() {
+  local tag=$1 dir base='' src from='' parent parents=() t
+  for t in ${chain_seen[@]+"${chain_seen[@]}"}; do
+    [[ $t == "$tag" ]] && return 0
+  done
+  chain_seen+=("$tag")
+  if [[ $tag == clod ]]; then
+    dir=$base_dir
+    src=$([[ -n $dir ]] && tildify "$dir/Dockerfile" || echo 'local image')
+    src+=' (base)'
+  else
+    tag_variant "$tag"
+    dir=$REPLY base=$variant_base
+    src=$([[ -n $dir ]] && tildify "$dir/Dockerfile" || echo 'local image')
+  fi
+  if [[ -n $dir ]]; then
+    while IFS= read -r parent; do
+      parents+=("$parent")
+      from+="${from:+, }$parent"
+    done < <(variant_parents "$dir" "$base")
+  fi
+  walk_image "$tag" state
+  chain_rows+=("${tag#clod-}" "$REPLY" "${from:--}" "$src")
+  for parent in ${parents[@]+"${parents[@]}"}; do
+    [[ $parent == clod || $parent == clod-* ]] && image_chain "$parent"
+  done
+  return 0
+}
+
+# Shows how image $1 is built: the chain of clod images it is FROM, with their
+# Dockerfiles.
+show_image() {
+  local tag i w=(4 5 4)
+  if [[ $1 == clod ]]; then
+    tag=clod
+  else
+    resolve_variant "$1"
+    tag=$REPLY
+    if [[ -z $tag ]]; then
+      echo "clod: no variant named '$1' (clod images lists them)" >&2
+      exit 1
+    fi
+  fi
+  image_chain "$tag"
+  for (( i = 0; i < ${#chain_rows[@]}; i += 4 )); do
+    (( ${#chain_rows[i]} > w[0] )) && w[0]=${#chain_rows[i]}
+    (( ${#chain_rows[i+1]} > w[1] )) && w[1]=${#chain_rows[i+1]}
+    (( ${#chain_rows[i+2]} > w[2] )) && w[2]=${#chain_rows[i+2]}
+  done
+  printf "%-${w[0]}s  %-${w[1]}s  %-${w[2]}s  %s\n" NAME STATE FROM SOURCE
+  for (( i = 0; i < ${#chain_rows[@]}; i += 4 )); do
+    printf "%-${w[0]}s  %-${w[1]}s  %-${w[2]}s  %s\n" "${chain_rows[@]:i:4}"
+  done
+}
+
 cmd_images() {
   local n src t
+  (( $# <= 1 )) || usage_error "images takes at most one image name"
+  if (( $# )); then
+    show_image "$1"
+    return 0
+  fi
   any_stale=''
   printf '  %-16s %-7s %s\n' NAME STATE SOURCE
   image_row clod clod "$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)"
@@ -1136,13 +1203,19 @@ cmd_env() {
   return 0
 }
 
-cmd_rebuild() {
+# build and rebuild: builds the image and the clod images it is FROM, those
+# that are stale or, for rebuild, all of them.
+cmd_build() {
   if [[ $tag != clod && -z $variant_dir ]]; then
-    echo "clod: $tag is not a clod image or variant, so there is nothing to rebuild" >&2
+    echo "clod: $tag is not a clod image or variant, so there is nothing to $command" >&2
     exit 1
   fi
   walk_image "$tag" build
-  docker image prune -f --filter label=clod.hash >/dev/null
+  if [[ -n $built ]]; then
+    docker image prune -f --filter label=clod.hash >/dev/null
+  else
+    echo "clod: ${tag#clod-} is up to date"
+  fi
 }
 
 # Runs command $command with arguments $@ in the container, building its image
@@ -1242,7 +1315,7 @@ setup_image
 setup_container
 case $command in
   env|images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
-  rebuild) need_docker; cmd_rebuild; exit 0 ;;
+  build|rebuild) need_docker; cmd_build; exit 0 ;;
 esac
 refuse_secrets
 need_docker

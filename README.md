@@ -108,7 +108,8 @@ the rest to the default command, so `clod -- --resume` is `clod claude
 
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
 what changed, one line per change. The next `clod` rebuilds the image if it
-changed.
+changed; `clod build` builds it straight away instead, without starting a
+container.
 
 An image is otherwise kept as built. To refresh its system packages, Node and
 whatever its variant downloads, rebuild it from scratch. When an image's files
@@ -117,6 +118,7 @@ as it is:
 
 ```bash
 clod update           # update clod
+clod build            # build the image now, if it changed
 clod rebuild          # rebuild the image from scratch
 clod --skip-build     # run the image as built
 ```
@@ -251,6 +253,7 @@ compiler or browser on top. clod comes with these, in [`images/`](images):
 clod -i go             # run the go variant
 clod default image go  # run it from now on
 clod images            # list the base, the bundled variants and yours, and which are stale
+clod images go+sudo    # how an image is built: the images it's FROM, and their Dockerfiles
 ```
 
 The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
