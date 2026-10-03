@@ -7,4 +7,5 @@ USER root
 RUN apt-get install -y chromium fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
     && echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox"' > /etc/chromium.d/clod
 RUN npx --yes playwright install-deps chromium && rm -rf /root/.npm
+COPY CLAUDE.md /etc/clod/.claude/rules/browser.md
 USER claude

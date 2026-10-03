@@ -531,6 +531,8 @@ FROM clod
 USER root
 # RUN apt-get install -y postgresql-client
 USER claude
+# Instructions for Claude about this image, from a CLAUDE.md beside this file:
+# COPY CLAUDE.md /etc/clod/.claude/rules/$name.md
 STARTER
     echo "clod: created $(tildify "$target") with a starter Dockerfile"
   fi

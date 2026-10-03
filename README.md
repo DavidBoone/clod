@@ -225,6 +225,15 @@ in the base, so variants can `apt-get install` without `apt-get update`. The
 directory is the build context, so `COPY` works for files beside the
 `Dockerfile`.
 
+A variant can give Claude instructions about itself, such as where its tools
+are. Put them in a Markdown file beside the `Dockerfile` and copy it into
+`/etc/clod/.claude/rules/`, which Claude Code loads in every image built from
+the variant:
+
+```dockerfile
+COPY CLAUDE.md /etc/clod/.claude/rules/mine.md
+```
+
 Images are never pulled at launch, so `-i` must name a variant or an image
 already built locally.
 
