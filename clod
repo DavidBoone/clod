@@ -236,7 +236,7 @@ find_envrc() {
 # variables (PATH, terminal size, direnv's own) are left out, and multi-line
 # ones, which --env-file can't carry, are skipped with a warning.
 envrc_vars() {
-  local clean=(env -i HOME="$HOME" PATH="$PATH" DIRENV_LOG_FORMAT=) base out
+  local clean=(env -i HOME="$HOME" PATH="$PATH" DIRENV_LOG_FORMAT=) base out err status=0
   local dump='BEGIN {
     for (k in ENVIRON) {
       if (k !~ /^[A-Za-z_][A-Za-z0-9_]*$/) continue
@@ -258,7 +258,13 @@ envrc_vars() {
       awk "$2"
     ' _ "$1" "$dump") || { echo "clod: $(tildify "$1") failed" >&2; return 1; }
   elif command -v direnv >/dev/null; then
-    out=$("${clean[@]}" direnv exec "$(dirname "$1")" awk "$dump") ||
+    # Some direnv versions log "loading" and "using" lines even with an empty
+    # DIRENV_LOG_FORMAT; its other messages still get through.
+    err=$(mktemp)
+    out=$("${clean[@]}" direnv exec "$(dirname "$1")" awk "$dump" 2>"$err") || status=$?
+    grep -vE $'^(\e\\[[0-9;]*m)*direnv: (loading|using) ' "$err" >&2
+    rm -f "$err"
+    (( status )) &&
       { echo "clod: run 'direnv allow' to use $(tildify "$1"), or add a .clod.envrc beside it" >&2; return 1; }
   else
     echo "clod: ignoring $(tildify "$1"): direnv is not installed" >&2
@@ -751,26 +757,33 @@ STARTER
 fi
 
 if [[ $command == env ]]; then
+  field() { printf '%-9s%s\n' "$1:" "$2"; }
   home_path=$(tildify "$home")
   if [[ $home_label == "$home_path" ]]; then
-    echo "home:  $home_label"
+    field home "$home_label"
   else
-    echo "home:  $home_label ($home_path)"
+    field home "$home_label ($home_path)"
   fi
-  echo "image: $tag${variant_dir:+ ($(tildify "$variant_dir"))}"
-  echo "command: ${CLOD_COMMAND:-claude} (what a bare clod runs)"
+  field image "$tag${variant_dir:+ ($(tildify "$variant_dir"))}"
+  field command "${CLOD_COMMAND:-claude} (what a bare clod runs)"
   if [[ -n $creds ]]; then
-    echo "login: borrowed from $creds_label"
+    field login "borrowed from $creds_label"
   else
-    echo "login: own"
+    field login own
   fi
-  echo "tz:    ${tz:-UTC}"
-  [[ -n $envrc ]] && echo "envrc: $(tildify "$envrc")"
-  [[ $OSTYPE == linux* ]] && echo "user:  claude as $(id -u):$(id -g)"
-  [[ -n $shared_dir ]] && echo "shared: $(tildify "$shared_dir")"
-  (( ${#port_args[@]} )) && echo "ports: ${port_args[*]}"
-  [[ -n $docker_socket ]] && echo "docker: the host's Docker socket (root on the Docker host)"
-  [[ -f $config ]] && echo "config: $(tildify "$config")"
+  field tz "${tz:-UTC}"
+  [[ -n $envrc ]] && field envrc "$(tildify "$envrc")"
+  [[ $OSTYPE == linux* ]] && field user "claude as $(id -u):$(id -g)"
+  [[ -n $shared_dir ]] && field shared "$(tildify "$shared_dir")"
+  if (( ${#port_args[@]} )); then
+    shown=''
+    for p in "${port_args[@]}"; do
+      [[ $p == -p ]] || shown+="${shown:+, }${p%:*} → ${p##*:}"
+    done
+    field ports "$shown"
+  fi
+  [[ -n $docker_socket ]] && field docker "the host's Docker socket (root on the Docker host)"
+  [[ -f $config ]] && field config "$(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
   exit 0
 fi
