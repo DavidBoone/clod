@@ -1,0 +1,223 @@
+#!/bin/zsh
+# Run Claude Code (default), Codex, bash or zsh in the clod container on the current directory.
+#
+#   clod [claude args]     Claude Code
+#   clod codex [args]      Codex
+#   clod bash [args]       bash
+#   clod zsh [args]        zsh
+#   clod env               show the home, image, envrc and variables that would be passed in
+#
+# Launcher settings come from the calling shell's environment:
+#
+#   CLOD_HOME   container home: a name (~/.clod/homes/<name>) or, if it contains a
+#               slash, a host path relative to the current directory (default: default)
+#   CLOD_IMAGE  image to run (default clod): a variant name, built from
+#               ~/.clod/images/<name>/ as clod-<name>, or any docker image
+#   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME);
+#               unset = the home keeps its own
+#
+# The envrc (below) can set these too, as defaults for the shell's.
+#
+# The clod image is built from this script's directory, and a variant from its
+# images/ directory, whenever their files (or, for a variant, the image it is
+# FROM) change. A variant can build on another as FROM clod-<name>.
+#
+# ~/.clod/shared, if present, is mounted read-only as /etc/claude-code, where
+# Claude Code reads managed settings and CLAUDE.md for every home.
+#
+# Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
+# hold the home label, image tag and login source this run resolved to.
+#
+# On a Linux host the clod image's claude user is built with the host user's
+# uid and gid, and host.docker.internal is mapped to the host.
+#
+# The nearest .clod.envrc or .envrc, looking up from the current directory, is
+# evaluated on the host and the variables it sets are passed into the container.
+# In each directory .clod.envrc wins over .envrc. A .clod.envrc is sourced in
+# bash with set -a and direnv's stdlib when direnv is installed; an .envrc is
+# loaded by direnv itself, so it must be allowed and only exports count.
+# Launcher settings it sets are used, not passed in.
+
+emulate -L zsh
+setopt extended_glob
+
+# Sets REPLY to the nearest .clod.envrc or .envrc from $PWD up, or to nothing.
+find_envrc() {
+  local dir=$PWD
+  REPLY=
+  while :; do
+    [[ -f $dir/.clod.envrc ]] && { REPLY=$dir/.clod.envrc; return }
+    [[ -f $dir/.envrc ]] && { REPLY=$dir/.envrc; return }
+    [[ $dir == / ]] && return
+    dir=${dir:h}
+  done
+}
+
+# Prints the variables envrc file $1 sets, as NAME=value lines. Host-only
+# variables (PATH, terminal size, direnv's own) are left out.
+envrc_vars() {
+  local clean=(env -i HOME="$HOME" PATH="$PATH" DIRENV_LOG_FORMAT=) base out
+  [[ -n $XDG_CONFIG_HOME ]] && clean+=(XDG_CONFIG_HOME="$XDG_CONFIG_HOME")
+  [[ -n $XDG_DATA_HOME ]] && clean+=(XDG_DATA_HOME="$XDG_DATA_HOME")
+  base=$($clean env)
+  if [[ $1 == */.clod.envrc ]]; then
+    out=$($clean bash -c '
+      command -v direnv >/dev/null && eval "$(direnv stdlib)"
+      cd "${1%/*}" || exit
+      set -a
+      . "$1"
+      set +a
+      env
+    ' _ $1) || { print -u2 "clod: ${1/#$HOME/~} failed"; return 1 }
+  elif (( $+commands[direnv] )); then
+    out=$($clean direnv exec ${1:h} env) ||
+      { print -u2 "clod: run 'direnv allow' to use ${1/#$HOME/~}, or add a .clod.envrc beside it"; return 1 }
+  else
+    print -u2 "clod: ignoring ${1/#$HOME/~}: direnv is not installed"
+    return 0
+  fi
+  print -r -- $out | grep -vxF -f <(print -r -- $base) |
+    grep -vE '^(PATH|PWD|OLDPWD|SHLVL|_|LINES|COLUMNS|DIRENV_[A-Z_]*)='
+  return 0
+}
+
+find_envrc
+envrc=$REPLY
+vars=()
+if [[ -n $envrc ]]; then
+  lines=("${(@f)$(envrc_vars $envrc)}") || exit 1
+  vars=(${lines:#})
+fi
+# Launcher settings from the envrc are defaults for the shell's, not container
+# variables.
+for v in ${(M)vars:#CLOD_(HOME|IMAGE|CREDS)=*}; do
+  [[ -n ${(P)${v%%=*}} ]] || typeset -g ${v%%=*}=${v#*=}
+done
+vars=(${vars:#CLOD_(HOME|IMAGE|CREDS|PROFILE)=*})
+if (( ${+CLOD_PROFILE} )); then
+  print -u2 "clod: CLOD_PROFILE is retired; set CLOD_HOME=$CLOD_PROFILE instead"
+  exit 1
+fi
+
+clod_dir=$HOME/.clod
+(( $+commands[shasum] )) && sum=shasum || sum=sha1sum
+
+# Docker Engine on Linux keeps bind-mount ownership as is, so claude gets the
+# host user's ids there.
+base_args=()
+[[ $OSTYPE == linux* ]] &&
+  base_args=(--build-arg CLOD_UID=$(id -u) --build-arg CLOD_GID=$(id -g))
+
+# Resolves a CLOD_HOME-style value ($2, named $1 in errors) into $REPLY.
+resolve_home() {
+  if [[ $2 == */* ]]; then
+    REPLY=${2:a}
+  elif [[ $2 == [A-Za-z0-9_-]## ]]; then
+    REPLY=$clod_dir/homes/$2
+  else
+    print -u2 "clod: invalid $1 name '$2' (use ./$2 for a path)"
+    exit 1
+  fi
+}
+
+resolve_home CLOD_HOME ${CLOD_HOME:-default}
+home=$REPLY
+home_label=${${home#$clod_dir/homes/}/#$HOME/~}
+
+image=${CLOD_IMAGE:-clod}
+
+creds=
+if [[ -n $CLOD_CREDS ]]; then
+  resolve_home CLOD_CREDS $CLOD_CREDS
+  creds=$REPLY/.claude/.credentials.json
+  if [[ ! -s $creds ]]; then
+    print -u2 "clod: CLOD_CREDS home has no login yet: ${creds/#$HOME/~}"
+    exit 1
+  fi
+  [[ $REPLY == $home ]] && creds=
+fi
+creds_label=${${${creds%/.claude/.credentials.json}#$clod_dir/homes/}/#$HOME/~}
+
+if [[ $image == *[[:space:]]* ]]; then
+  print -u2 "clod: invalid CLOD_IMAGE '$image'"
+  exit 1
+fi
+variant_dir=$clod_dir/images/$image
+if [[ $image == [A-Za-z0-9_-]## && -f $variant_dir/Dockerfile ]]; then
+  tag=clod-$image
+else
+  variant_dir=
+  tag=$image
+fi
+base_dir=${0:A:h}
+[[ -f $base_dir/Dockerfile ]] || base_dir=
+
+tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
+tz=${tz##*zoneinfo/}
+
+if [[ $1 == env ]]; then
+  print "home:  $home_label${${home_label:#${home/#$HOME/~}}:+ (${home/#$HOME/~})}"
+  print "image: $tag${variant_dir:+ (${variant_dir/#$HOME/~})}"
+  if [[ -n $creds ]]; then
+    print "login: borrowed from $creds_label"
+  else
+    print "login: own"
+  fi
+  print "tz:    ${tz:-UTC}"
+  [[ -n $envrc ]] && print "envrc: ${envrc/#$HOME/~}"
+  [[ $OSTYPE == linux* ]] && print "user:  claude as $(id -u):$(id -g)"
+  [[ -d $clod_dir/shared ]] && print "shared: ${clod_dir/#$HOME/~}/shared"
+  (( ${#vars} )) && print -rl -- $vars
+  exit 0
+fi
+
+mkdir -p $home
+# Builds $1 from directory $2, with any further docker build arguments, unless
+# the image is already labelled with hash $3.
+build_if_changed() {
+  [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' $1 2>/dev/null) == $3 ]] && return
+  print -u2 "clod: building $1..."
+  docker build -t $1 --label clod.hash=$3 "${@:4}" $2 || exit 1
+}
+
+files_hash() {
+  (cd $1 && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 $sum) | $sum | cut -d' ' -f1
+}
+
+# Builds clod or clod-<variant> $1, first building the clod image it is FROM.
+building=()
+build_image() {
+  local tag=$1 dir parent hash build_args=()
+  if (( ${building[(Ie)$tag]} )); then
+    print -u2 "clod: image $tag is built FROM itself"
+    exit 1
+  fi
+  building+=($tag)
+  if [[ $tag == clod ]]; then
+    [[ -n $base_dir ]] || return 0
+    dir=$base_dir
+    hash=$( { cat $dir/Dockerfile $dir/entrypoint.sh; print -r -- $base_args } | $sum | cut -d' ' -f1)
+    build_args=($base_args)
+  else
+    dir=$clod_dir/images/${tag#clod-}
+    parent=$(awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; exit } }' $dir/Dockerfile)
+    if [[ $parent == clod || ( $parent == clod-* && -f $clod_dir/images/${parent#clod-}/Dockerfile ) ]]; then
+      build_image $parent
+    fi
+    hash=$( { docker image inspect -f '{{.Id}}' $parent 2>/dev/null; files_hash $dir } | $sum | cut -d' ' -f1)
+  fi
+  build_if_changed $tag $dir $hash $build_args
+}
+
+if [[ $tag == clod || -n $variant_dir ]]; then
+  build_image $tag
+fi
+
+print -u2 "clod · $home_label · $tag · ${#vars} vars"
+args=(-v "$home":/home/claude -v "$PWD":/workspace -e CLOD_HOME=$home_label -e CLOD_IMAGE=$tag)
+[[ -n $creds ]] && args+=(-v "$creds":/home/claude/.claude/.credentials.json -e CLOD_CREDS=$creds_label)
+[[ -n $tz ]] && args+=(-e TZ=$tz)
+[[ -d $clod_dir/shared ]] && args+=(-v "$clod_dir/shared":/etc/claude-code:ro)
+# Docker Engine on Linux has no built-in host.docker.internal.
+[[ $OSTYPE == linux* ]] && args+=(--add-host=host.docker.internal:host-gateway)
+exec docker run -it --rm --env-file <(print -rl -- $vars) $args "$tag" "$@"

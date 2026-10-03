@@ -1,0 +1,7 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash /etc/claude-code/statusline.sh",
+    "refreshInterval": 10
+  }
+}
