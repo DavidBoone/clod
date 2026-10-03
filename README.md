@@ -373,7 +373,7 @@ path. Your shell's settings and a project's envrc win over these defaults;
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
-tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`), and `CLOD_CREDS`, set only when a login is
+(`clod`, `clod-<variant>`, `clod-<a>.<b>`), and `CLOD_CREDS`, set only when a login is
 borrowed, the home it came from.
 
 ### Per-project environment
@@ -436,9 +436,13 @@ resumed sessions.
 
 Docker Engine on Linux keeps bind-mount ownership as is, so on a Linux host
 `clod` builds the image with `claude` given your uid and gid, and files written
-to the home and workspace belong to you. The image is therefore specific to the
-user who built it. The launcher also maps `host.docker.internal` to the host,
-which Docker Desktop and Colima provide on their own.
+to the home and workspace belong to you. The images are therefore specific to
+the user who built them, so when your uid isn't 1000, clod tags yours with it
+(`clod:1001`, `clod-go:1001`) and users sharing one Docker keep their own. You
+still name them `clod` and `clod-go`: in `-i`, in `CLOD_IMAGE` and in a
+variant's `FROM` line, which clod points at your tag when it builds the
+variant. The launcher also maps `host.docker.internal` to the host, which
+Docker Desktop and Colima provide on their own.
 
 Rootless Docker and Podman are untested.
 

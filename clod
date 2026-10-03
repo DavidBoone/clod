@@ -39,13 +39,16 @@
 # is told about the container comes with the image, from container.md.
 #
 # Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
-# hold the home label, image tag and login source this run resolved to, and
+# hold the home label, image name and login source this run resolved to, and
 # CLOD_PORTS the published container ports. CLOD_WORKSPACE_FILES is set when the
 # current directory has files, so the container can warn if it sees none. With
 # --docker, CLOD_HOST_WORKSPACE is the current directory's path on the host.
 #
 # On a Linux host the clod image's claude user is built with the host user's
-# uid and gid, and host.docker.internal is mapped to the host.
+# uid and gid, and host.docker.internal is mapped to the host. For a uid other
+# than 1000, clod's images are tagged NAME:<uid>, and a variant's FROM lines
+# naming them are pointed at those tags, so users sharing a Docker daemon each
+# keep their own images.
 #
 # The nearest .clod.envrc or .envrc, looking up from the current directory, is
 # evaluated on the host and the variables it sets are passed into the container.
@@ -386,10 +389,14 @@ fi
 command -v shasum >/dev/null && sum=shasum || sum=sha1sum
 
 # Docker Engine on Linux keeps bind-mount ownership as is, so claude gets the
-# host user's ids there.
-base_args=()
-[[ $OSTYPE == linux* ]] &&
+# host user's ids there. Images built for a uid other than the Dockerfile's
+# 1000 are tagged with uid_tag, :<uid>, so users sharing a Docker daemon don't
+# replace each other's; clod still calls them clod, clod-NAME and clod-A.B.
+base_args=() uid_tag=''
+if [[ $OSTYPE == linux* ]]; then
   base_args=(--build-arg "CLOD_UID=$(id -u)" --build-arg "CLOD_GID=$(id -g)")
+  [[ $(id -u) == 1000 ]] || uid_tag=:$(id -u)
+fi
 
 # Resolves a CLOD_HOME-style value ($2, named $1 in errors) into $REPLY.
 resolve_home() {
@@ -429,8 +436,11 @@ base_hash() {
 
 # Prints the images variant directory $1's Dockerfile is FROM, one per line,
 # with the ARGs declared before its first FROM expanded; BASE is $2 if given.
+# Given clod images $3 (space-separated), it prints the Dockerfile instead,
+# with each FROM that names one of them naming it with uid_tag.
 variant_parents() {
-  awk -v base="$2" '
+  awk -v base="$2" -v own="$3" -v suffix="$uid_tag" '
+    BEGIN { n = split(own, o, " "); for (i = 1; i <= n; i++) mine[o[i]] = 1 }
     function expand(s,   out, name) {
       out = ""
       while (match(s, /\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*/)) {
@@ -449,8 +459,14 @@ variant_parents() {
     }
     toupper($1) == "FROM" {
       from = 1
-      for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print expand($i); break }
-    }' "$1/Dockerfile"
+      for (i = 2; i <= NF; i++) if ($i !~ /^--/) {
+        image = expand($i)
+        if (own == "") print image
+        else if (image in mine) $i = image suffix
+        break
+      }
+    }
+    own != "" { print }' "$1/Dockerfile"
 }
 
 # True when variant directory $1's Dockerfile declares ARG BASE before its first
@@ -514,8 +530,19 @@ check_combination() {
   done
 }
 
-# Prints the hash a variant from directory $1, FROM images $2..., is labelled
-# with when built on those images as they are now.
+# Sets REPLY to the Docker tag of image $1: with uid_tag if it is clod or a
+# variant's image, else $1 itself.
+docker_tag() {
+  if [[ $1 == clod ]]; then
+    REPLY=$1$uid_tag
+    return 0
+  fi
+  tag_variant "$1"
+  if [[ -n $REPLY ]]; then REPLY=$1$uid_tag; else REPLY=$1; fi
+}
+
+# Prints the hash a variant from directory $1, FROM Docker tags $2..., is
+# labelled with when built on those images as they are now.
 variant_hash() {
   local dir=$1 parent
   shift
@@ -639,7 +666,7 @@ if [[ $image == *[[:space:]]* ]]; then
   exit 1
 fi
 # A variant NAME is built as clod-NAME, and a combination A+B, B built on A, as
-# clod-A.B; image becomes NAME or A.B.
+# clod-A.B; image becomes NAME or A.B. run_tag is the Docker tag that runs.
 check_combination "$image"
 variant_tag "$image"
 if [[ -n $REPLY ]]; then
@@ -650,6 +677,8 @@ if [[ -n $REPLY ]]; then
 else
   tag=$image variant_dir=''
 fi
+docker_tag "$tag"
+run_tag=$REPLY
 
 shared_dir=$clod_dir/shared
 [[ -d $shared_dir ]] || shared_dir=$script_dir/shared
@@ -681,8 +710,9 @@ if [[ $command == images ]]; then
   checking=()
   image_state() {
     local tag=$1 dir base label hash parent parents=() stale='' c
-    REPLY=-
-    label=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$tag" 2>/dev/null) || return 0
+    docker_tag "$tag"
+    label=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$REPLY" 2>/dev/null) ||
+      { REPLY=-; return 0; }
     REPLY=built
     for c in ${checking[@]+"${checking[@]}"}; do
       [[ $c == "$tag" ]] && return 0
@@ -696,11 +726,12 @@ if [[ $command == images ]]; then
       [[ -z $dir ]] && { REPLY=built; return 0; }
       checking+=("$tag")
       while IFS= read -r parent; do
-        parents+=("$parent")
         if [[ $parent == clod || $parent == clod-* ]]; then
           image_state "$parent"
           [[ $REPLY == built ]] || stale=1
         fi
+        docker_tag "$parent"
+        parents+=("$REPLY")
       done < <(variant_parents "$dir" "$base")
       unset 'checking[${#checking[@]}-1]'
       hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
@@ -731,8 +762,9 @@ if [[ $command == images ]]; then
     fi
     image_row "$n" "clod-$n" "$src"
   done
-  # Combinations that are built, and the one that runs here.
-  combos=$({ docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null
+  # Combinations built with this user's tags, and the one that runs here.
+  combos=$({ docker image ls --filter label=clod.hash --format '{{.Repository}}:{{.Tag}}' 2>/dev/null |
+               sed -n "s/${uid_tag:-:latest}\$//p"
              [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-.*\.' | sort -u)
   for t in $combos; do
     image_row "${t#clod-}" "$t" "$(t=${t#clod-}; echo "${t//./ + }")"
@@ -891,7 +923,7 @@ if [[ $command == env ]]; then
   fi
   field tz "${tz:-UTC}"
   [[ -n $envrc ]] && field envrc "$(tildify "$envrc")"
-  [[ $OSTYPE == linux* ]] && field user "claude as $(id -u):$(id -g)"
+  [[ $OSTYPE == linux* ]] && field user "claude as $(id -u):$(id -g)${uid_tag:+, images tagged $uid_tag}"
   [[ -n $shared_dir ]] && field shared "$(tildify "$shared_dir")"
   if (( ${#port_args[@]} )); then
     shown=''
@@ -906,20 +938,23 @@ if [[ $command == env ]]; then
   exit 0
 fi
 
-# Builds $1 from directory $2, with any further docker build arguments, unless
-# the image is already labelled with hash $3. For `clod rebuild` it always builds,
-# without the layer cache.
+# Builds clod image $1, tagged with uid_tag, from directory $2, with any further
+# docker build arguments, unless the image is already labelled with hash $3.
+# Dockerfile text $4, if any, takes the place of the directory's. For `clod
+# rebuild` it always builds, without the layer cache.
 built='' rebuild=''
 [[ $command == rebuild ]] && rebuild=1
 build_if_changed() {
-  local no_cache=()
+  local no_cache=() file=()
+  [[ -n $4 ]] && file=(-f -)
   if [[ -n $rebuild ]]; then
     no_cache=(--no-cache)
   else
-    [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$3" ]] && return
+    [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1$uid_tag" 2>/dev/null) == "$3" ]] && return
   fi
   echo "clod: building $1..." >&2
-  docker build -t "$1" --label "clod.hash=$3" ${no_cache[@]+"${no_cache[@]}"} "${@:4}" "$2" || exit 1
+  docker build -t "$1$uid_tag" --label "clod.hash=$3" ${file[@]+"${file[@]}"} \
+    ${no_cache[@]+"${no_cache[@]}"} "${@:5}" "$2" <<< "$4" || exit 1
   built=1
 }
 
@@ -927,7 +962,7 @@ build_if_changed() {
 # every stage's, so a multi-stage Dockerfile can name one in any stage.
 building=() done_images=()
 build_image() {
-  local tag=$1 dir base parents=() parent hash build_args=() b
+  local tag=$1 dir base parents=() parent own=() tags=() dockerfile='' hash build_args=() b
   for b in ${building[@]+"${building[@]}"}; do
     if [[ $b == "$tag" ]]; then
       echo "clod: image $tag is built FROM itself" >&2
@@ -948,21 +983,24 @@ build_image() {
   else
     tag_variant "$tag"
     dir=$REPLY base=$variant_base
-    [[ -n $base ]] && build_args=(--build-arg "BASE=$base")
+    [[ -n $base ]] && build_args=(--build-arg "BASE=$base$uid_tag")
     while IFS= read -r parent; do
       parents+=("$parent")
     done < <(variant_parents "$dir" "$base")
     for parent in ${parents[@]+"${parents[@]}"}; do
-      if [[ $parent == clod ]]; then
-        build_image clod
-      elif [[ $parent == clod-* ]]; then
-        tag_variant "$parent"
-        [[ -n $REPLY ]] && build_image "$parent"
+      [[ $parent == clod ]] || tag_variant "$parent"
+      if [[ $parent == clod || -n $REPLY ]]; then
+        build_image "$parent"
+        own+=("$parent") tags+=("$parent$uid_tag")
+      else
+        tags+=("$parent")
       fi
     done
-    hash=$(variant_hash "$dir" ${parents[@]+"${parents[@]}"})
+    hash=$(variant_hash "$dir" ${tags[@]+"${tags[@]}"})
+    # FROM clod or clod-NAME means this user's image, the one with uid_tag.
+    [[ -n $uid_tag && ${#own[@]} -gt 0 ]] && dockerfile=$(variant_parents "$dir" "$base" "${own[*]}")
   fi
-  build_if_changed "$tag" "$dir" "$hash" ${build_args[@]+"${build_args[@]}"}
+  build_if_changed "$tag" "$dir" "$hash" "$dockerfile" ${build_args[@]+"${build_args[@]}"}
   unset 'building[${#building[@]}-1]'
 }
 
@@ -1018,11 +1056,11 @@ need_docker
 
 mkdir -p "$home"
 
-if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
+if [[ -n $skip_build ]] && docker image inspect "$run_tag" >/dev/null 2>&1; then
   echo "clod: running $tag as built" >&2
 elif [[ $tag == clod || -n $variant_dir ]]; then
   build_image "$tag"
-elif ! docker image inspect "$tag" >/dev/null 2>&1; then
+elif ! docker image inspect "$run_tag" >/dev/null 2>&1; then
   variants=$(for f in "$clod_dir"/images/*/Dockerfile "$script_dir"/images/*/Dockerfile; do
     [[ -f $f ]] && basename "$(dirname "$f")"
   done | sort -u | tr '\n' ' ')
@@ -1069,7 +1107,7 @@ if [[ -n $docker_socket ]]; then
   sock=/var/run/docker.sock
   mount=(--mount "type=bind,src=$sock,dst=$sock")
   # shellcheck disable=SC2016 # the quoted script runs in the container
-  probe=$(docker run --rm --pull=never "${mount[@]}" --entrypoint sh "$tag" \
+  probe=$(docker run --rm --pull=never "${mount[@]}" --entrypoint sh "$run_tag" \
     -c 'stat -c "%F %g" "$1" && { command -v docker >/dev/null || echo no-cli; }' sh "$sock" 2>&1)
   sock_stat=${probe%%$'\n'*}
   if [[ ! $sock_stat =~ ^socket\ [0-9]+$ ]]; then
@@ -1084,4 +1122,4 @@ fi
 [[ -t 0 && -t 1 ]] && args+=(-t)
 echo "clod · $home_label · $tag · ${#vars[@]} vars${docker_socket:+ · Docker socket}" >&2
 # Images are local: clod builds them, so a mistyped name must not pull one.
-exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${args[@]}" "$tag" "$command" "$@"
+exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${args[@]}" "$run_tag" "$command" "$@"
