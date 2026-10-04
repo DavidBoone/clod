@@ -54,6 +54,9 @@ ARG CLOD_GID=1000
 RUN groupadd -o -g $CLOD_GID claude \
     && useradd -l -m -o -u $CLOD_UID -g claude -s /bin/bash claude
 
+# clod --scratch mounts an empty volume here, which takes this directory's owner.
+RUN mkdir /workspace && chown claude:claude /workspace
+
 # A separate chmod rather than COPY --chmod, which needs BuildKit; Homebrew's
 # docker on macOS has no buildx, so it builds with the classic builder.
 COPY entrypoint.sh /usr/local/bin/clod-entrypoint

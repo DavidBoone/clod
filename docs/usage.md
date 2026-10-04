@@ -9,6 +9,7 @@ clod codex [args]    # Codex
 clod bash | zsh      # a shell in the container
 clod -i go           # the go image variant (see Image variants)
 clod -H work         # the "work" home (see Homes)
+clod -s              # an empty, throwaway /workspace (see A scratch workspace)
 clod env             # show the home, image, login, ports, envrc and variables that would be used
 clod default         # show your defaults
 clod --help          # all commands and options
@@ -30,6 +31,20 @@ then read your credentials and every home's login. `clod --force` runs anyway.
 
 See also [Image variants](images.md) and [Homes, settings and per-project
 environment](configuration.md).
+
+## A scratch workspace
+
+`clod --scratch` (`-s`) runs with an empty `/workspace` instead of the current
+directory: a Docker volume that's removed with the container, for a question,
+an experiment or a repository cloned just to look at. Only the home persists,
+so copy out anything worth keeping, or push it somewhere. No envrc is read,
+since the current directory isn't the project, and clod runs from anywhere,
+your home directory included. It doesn't combine with `--docker`, which needs a
+workspace on the host.
+
+Claude Code keys its history and memory by the workspace path, which is
+`/workspace` in every clod run, so a scratch session shares them with the
+home's other sessions: `clod -s claude --resume` lists them all.
 
 ## Install and tab completion
 
