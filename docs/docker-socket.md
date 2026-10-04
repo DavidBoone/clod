@@ -31,7 +31,7 @@ reach grows from the project and its home to that whole host:
 Use `--docker` only for work you'd let run on your machine unconfined, and run
 it with a home that holds no more than that work needs.
 
-`--docker` is an option only, with no setting in the environment, an envrc or
+`--docker` is an option only, with no setting in the environment, an `.envrc` or
 your defaults, so a project can't turn it on: it applies only when you type it.
 
 ## How the agent's containers behave
