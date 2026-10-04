@@ -219,11 +219,16 @@ test_statusline() {
          "rate_limits":{"five_hour":{"used_percentage":12}}}' > input.json
   git init -q -b main .
   # the model, clod's home, image and ports, and git on one line; the meters on the next
-  clod -P 5173 bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod -P 5173 -P 6000/udp bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g; s/\x1b\]8;;[^\x07]*\x07//g' | tee out
   test "$(wc -l < out)" = 2
-  head -1 out | has '✦ Opus .*⌂ default ⬢ clod  ⇄ :5173 .*ᚴ main ±[0-9]'
+  head -1 out | has '✦ Opus .*⌂ default ⬢ clod  ⇄ :5173  .*ᚴ main ±[0-9]'
+  if grep -q 6000 out; then false; fi
   tail -1 out | has '42%'
+  # inside .git, where git status fails, it still shows both lines
+  sed -i 's|"/workspace"|"/workspace/.git"|' input.json
+  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' > out
+  test "$(wc -l < out)" = 2
 }
 
 test_port() {

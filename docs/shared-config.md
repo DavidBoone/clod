@@ -7,8 +7,9 @@ Claude Code reads managed settings and a managed `CLAUDE.md` from
 this repo's [`shared/`](../shared) there, which updates with `git pull`:
 
 - `statusline.sh` is the statusline, on two lines: the model, the home
-  (`⌂`) and image (`⬢`), the published ports (`⇄`, links to `localhost`
-  where the terminal supports them) and the git branch with its count of
+  (`⌂`) and image (`⬢`), the published ports (`⇄`, TCP only, as links to
+  `localhost` where the terminal supports them, right when the host port is
+  the container's) and the git branch with its count of
   changed files; then tokens, context use, cache idle time and rate limits.
   A rate limit's bar shows usage against how much of its window has passed,
   red where usage is ahead.

@@ -53,11 +53,11 @@ mkdir -p "$state_dir"
 state_file="$state_dir/$session_id"
 turn_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/cache-turns.log"
 
-# ANSI helpers (statusline renders escape codes). Basic/bright 16 colors only:
-# truecolor gets approximated by the statusline renderer. Line 1 gives each
-# group one hue (cyan Claude, magenta clod, green git); line 2 has blue
-# labels and white values. Green, yellow and red otherwise mean good, warning
-# and bad.
+# ANSI helpers (statusline renders escape codes). Basic/bright 16 colors, with
+# one 256-color gray background in qbar: truecolor gets approximated by the
+# statusline renderer. Line 1 gives each group one hue (cyan Claude, magenta
+# clod, green git); line 2 has blue labels and white values. Green, yellow and
+# red otherwise mean good, warning and bad.
 RST=$'\033[0m'
 DIM=$'\033[2m'
 MAGENTA=$'\033[35m'
@@ -181,10 +181,12 @@ fi
 # link to http://localhost:PORT. Claude Code passes the links on only when it
 # recognises the terminal (TERM_PROGRAM and the like, or FORCE_HYPERLINK=1);
 # otherwise they show as plain text. CLOD_PORTS holds container ports, so a
-# link is right only when the host port is the same.
+# link is right only when the host port is the same. UDP ports aren't shown.
 if [ -n "${CLOD_PORTS:-}" ]; then
     ports_part="${MAGENTA}⇄${RST}"
     for port in ${CLOD_PORTS//,/ }; do
+        [[ $port == */udp ]] && continue
+        port=${port%/tcp}
         ports_part+=" ${UL_MAGENTA}"$'\033]8;;'"http://localhost:${port}"$'\a'":${port}"$'\033]8;;\a'"${RST}"
     done
     head+=("$ports_part")
@@ -195,7 +197,7 @@ if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --sh
         || git -C "$cwd" --no-optional-locks rev-parse --short HEAD 2>/dev/null); then
     # Two extra spaces set the git part apart from the model/ports/clod group.
     git_part="  ${GREEN}ᚴ ${branch}${RST}"
-    dirty=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null | wc -l)
+    dirty=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null | wc -l) || dirty=0
     [ "$dirty" -gt 0 ] && git_part+=" ${YELLOW}±${dirty}${RST}"
     head+=("$git_part")
 fi
@@ -229,14 +231,17 @@ fi
 # the elapsed share of the window and blank cells stand for the time still to
 # come, with a gray background marking out all ten cells (256-color gray; 232
 # is black, 255 white; 236 suits a black terminal background); the green fill
-# is usage, and fill past the track (ahead of pace) is red. Any nonzero usage
-# fills at least one cell.
+# is usage, and fill past the track (ahead of pace) is red. Both round to the
+# nearest cell, and usage at or behind pace never passes the track. Any
+# nonzero usage fills at least one cell.
 qbar() {
     local u=$1 e=$2 W=10 s="" i
     local BG=$'\033[48;5;236m' FUT=" "
     # Alternative: no background, dim ▁ line for the future.
     # local BG="" FUT="${DIM}▁"
-    local nu=$(( (u * W + 99) / 100 )) ne=$(( (e * W + 50) / 100 ))
+    local nu=$(( (u * W + 50) / 100 )) ne=$(( (e * W + 50) / 100 ))
+    [ "$u" -le "$e" ] && [ "$nu" -gt "$ne" ] && nu=$ne
+    [ "$u" -gt 0 ] && [ "$nu" -eq 0 ] && nu=1
     [ "$nu" -gt "$W" ] && nu=$W
     [ "$ne" -gt "$W" ] && ne=$W
     for ((i = 0; i < W; i++)); do

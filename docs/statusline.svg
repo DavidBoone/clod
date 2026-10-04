@@ -55,7 +55,7 @@
 <rect x="639.6" y="38" width="8.4" height="18" fill="#303030"/>
 <text x="639.6" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
 <rect x="648.0" y="38" width="8.4" height="18" fill="#303030"/>
-<text x="648.0" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<text x="648.0" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
 <rect x="656.4" y="38" width="8.4" height="18" fill="#303030"/>
 <text x="656.4" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
 <rect x="664.8" y="38" width="8.4" height="18" fill="#303030"/>
