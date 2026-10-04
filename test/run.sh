@@ -87,7 +87,7 @@ test_run_command() {
     test "$(id -u)" = "'"$(id -u)"'"
     test "$(cat /workspace/from-host)" = hello
     test -f /etc/claude-code/managed-settings.json
-    test -s /etc/clod/.claude/rules/clod.md
+    test -r /etc/clod/.claude/rules/clod.md
     touch /workspace/from-container
     git --version; gh --version | head -1; node --version; python3 --version; jq --version; fd --version
   '
@@ -403,16 +403,16 @@ test_variant() {
     browser)
       check='echo "<h1>clod</h1>" > /tmp/page.html &&
         chromium --headless --screenshot=/tmp/shot.png --window-size=800,600 file:///tmp/page.html &&
-        test -s /tmp/shot.png && test -s /etc/clod/.claude/rules/browser.md' ;;
+        test -s /tmp/shot.png && test -r /etc/clod/.claude/rules/browser.md' ;;
     docker)
       check='docker --version && docker compose version && docker buildx version &&
-        test -s /etc/clod/.claude/rules/docker.md' ;;
+        test -r /etc/clod/.claude/rules/docker.md' ;;
     dotnet) check='dotnet --version' ;;
     go) check='go version' ;;
     lamp) check='php -v && composer --version && apache2 -v && mariadb --version' ;;
     python) check='uv --version && gcc --version | head -1 && python3-config --includes' ;;
     rust) check='cargo new -q /tmp/hello && cd /tmp/hello && cargo run -q' ;;
-    sudo) check='test "$(sudo -n whoami)" = root && test -s /etc/clod/.claude/rules/sudo.md' ;;
+    sudo) check='test "$(sudo -n whoami)" = root && test -r /etc/clod/.claude/rules/sudo.md' ;;
     go+sudo) check='go version && test "$(sudo -n whoami)" = root' ;;
   esac
   clod -i "$1" bash -c "set -e; $check"

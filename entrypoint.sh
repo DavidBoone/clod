@@ -52,6 +52,10 @@ fi
 # .claude/rules/) load through --add-dir. The = form keeps the option, which
 # takes several directories, from taking a subcommand or prompt as one.
 if [ -d /etc/clod ]; then
+    # Claude Code skips a file it can't read without a word. COPY keeps the
+    # source file's mode, so a source saved as 600 gives an unreadable one.
+    find /etc/clod ! -readable -printf \
+        "clod: Claude can't read %p; chmod 644 the file it was copied from and rebuild\n" >&2 || true
     set -- --add-dir=/etc/clod "$@"
     export CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
 fi
