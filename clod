@@ -72,11 +72,11 @@
 # Below are the helpers, the setup phases and the commands (cmd_* functions);
 # the dispatch at the bottom runs the phases a command needs, then the command.
 # Commands are a single word (env, default, the run commands) or a noun with a
-# verb (image, home, workspace, shared); a bare noun lists. A new command or
-# noun goes in `commands`, a new verb in its noun's list of verbs, and either in
-# the usage, a cmd_ function and the dispatch; a new option in parse_args, the
-# usage and `options`; a new launcher setting in `settings`. Tab completion
-# reads those lists.
+# verb (image, home, workspace, shared); a bare noun lists, except shared, which
+# needs a verb. A new command or noun goes in `commands`, a new verb in its
+# noun's list in noun_verbs, and either in the usage, a cmd_ function and the
+# dispatch; a new option in parse_args, the usage and `options`; a new launcher
+# setting in `settings`. Tab completion reads those lists.
 #
 # Helpers return a value in REPLY, plus named globals when there are more, so
 # callers needn't fork a subshell. Those whose result is text print it instead:
@@ -98,9 +98,22 @@ script_dir=$(cd "$(dirname "$script")" && pwd -P)
 base_dir=$script_dir
 [[ -f $base_dir/Dockerfile ]] || base_dir=
 
-# The commands, and the ones among them that run in the container.
+# The commands, the ones among them that run in the container, and the nouns,
+# whose verbs noun_verbs lists.
 run_commands='claude codex bash zsh'
-commands="$run_commands env images homes new-image remove-image prune new-shared default build rebuild update install completion"
+nouns='image home workspace shared'
+commands="$run_commands env $nouns default update install completion"
+# Commands that stand for image's verbs, left out of the usage and completion.
+alias_commands='build rebuild'
+
+# Sets REPLY to the verbs of noun $1.
+noun_verbs() {
+  case $1 in
+    image) REPLY='show new build rebuild rm prune' ;;
+    home|workspace) REPLY='rm' ;;
+    shared) REPLY='new diff' ;;
+  esac
+}
 # The long options parse_args takes, for tab completion.
 options='--image --home --workspace --port --scratch --force --skip-build --docker --help --version'
 
@@ -461,7 +474,7 @@ resolve_variant() {
     exit 1
   fi
   if [[ -n $variant_missing && $1 == *+* ]]; then
-    echo "clod: no variant named '$variant_missing' (clod images lists them)" >&2
+    echo "clod: no variant named '$variant_missing' (clod image lists them)" >&2
     exit 1
   fi
   if [[ -n $REPLY ]]; then
@@ -475,12 +488,12 @@ resolve_variant() {
 }
 
 # Builds $1 from directory $2, with any further docker build arguments, unless
-# the image is already labelled with hash $3. For `clod rebuild` it always builds,
-# without the layer cache.
+# the image is already labelled with hash $3. For `clod image rebuild` it always
+# builds, without the layer cache.
 built=''
 build_if_changed() {
   local no_cache=()
-  if [[ $command == rebuild ]]; then
+  if [[ $verb == rebuild ]]; then
     no_cache=(--no-cache)
   else
     [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$3" ]] && return
@@ -520,7 +533,7 @@ walk_image() {
     [[ -n $base_dir ]] || return 0
     dir=$base_dir hash=$(base_hash)
     build_args=(${base_args[@]+"${base_args[@]}"})
-    [[ $command == rebuild ]] && build_args+=(--pull)
+    [[ $verb == rebuild ]] && build_args+=(--pull)
   else
     tag_variant "$tag"
     dir=$REPLY base=$variant_base
@@ -572,13 +585,13 @@ holds_secrets() {
 # The setup phases.
 
 # Reads the command line into scratch, workspace_opt, force, skip_build,
-# docker_socket, command (empty for the default command) and args, the
-# command's arguments.
+# docker_socket, command (empty for the default command), verb (a noun's, or
+# empty) and args, the command's arguments.
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
   local opt_ports=() dashdash=''
-  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' command=''
+  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' command='' verb=''
   while (( $# )); do
     case $1 in
       -i|--image|-H|--home|-w|--workspace|-P|--port)
@@ -609,15 +622,29 @@ parse_args() {
     esac
   done
   if [[ -z $dashdash && $# -gt 0 ]]; then
-    is_one_of "$1" "$commands" || usage_error "unknown command '$1'; the default command's args go after --"
+    is_one_of "$1" "$commands $alias_commands" ||
+      usage_error "unknown command '$1'; the default command's args go after --"
     command=$1
     shift
   fi
-  case $command in
-    env|homes|new-shared|prune|update|completion)
-      (( $# == 0 )) || usage_error "$command takes no arguments" ;;
+  if is_one_of "$command" "$alias_commands"; then
+    echo "clod: clod $command is deprecated; use clod image $command" >&2
+    verb=$command command=image
+  elif is_one_of "$command" "$nouns" && (( $# )); then
+    noun_verbs "$command"
+    is_one_of "$1" "$REPLY" || usage_error "unknown $command command '$1' (one of: ${REPLY// /, })"
+    verb=$1
+    shift
+  fi
+  case $command${verb:+ $verb} in
+    env|image|'image prune'|home|workspace|'shared new'|'shared diff'|update|completion)
+      (( $# == 0 )) || usage_error "$command${verb:+ $verb} takes no arguments" ;;
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
-    new-image) (( $# <= 2 )) || usage_error "new-image takes a NAME and at most one image to start from" ;;
+    shared) usage_error "shared takes a command: new or diff" ;;
+    'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
+    'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
+    'home rm') (( $# )) || usage_error "home rm takes one or more vol:NAME" ;;
+    'workspace rm') (( $# )) || usage_error "workspace rm takes one or more NAME or vol:NAME" ;;
   esac
   [[ -n $scratch && -n $workspace_opt ]] && usage_error "--scratch and --workspace don't combine"
   args=("$@")
@@ -848,11 +875,13 @@ SHIM
 
 # Prints the words in $@ that start with the word being completed, $cur, as
 # the shell completes them: after $pre (an option's --NAME=), less $strip (what
-# bash, which splits words at = and :, has before its own current word).
+# bash, which splits words at = and :, has before its own current word). Skips
+# the words in $given, the names a command has already.
 offer() {
   local word out
   for word in "$@"; do
     [[ $word == "$cur"* ]] || continue
+    is_one_of "$word" "$given" && continue
     out=$pre$word
     printf '%s\n' "${out#"$strip"}"
   done
@@ -893,10 +922,10 @@ offer_images() {
 # the last word, given the words before it, one per line, or exits 1 where the
 # word is a file name: a command's arguments, a home's path or install's
 # directory. It reads only directories, never the envrc, and asks Docker only
-# for volume homes and workspaces and remove-image's images, so it's quick.
+# for volume homes and workspaces and image rm's images, so it's quick.
 cmd_complete() {
   local raw=("$@") words=() cur last pre='' strip='' glue='' cmd='' cmd_args=() prev=''
-  local word i s keys='' homes='' variants
+  local word i s keys='' homes='' variants verb='' given=''
   # bash splits a word at = and : (--home=vol:NAME, -P 3000:5173) into pieces,
   # with each = and : a piece of its own; this joins them back up.
   for word in ${raw[@]+"${raw[@]}"}; do
@@ -938,7 +967,7 @@ cmd_complete() {
     for word in "$clod_dir"/homes/*/; do
       [[ -d $word ]] && word=${word%/} && homes+=" ${word##*/}"
     done
-    if [[ $prev == -H || $prev == --home || ${cmd_args[0]} == home ]]; then
+    if [[ $prev == -H || $prev == --home || $cmd == default && ${cmd_args[0]} == home ]]; then
       while IFS= read -r word; do homes+=" vol:$word"; done < <(volume_names clod-home-)
     fi
   fi
@@ -969,19 +998,39 @@ cmd_complete() {
       1:home) [[ $cur == */* ]] && return 1; offer $homes --reset ;;
       1:ports) offer --reset ;;
     esac
-  elif [[ $cmd == images && ${#cmd_args[@]} == 0 ]]; then
-    offer_images
-  elif [[ $cmd == build || $cmd == rebuild ]]; then
-    offer_images
-  elif [[ $cmd == remove-image ]]; then
-    # The images clod built, named as clod images lists them, less those named
-    # already.
-    while IFS= read -r word; do
-      is_one_of "$word" "${cmd_args[*]}" || offer "$word"
-    done < <(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
-      sed -n 's/^clod-//p; /^clod$/p' | sort -u)
-  elif [[ $cmd == new-image && ${#cmd_args[@]} == 1 ]]; then
-    offer_images variants
+  elif is_one_of "$cmd" "$nouns"; then
+    if (( ${#cmd_args[@]} == 0 )); then
+      noun_verbs "$cmd"
+      offer $REPLY
+      return 0
+    fi
+    verb=${cmd_args[0]}
+    unset 'cmd_args[0]'
+    cmd_args=(${cmd_args[@]+"${cmd_args[@]}"})
+    # The names given already, with and without vol:.
+    for word in ${cmd_args[@]+"${cmd_args[@]}"}; do
+      given+=" $word vol:${word#vol:} ${word#vol:}"
+    done
+    # shellcheck disable=SC2046 # image and volume names are words
+    case $cmd:$verb in
+      image:show) (( ${#cmd_args[@]} )) || offer_images ;;
+      image:build|image:rebuild) offer_images ;;
+      # The images clod built, named as clod image lists them.
+      image:rm)
+        offer $(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
+          sed -n 's/^clod-//p; /^clod$/p' | sort -u)
+        ;;
+      image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
+      home:rm) offer $(volume_names clod-home- | sed 's/^/vol:/') ;;
+      # A workspace is named NAME, or vol:NAME once that is typed.
+      workspace:rm)
+        if [[ $cur == vol:* ]]; then
+          offer $(volume_names clod-workspace- | sed 's/^/vol:/')
+        else
+          offer $(volume_names clod-workspace-)
+        fi
+        ;;
+    esac
   fi
   return 0
 }
@@ -1049,7 +1098,7 @@ cmd_default() {
       image)
         resolve_variant "$value"
         if [[ -z $REPLY ]] && ! docker image inspect "$value" >/dev/null 2>&1; then
-          echo "clod: no variant or local image named '$value' (clod images lists them)" >&2
+          echo "clod: no variant or local image named '$value' (clod image lists them)" >&2
           exit 1
         fi
         ;;
@@ -1093,7 +1142,7 @@ in_use() {
   [[ $'\n'$used_ids$'\n' == *$'\n'$id$'\n'* ]]
 }
 
-# Sets REPLY to the state of image $1 as clod images shows it: walk_image's,
+# Sets REPLY to the state of image $1 as clod image shows it: walk_image's,
 # with ", in use" when a container uses it.
 image_state() {
   walk_image "$1" state
@@ -1138,7 +1187,7 @@ image_chain() {
 
 # Shows how image $1 is built: the chain of clod images it is FROM, with their
 # Dockerfiles.
-show_image() {
+cmd_image_show() {
   local tag i w=(4 5 4)
   if [[ $1 == clod ]]; then
     tag=clod
@@ -1146,7 +1195,7 @@ show_image() {
     resolve_variant "$1"
     tag=$REPLY
     if [[ -z $tag ]]; then
-      echo "clod: no variant named '$1' (clod images lists them)" >&2
+      echo "clod: no variant named '$1' (clod image lists them)" >&2
       exit 1
     fi
   fi
@@ -1162,13 +1211,10 @@ show_image() {
   done
 }
 
-cmd_images() {
+# Lists the base image, the variants and the images clod built, with their
+# states.
+cmd_image() {
   local n src t i names tags srcs states=() state_width=5 mark
-  (( $# <= 1 )) || usage_error "images takes at most one image name"
-  if (( $# )); then
-    show_image "$1"
-    return 0
-  fi
   any_stale='' any_used=''
   names=(clod) tags=(clod)
   srcs=("$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)")
@@ -1211,7 +1257,7 @@ cmd_images() {
   echo "bundled  comes with clod, in $(tildify "$script_dir")"
   [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
   [[ -n $any_used ]] && echo "in use   a container, maybe a stopped one, uses it (docker ps -a), so it can't be removed"
-  echo "clod remove-image NAME removes a built image, and clod prune the stale ones"
+  echo "clod image rm NAME removes a built image, and clod image prune the stale ones"
   return 0
 }
 
@@ -1232,7 +1278,7 @@ remove_tag() {
 
 # Removes the images clod built named $@ (as for -i), or with none named the
 # image -i selects, or none if any isn't one.
-cmd_remove_image() {
+cmd_image_rm() {
   local name n tags=() t
   (( $# )) || set -- "$image"
   for name; do
@@ -1240,7 +1286,7 @@ cmd_remove_image() {
     t=clod-${n#clod-}
     [[ $name == clod ]] && t=clod
     if [[ -z $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$t" 2>/dev/null) ]]; then
-      echo "clod: no image clod built named '$name' (clod images lists them)" >&2
+      echo "clod: no image clod built named '$name' (clod image lists them)" >&2
       exit 1
     fi
     if in_use "$t"; then
@@ -1258,7 +1304,7 @@ cmd_remove_image() {
 # and the untagged ones builds replaced. Images built on others go first, so a
 # base's layers are freed with the last image using them; the base image goes
 # last.
-cmd_prune() {
+cmd_image_prune() {
   local t stale=() used=()
   while IFS= read -r t; do
     walk_image "$t" state
@@ -1291,7 +1337,7 @@ home_row() {
   printf '%s %-20s %-7s %s\n' "$mark" "$2" "$claude" "$codex"
 }
 
-cmd_homes() {
+cmd_home() {
   local d v listed=''
   printf '  %-20s %-7s %s\n' HOME CLAUDE CODEX
   for d in "$clod_dir"/homes/*; do
@@ -1311,7 +1357,102 @@ cmd_homes() {
   echo "  (vol:NAME, a Docker volume; ? means its logins can't be checked from here)"
 }
 
-cmd_new_shared() {
+# True when a container, running or stopped, uses Docker volume $1, which Docker
+# then won't remove.
+volume_in_use() {
+  [[ -n $(docker ps -aq --filter "volume=$1" 2>/dev/null) ]]
+}
+
+# Removes the Docker volumes $1NAME for the names in $3..., volume $2s (home or
+# workspace), once they're listed and, unless --force, the answer to a y/N
+# question is yes. Removes none if any isn't one or a container uses it.
+remove_volumes() {
+  local prefix=$1 kind=$2 name v vols=() answer out
+  shift 2
+  for name; do
+    v=$prefix$name
+    is_one_of "$v" "${vols[*]}" && continue
+    if [[ ! $name =~ $name_re ]] || ! docker volume inspect "$v" >/dev/null 2>&1; then
+      echo "clod: no volume $kind named vol:$name (clod $kind lists them)" >&2
+      exit 1
+    fi
+    if volume_in_use "$v"; then
+      echo "clod: a container uses vol:$name, so it can't be removed; docker ps -a lists the containers" >&2
+      exit 1
+    fi
+    vols+=("$v")
+  done
+  if [[ -z $force ]]; then
+    echo "clod: deleting, with every file in them:" >&2
+    for v in "${vols[@]}"; do
+      echo "  vol:${v#"$prefix"} (Docker volume $v)" >&2
+    done
+    if [[ ! -t 0 ]]; then
+      echo "clod: there's no terminal to ask in; clod --force $kind rm deletes without asking" >&2
+      exit 1
+    fi
+    read -r -p "Delete? [y/N] " answer
+    case $answer in
+      y|Y|yes|YES) ;;
+      *) echo "clod: nothing deleted" >&2; exit 1 ;;
+    esac
+  fi
+  for v in "${vols[@]}"; do
+    if ! out=$(docker volume rm "$v" 2>&1); then
+      echo "clod: can't remove $v: $out" >&2
+      exit 1
+    fi
+    echo "removed vol:${v#"$prefix"} ($v)"
+  done
+}
+
+# Removes the volume homes named $@, as vol:NAME.
+cmd_home_rm() {
+  local name names=()
+  for name; do
+    if [[ $name != vol:* ]]; then
+      echo "clod: home rm removes only volume homes, named vol:NAME; to remove the home $name, delete its folder" >&2
+      exit 1
+    fi
+    names+=("${name#vol:}")
+  done
+  remove_volumes clod-home- home "${names[@]}"
+}
+
+# Lists the volume workspaces, marking those a container uses.
+cmd_workspace() {
+  local n names state any_used='' mark
+  names=$(volume_names clod-workspace-)
+  if [[ -z $names ]]; then
+    echo "clod: no volume workspaces; clod -w vol:NAME creates one"
+    return 0
+  fi
+  printf '  %-20s %s\n' WORKSPACE STATE
+  for n in $names; do
+    mark=' ' state=-
+    [[ vol:$n == "$workspace" ]] && mark='*'
+    if volume_in_use "clod-workspace-$n"; then
+      state='in use' any_used=1
+    fi
+    printf '%s %-20s %s\n' "$mark" "vol:$n" "$state"
+  done
+  echo
+  echo "clod -w vol:NAME uses one, and a new name creates it (the Docker volume"
+  echo "clod-workspace-NAME); clod workspace rm NAME deletes one"
+  [[ -n $any_used ]] && echo "in use: a container, maybe a stopped one, uses it (docker ps -a), so it can't be removed"
+  return 0
+}
+
+# Removes the volume workspaces named $@, as NAME or vol:NAME.
+cmd_workspace_rm() {
+  local name names=()
+  for name; do
+    names+=("${name#vol:}")
+  done
+  remove_volumes clod-workspace- workspace "${names[@]}"
+}
+
+cmd_shared_new() {
   local target=$clod_dir/shared starter=$script_dir/shared report backup
   if [[ ! -d $starter ]]; then
     echo "clod: there's no starter shared config in $(tildify "$script_dir")" >&2
@@ -1337,8 +1478,8 @@ cmd_new_shared() {
     fi
     echo "clod: $(tildify "$target") already exists. Compared with the starter in $(tildify "$starter"):"
     echo "$report"
-    echo "See the differences: diff -ru $(tildify "$starter") $(tildify "$target")"
-    echo "Replace yours with the starter (yours is kept as a backup): clod --force new-shared"
+    echo "See the differences: clod shared diff"
+    echo "Replace yours with the starter (yours is kept as a backup): clod --force shared new"
     return 0
   fi
   mkdir -p "$clod_dir"
@@ -1352,9 +1493,23 @@ cmd_new_shared() {
   echo "Edit the files there; every clod from now on mounts it instead of the starter."
 }
 
-cmd_new_image() {
+# Shows the differences between the starter shared config and ~/.clod/shared.
+cmd_shared_diff() {
+  local target=$clod_dir/shared starter=$script_dir/shared
+  if [[ ! -d $starter ]]; then
+    echo "clod: there's no starter shared config in $(tildify "$script_dir")" >&2
+    exit 1
+  fi
+  if [[ ! -d $target ]]; then
+    echo "clod: there's no $(tildify "$target"), so clod uses the starter; clod shared new creates it" >&2
+    exit 1
+  fi
+  diff -ru "$starter" "$target" && echo "clod: $(tildify "$target") is the same as the starter"
+  return 0
+}
+
+cmd_image_new() {
   local name=$1 from=$2 target src='' combo='' variants from_lines
-  [[ -n $name ]] || usage_error "new-image needs a NAME"
   [[ $name =~ $name_re ]] || usage_error "invalid image name '$name'"
   target=$clod_dir/images/$name
   if [[ -e $target ]]; then
@@ -1367,7 +1522,7 @@ cmd_new_image() {
     find_variant "$from"
     src=$REPLY
     if [[ -z $src && -z $combo ]]; then
-      echo "clod: no variant named '$from' (clod images lists them)" >&2
+      echo "clod: no variant named '$from' (clod image lists them)" >&2
       exit 1
     fi
   elif [[ -f $script_dir/images/$name/Dockerfile ]]; then
@@ -1453,11 +1608,11 @@ cmd_env() {
   return 0
 }
 
-# build and rebuild: builds the images named $@ (as for -i), or with none named
-# the image -i selects, and the clod images they are FROM, those that are stale
-# or, for rebuild, all of them. Each image is built once, however many of the
-# named ones are built on it.
-cmd_build() {
+# image build and image rebuild: builds the images named $@ (as for -i), or
+# with none named the image -i selects, and the clod images they are FROM, those
+# that are stale or, for rebuild, all of them. Each image is built once, however
+# many of the named ones are built on it.
+cmd_image_build() {
   local name tags=() t
   (( $# )) || set -- "$image"
   for name; do
@@ -1468,7 +1623,7 @@ cmd_build() {
       t=$REPLY
     fi
     if [[ -z $t ]]; then
-      echo "clod: $name is not a clod image or variant, so there is nothing to $command" >&2
+      echo "clod: $name is not a clod image or variant, so there is nothing to $verb" >&2
       exit 1
     fi
     tags+=("$t")
@@ -1563,8 +1718,9 @@ cmd_run() {
 
 # The dispatch. install, update and completion run before the envrc is read, and default
 # before the settings it edits are resolved, so a broken one can be fixed with
-# it. The rest run once the home, image and ports are settled. Only build,
-# rebuild, remove-image, prune and a run check that Docker is up, and only a run refuses mounts holding secrets.
+# it. The rest run once the home, image and ports are settled. Only a run and
+# the commands that change images or volumes, or list volume workspaces, check
+# that Docker is up, and only a run refuses mounts holding secrets.
 # The shell's tab completion runs __complete, which takes no options and reads
 # no settings.
 if [[ $1 == __complete ]]; then
@@ -1584,12 +1740,12 @@ load_settings
 setup_home
 setup_image
 setup_container
-case $command in
+case $command${verb:+ $verb} in
   env) check_workspace; cmd_env; exit 0 ;;
-  images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
-  build|rebuild) need_docker; cmd_build "$@"; exit 0 ;;
-  remove-image) need_docker; cmd_remove_image "$@"; exit 0 ;;
-  prune) need_docker; cmd_prune; exit 0 ;;
+  image|'image show'|'image new'|home|'shared new'|'shared diff')
+    "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
+  'image build'|'image rebuild') need_docker; cmd_image_build "$@"; exit 0 ;;
+  'image '*|'home '*|workspace*) need_docker; "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
 esac
 check_workspace
 refuse_secrets
