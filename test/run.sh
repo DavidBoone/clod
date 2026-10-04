@@ -21,7 +21,7 @@
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
-base_tests='env run-command mount-paths scratch workspace refuses-home claude codex statusline
+base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude codex statusline
   port docker-socket envrc volume-home volume-workspace default shared command-line
   multi-stage combine rebuild image-rm image-prune completion'
 classic_tests='classic'
@@ -96,6 +96,24 @@ test_run_command() {
     git --version; gh --version | head -1; node --version; python3 --version; jq --version; fd --version
   '
   test "$(stat -c %u from-container)" = "$(id -u)"
+}
+
+test_terminal() {
+  export TERM=xterm-256color TERM_PROGRAM=iTerm.app TERM_PROGRAM_VERSION=3.7.3 \
+    LC_TERMINAL=iTerm2 LC_TERMINAL_VERSION=3.7.3 COLORTERM=truecolor
+  # in a terminal they go in, all but TERM
+  cat > check <<'EOF'
+set -e
+test "$TERM" = xterm
+test "$TERM_PROGRAM" = iTerm.app && test "$TERM_PROGRAM_VERSION" = 3.7.3
+test "$LC_TERMINAL" = iTerm2 && test "$LC_TERMINAL_VERSION" = 3.7.3
+test "$COLORTERM" = truecolor
+EOF
+  script -qec 'clod bash /workspace/check' /dev/null < /dev/null
+  # without one they don't
+  clod bash -c '
+    test -z "${TERM_PROGRAM:-}${TERM_PROGRAM_VERSION:-}${LC_TERMINAL:-}${LC_TERMINAL_VERSION:-}${COLORTERM:-}"
+  ' < /dev/null
 }
 
 test_mount_paths() {
