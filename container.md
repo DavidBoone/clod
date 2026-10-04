@@ -23,6 +23,7 @@ You can't run `clod` or see the host's `~/.clod`; the user changes these on the 
 - Environment variables for the container: `.envrc` in the project (`export FOO=bar`), loaded by direnv on the host, where it must be allowed
 - Defaults for every run: `clod default image|command|home|ports VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.envrc`
 - Instructions or managed settings for every home: `~/.clod/shared/` (`clod shared new` creates it)
+- A home on the shared folders that's slow, or that `chown` fails in: a volume home, which `clod home mv NAME vol:NAME` moves it to, login included (`clod home cp` copies)
 - Ports: `clod -P 3000` or `CLOD_PORTS`; Docker access: `clod -i docker --docker`, which gives the agent root on the Docker host
 
 On the host, `clod env` shows the settings a run would use; `clod image`, `clod home` and `clod workspace` list the images, homes and volume workspaces, and `clod --help` lists the rest. The full docs are in the repo's `docs/`: `usage.md`, `images.md`, `configuration.md`, `shared-config.md`, `docker-socket.md`, `security.md`, `docker.md`. Read them (`https://raw.githubusercontent.com/DavidBoone/clod/master/docs/<page>`) before advising on clod beyond this summary.

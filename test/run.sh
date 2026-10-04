@@ -22,7 +22,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude codex statusline
-  port docker-socket envrc volume-home volume-workspace default shared command-line
+  port docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line
   multi-stage combine rebuild image-rm image-prune completion'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -119,6 +119,7 @@ EOF
 test_mount_paths() {
   mkdir 'a,"b'
   echo hello > 'a,"b/from-host'
+  clod home new './h,"1' >/dev/null
   clod -H './h,"1' -w 'a,"b' bash -c '
     set -e
     test "$(cat /workspace/from-host)" = hello
@@ -274,11 +275,13 @@ test_envrc() {
   clod env | has '^ports: .*5000'
   if CLOD_PORTS='' clod env | has '^ports:'; then false; fi
   if clod -P '' env | has '^ports:'; then false; fi
+  clod home new from-envrc >/dev/null
   clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc'
 }
 
 test_volume_home() {
   docker volume rm -f clod-home-vtest >/dev/null
+  clod home new vol:vtest >/dev/null
   clod -H vol:vtest bash -c '
     set -e
     test "$CLOD_HOME" = vol:vtest
@@ -291,10 +294,10 @@ test_volume_home() {
   clod -H vol:vtest env | has '^home: *vol:vtest (Docker volume clod-home-vtest)'
   clod -H vol:vtest home | has '^\* vol:vtest '
   exits 1 clod -H vol:./x env
-  # home rm takes only volume homes, asks first, and needs --force without a
-  # terminal
-  exits 2 clod home rm default 2>&1 | has 'only volume homes'
-  exits 2 clod --force home rm vol:vtest default
+  # home rm takes names and vol:NAME, not paths, asks first, and needs --force
+  # without a terminal
+  exits 2 clod home rm ./x 2>&1 | has 'delete the home ./x yourself'
+  exits 2 clod --force home rm vol:vtest ~/.clod/homes/x
   exits 2 clod home rm -f vol:vtest 2>&1 | has "options go before the command"
   # a name it doesn't know removes none of them
   exits 1 clod --force home rm vol:vtest vol:no-such
@@ -309,9 +312,107 @@ test_volume_home() {
   exits 1 clod --force home rm vol:vtest 2>&1 | has 'a container uses vol:vtest'
   docker rm clod-test-home >/dev/null
   docker volume inspect clod-home-vtest >/dev/null
-  clod --force home rm vol:vtest | has -x 'removed vol:vtest (clod-home-vtest)'
+  clod --force home rm vol:vtest | has -x 'removed vol:vtest (Docker volume clod-home-vtest)'
   if docker volume inspect clod-home-vtest >/dev/null 2>&1; then false; fi
   if clod home | grep -q vtest; then false; fi
+  # a directory home, the same way
+  mkdir -p ~/.clod/homes/dtest/.claude
+  exits 1 clod home rm dtest < /dev/null 2>&1 | has 'no terminal'
+  test -d ~/.clod/homes/dtest
+  docker create --name clod-test-home --mount "type=bind,src=$HOME/.clod/homes/dtest,dst=/h" clod >/dev/null
+  exits 1 clod --force home rm dtest 2>&1 | has 'a container uses dtest'
+  docker rm clod-test-home >/dev/null
+  test -d ~/.clod/homes/dtest
+  clod --force home rm dtest dtest | has -x "removed dtest (the folder ~/.clod/homes/dtest)"
+  test ! -e ~/.clod/homes/dtest
+  exits 1 clod --force home rm dtest 2>&1 | has 'no home dtest'
+}
+
+# home cp and mv, between directory and volume homes both ways: the copy is
+# claude's, and they refuse a missing source, an existing destination, a home a
+# container uses and a directory that's off limits.
+test_home_copy() {
+  docker volume rm -f clod-home-cp1 clod-home-cp2 >/dev/null
+  docker rm -f clod-test-cp clod-test-cp-dir clod-test-cp-gone >/dev/null 2>&1 || true
+  mkdir -p ~/.clod/homes/src/.config
+  echo hi > ~/.clod/homes/src/.config/f
+  chmod 600 ~/.clod/homes/src/.config/f
+  test "$(clod home cp src vol:cp1)" = 'copied src to vol:cp1'
+  test -f ~/.clod/homes/src/.config/f
+  clod -H vol:cp1 bash -c '
+    set -e
+    test "$(cat ~/.config/f)" = hi
+    test "$(stat -c %U ~ ~/.config ~/.config/f | sort -u)" = claude
+    test "$(stat -c %a ~/.config/f)" = 600
+    touch ~/written
+  '
+  test "$(clod home cp vol:cp1 back)" = 'copied vol:cp1 to back'
+  test "$(cat ~/.clod/homes/back/.config/f)" = hi
+  test -O ~/.clod/homes/back/written
+  test "$(clod home mv vol:cp1 vol:cp2)" = 'moved vol:cp1 to vol:cp2'
+  if docker volume inspect clod-home-cp1 >/dev/null 2>&1; then false; fi
+  clod -H vol:cp2 bash -c 'test -f ~/written'
+  test "$(clod home mv back vol:cp1)" = 'moved back to vol:cp1'
+  test ! -e ~/.clod/homes/back
+  clod -H vol:cp1 bash -c 'test -f ~/written'
+  # a directory moved to a directory is renamed
+  test "$(clod home mv src ./moved/here)" = 'moved src to ./moved/here'
+  test ! -e ~/.clod/homes/src
+  test -f moved/here/.config/f
+  exits 2 clod home cp src
+  exits 2 clod home mv a b c
+  exits 2 clod home cp -f a 2>&1 | has "options go before the command"
+  exits 1 clod home cp nope vol:x 2>&1 | has -x 'clod: no home nope (clod home lists them)'
+  exits 1 clod home cp vol:nope x 2>&1 | has 'no home vol:nope'
+  exits 1 clod home cp vol:cp1 vol:cp2 2>&1 | has 'already a home vol:cp2'
+  mkdir -p ~/.clod/homes/taken
+  exits 1 clod home mv vol:cp1 taken 2>&1 | has 'taken already exists'
+  exits 1 clod home cp ./moved ./moved/here/inside 2>&1 | has 'into itself'
+  exits 1 clod home mv ~ vol:x 2>&1 | has "won't touch"
+  exits 1 clod home cp ~/.clod/homes vol:x 2>&1 | has "won't touch"
+  exits 1 clod home cp vol:cp1 ~/.clod 2>&1 | has "won't touch"
+  # neither a source nor a destination a container uses, even a stopped one
+  docker create --name clod-test-cp -v clod-home-cp1:/h clod >/dev/null
+  exits 1 clod home mv vol:cp1 elsewhere 2>&1 | has 'a container uses vol:cp1'
+  docker create --name clod-test-cp-dir --mount "type=bind,src=$PWD/moved/here,dst=/h" clod >/dev/null
+  exits 1 clod home cp ./moved/here vol:x 2>&1 | has 'a container uses'
+  mkdir gone
+  docker create --name clod-test-cp-gone --mount "type=bind,src=$PWD/gone,dst=/h" clod >/dev/null
+  rmdir gone
+  exits 1 clod home cp vol:cp2 ./gone 2>&1 | has 'a container uses'
+  docker rm clod-test-cp clod-test-cp-dir clod-test-cp-gone >/dev/null
+  test -f moved/here/.config/f
+  test ! -e gone
+  docker volume inspect clod-home-cp1 >/dev/null
+  if docker volume inspect clod-home-x >/dev/null 2>&1; then false; fi
+  clod --force home rm vol:cp1 vol:cp2 >/dev/null
+}
+
+# A run asks before creating a home that doesn't exist, and without a terminal
+# fails; clod home new creates one.
+test_home_new() {
+  docker volume rm -f clod-home-ntest >/dev/null
+  exits 1 clod -H fresh bash -c true < /dev/null 2>&1 |
+    has -x "clod: there's no home fresh; clod home new fresh creates it"
+  test ! -e ~/.clod/homes/fresh
+  exits 1 clod -H vol:ntest bash -c true < /dev/null 2>&1 | has 'no home vol:ntest'
+  if docker volume inspect clod-home-ntest >/dev/null 2>&1; then false; fi
+  # in a terminal it asks
+  printf 'n\n' | script -qec 'clod -H fresh bash -c true' /dev/null > out || true
+  has 'no home fresh; create it' < out
+  test ! -e ~/.clod/homes/fresh
+  printf 'y\n' | script -qec 'clod -H fresh bash -c true' /dev/null > out
+  test -d ~/.clod/homes/fresh
+  clod -H fresh bash -c true
+  test "$(clod home new made)" = 'created home made'
+  clod -H made bash -c 'test "$(stat -c %U ~)" = claude'
+  exits 1 clod home new made 2>&1 | has 'made already exists'
+  test "$(clod home new vol:ntest)" = 'created home vol:ntest'
+  clod -H vol:ntest bash -c 'test "$(stat -c %U ~)" = claude'
+  exits 1 clod home new vol:ntest 2>&1 | has 'already a home vol:ntest'
+  exits 2 clod home new
+  exits 2 clod home new a b
+  clod --force home rm vol:ntest >/dev/null
 }
 
 test_volume_workspace() {
@@ -612,7 +713,9 @@ test_completion() {
   if clod __complete '' | grep -qxE 'build|rebuild'; then false; fi
   test "$(clod __complete image '')" = "$(printf 'show\nnew\nbuild\nrebuild\nrm\nprune')"
   test "$(clod __complete image re)" = rebuild
-  test "$(clod __complete home '')" = rm
+  test "$(clod __complete home '')" = "$(printf 'new\ncp\nmv\nrm')"
+  test -z "$(clod __complete home new '')"
+  if clod __complete home new ./x; then false; fi
   test "$(clod __complete workspace '')" = rm
   test "$(clod __complete shared '')" = "$(printf 'new\ndiff')"
   test -z "$(clod __complete shared new '')"
@@ -654,7 +757,17 @@ test_completion() {
     '[[ "$1 $2" == "volume ls" ]] && printf "%s\n" clod-home-vhome clod-workspace-play' > bin/docker
   chmod +x bin/docker
   PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x vol:vhome
-  test -z "$(PATH=$PWD/bin:$PATH clod __complete home rm vol:vhome '')"
+  PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x work
+  # a home named already isn't offered again
+  PATH=$PWD/bin:$PATH clod __complete home rm vol:vhome '' > out
+  has -x work < out
+  if grep -qx vol:vhome out; then false; fi
+  # home cp and mv: a home, then a new one, which only a path completes
+  PATH=$PWD/bin:$PATH clod __complete home cp '' | has -x work
+  PATH=$PWD/bin:$PATH clod __complete home mv '' | has -x vol:vhome
+  test -z "$(PATH=$PWD/bin:$PATH clod __complete home cp work '')"
+  if clod __complete home cp ./w; then false; fi
+  if clod __complete home mv work ./w; then false; fi
   PATH=$PWD/bin:$PATH clod __complete workspace rm '' | has -x play
   PATH=$PWD/bin:$PATH clod __complete workspace rm vol : '' | has -x play
   test "$(PATH=$PWD/bin:$PATH clod __complete workspace rm vo)" = vol:play
@@ -665,12 +778,12 @@ test_completion() {
       'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
       'clod -w pro' 'clod --workspace=pro' 'clod claude pro' 'clod image sh' 'clod shared d' \
       'clod home rm vol:vh' 'clod workspace rm pl' 'clod workspace rm vol:pl' \
-      'clod workspace rm vo' > out
+      'clod workspace rm vo' 'clod home cp wo' 'clod home mv vol:vh' 'clod home rm wo' > out
     sed 's|proj/$|proj|' out | diff - <(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
       'clod --home=work' 'clod -H vol:vhome' 'clod --home=vol:vhome' 'clod --workspace=vol:play' \
       'clod -w proj' 'clod --workspace=proj' 'clod claude proj' 'clod image show' 'clod shared diff' \
       'clod home rm vol:vhome' 'clod workspace rm play' 'clod workspace rm vol:play' \
-      'clod workspace rm vol:play')
+      'clod workspace rm vol:play' 'clod home cp work' 'clod home mv vol:vhome' 'clod home rm work')
   done
 }
 
@@ -752,6 +865,8 @@ export HOME=$work/home
 mkdir -p "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$PATH"
 while IFS= read -r v; do unset "$v"; done < <(compgen -v CLOD_)
+# The default home, which a run without a terminal won't create.
+mkdir -p "$HOME/.clod/homes/default"
 "$repo/clod" install >/dev/null
 if [[ $(readlink "$HOME/.local/bin/clod") != "$repo/clod" || $(command -v clod) != "$HOME/.local/bin/clod" ]]; then
   echo "test/run.sh: clod install didn't link $HOME/.local/bin/clod to $repo/clod" >&2

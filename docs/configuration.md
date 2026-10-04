@@ -8,12 +8,15 @@ one home per client or context to keep those apart: `/login` once in each, and
 again when the login expires (about monthly).
 
 ```bash
-clod -H work                    # ~/.clod/homes/work, created on first use
+clod -H work                    # use ~/.clod/homes/work
 clod home                       # list the homes and which have logins
+clod home new work              # create a home without running anything
 ```
 
-A directory home is a folder under `~/.clod/homes`, or the path `-H` names;
-deleting the folder deletes the home and its login.
+A directory home is a folder under `~/.clod/homes`, or the path `-H` names.
+A run whose home doesn't exist asks, in a terminal, before creating it, so a
+mistyped name doesn't start an empty home; without a terminal it fails, and
+`clod home new` creates the home first.
 
 ### Volume homes
 
@@ -21,21 +24,44 @@ deleting the folder deletes the home and its login.
 of a directory on your machine. The volume lives on Docker's own disk (on
 macOS, inside the Colima or Docker Desktop VM), so it avoids the shared-folder
 file system: installs and caches in the home are faster, and `chown` and
-`chmod` work as on any Linux disk. Docker creates the volume on first use,
-starting it with the image's `/home/claude`.
+`chmod` work as on any Linux disk. A new volume home starts as a copy of the
+image's `/home/claude`.
 
 Its files aren't visible from the host; `clod -H vol:NAME bash` gets you a
 shell in it. `clod home` lists volume homes but shows `?` for their logins.
+`colima delete` and `docker system prune --volumes` delete volume homes.
+
+### Deleting homes
 
 ```bash
-clod home rm vol:work           # delete clod-home-work, login included, after asking
-clod --force home rm vol:work   # delete it without asking
+clod home rm work               # delete ~/.clod/homes/work, login included, after asking
+clod home rm vol:work           # delete the volume clod-home-work, after asking
+clod --force home rm work       # delete it without asking
 ```
 
 In a terminal, `clod home rm` lists what it will delete and asks first;
-without one, it needs `--force`. It deletes only volume homes, and Docker
-won't remove one a container uses. `colima delete` and
-`docker system prune --volumes` delete volume homes too.
+without one, it needs `--force`. It takes names and `vol:NAME`, not paths: a
+home at a path is a folder you delete yourself. It won't delete a home a
+container uses, even a stopped one (`docker ps -a` lists them).
+
+### Copying and moving homes
+
+`clod home cp` copies a home, login included, to a new one, and `clod home mv`
+moves it. Either side can be a name, a path or `vol:NAME`, so a directory home
+can become a volume home or the other way round:
+
+```bash
+clod home cp work vol:work      # copy ~/.clod/homes/work into the volume clod-home-work
+clod home mv vol:work work2     # move the volume into ~/.clod/homes/work2
+clod home mv work old-work      # rename a directory home
+```
+
+The copy runs in a container of the `clod` image, as `claude`, so its files
+are `claude`'s (yours, for a directory). `mv` deletes the source only once the
+copy is complete; a directory moved to a directory is renamed. Both refuse a
+destination that exists, a source or destination a container uses, even a
+stopped one, and `/`, your home folder, a folder above it, `~/.clod` and
+`~/.clod/homes`.
 
 ## Settings
 
