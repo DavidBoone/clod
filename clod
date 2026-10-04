@@ -575,6 +575,14 @@ parse_args() {
     command=$1
     shift
   fi
+  case $command in
+    build|rebuild)
+      (( $# == 0 )) || usage_error "$command takes no arguments; to $command an image, name it with -i: clod -i $1 $command" ;;
+    env|homes|new-shared|update|completion)
+      (( $# == 0 )) || usage_error "$command takes no arguments" ;;
+    install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
+    new-image) (( $# <= 2 )) || usage_error "new-image takes a NAME and at most one image to start from" ;;
+  esac
   args=("$@")
   [[ -n $opt_image ]] && CLOD_IMAGE=$opt_image
   [[ -n $opt_home ]] && CLOD_HOME=$opt_home
