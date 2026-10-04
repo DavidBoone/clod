@@ -4,9 +4,12 @@ clod's completion loaded, and prints each line as the shell completed it.
 
     test/tab-complete.py bash|zsh LINE...
 
-For each LINE it types the line and Tab, then Ctrl-A and `echo RESULT: `, and
-Enter: the shell handles keys in order, completion included, so the echoed line
-is the completed one. The environment (HOME, PATH) is passed through.
+For each LINE it waits for the shell's prompt, types the line and Tab, then
+Ctrl-A and `echo RESULT: `, and Enter: the shell handles keys in order,
+completion included, so the echoed line is the completed one. Keys typed before
+the prompt would reach the terminal's own line editing instead of the shell's,
+so nothing is typed until the prompt shows. The environment (HOME, PATH) is
+passed through.
 """
 import os
 import pty
@@ -15,8 +18,9 @@ import sys
 import time
 
 shell, lines = sys.argv[1], sys.argv[2:]
+prompt = "tab-complete> "
 argv = {"bash": ["bash", "--norc", "--noprofile", "-i"], "zsh": ["zsh", "-f", "-i"]}[shell]
-env = dict(os.environ, TERM="dumb", PS1="$ ", PROMPT="$ ")
+env = dict(os.environ, TERM="dumb", PS1=prompt, PROMPT=prompt)
 
 pid, fd = pty.fork()
 if pid == 0:
@@ -25,8 +29,8 @@ if pid == 0:
 out = b""
 
 
-def wait_for(marker, timeout=20):
-    """Reads until the output holds marker after the last read position."""
+def wait_for(marker, timeout=30):
+    """Reads until the output holds marker; returns what came before it."""
     global out
     end = time.time() + timeout
     while marker not in out:
@@ -40,13 +44,15 @@ def wait_for(marker, timeout=20):
 
 
 # zsh picks vi keys when $EDITOR mentions vi, and Ctrl-A needs emacs keys.
-emacs = b"bindkey -e; " if shell == "zsh" else b"set -o emacs; "
-os.write(fd, emacs + b'eval "$(clod completion)"; echo READY\n')
-wait_for(b"READY\r\n")
+setup = "bindkey -e" if shell == "zsh" else "set -o emacs"
+wait_for(prompt.encode())
+os.write(fd, f'{setup}; eval "$(clod completion)"\n'.encode())
+wait_for(prompt.encode())
 for line in lines:
     os.write(fd, line.encode() + b"\t\x01echo RESULT: \n")
     # the terminal echoes the typed "echo RESULT: " too, but not after a newline
     wait_for(b"\nRESULT: ")
     print(wait_for(b"\r\n").decode().rstrip())
+    wait_for(prompt.encode())
 os.write(fd, b"exit\n")
 os.waitpid(pid, 0)
