@@ -101,7 +101,7 @@ base_dir=$script_dir
 # whose verbs noun_verbs lists.
 run_commands='claude codex bash zsh'
 nouns='image home workspace shared'
-commands="$run_commands env $nouns default update install completion"
+commands="$run_commands env $nouns default update install uninstall completion"
 # Commands that stand for image's verbs, left out of the usage and completion.
 alias_commands='build rebuild'
 
@@ -129,6 +129,8 @@ variant_re='^[a-z0-9]+((_|__|-+)[a-z0-9]+)*$'
 port_re='^((([0-9.]+|\[[0-9a-fA-F:]+\]):)?[0-9]+:)?[0-9]+(/(tcp|udp))?$'
 clod_dir=$HOME/.clod
 config=$clod_dir/config
+# The directories install picks from, in order, when they're on PATH.
+install_dirs=("$HOME/.local/bin" "$HOME/bin" /opt/homebrew/bin /usr/local/bin)
 command -v shasum >/dev/null && sum=shasum || sum=sha1sum
 
 # Docker Engine on Linux keeps bind-mount ownership as is, so claude gets the
@@ -156,7 +158,9 @@ Commands:
   default [KEY [VALUE]]  show or set your defaults: image, command, home,
                          ports (VALUE --reset removes one)
   update                 update clod itself (git pull in its checkout)
-  install [DIR]          link clod into DIR, or a directory on your PATH
+  install [DIR]          link clod into DIR, or a directory on your PATH, and
+                         its tab completion where bash and zsh load it
+  uninstall              remove the links install made
   completion             print tab completion for bash and zsh, to load from
                          your shell's startup file: eval "$(clod completion)"
 
@@ -215,8 +219,9 @@ Options (before the command):
   -s, --scratch          an empty /workspace, discarded on exit, instead of the
                          current directory; no .envrc is read. Not with -w
   -f, --force            run from a directory clod otherwise refuses; replace
-                         an existing clod (install) or shared config (shared
-                         new); delete without asking (home rm, workspace rm)
+                         an existing clod or completion file (install) or
+                         shared config (shared new); delete without asking
+                         (home rm, workspace rm)
       --skip-build       run the image as built, even if its files have changed
       --docker           mount the host's Docker socket. Only the socket: the
                          docker CLI comes from the image (clod -i docker
@@ -660,7 +665,7 @@ parse_args() {
     shift
   fi
   case $command${verb:+ $verb} in
-    env|image|'image prune'|home|workspace|'shared new'|'shared diff'|update|completion)
+    env|image|'image prune'|home|workspace|'shared new'|'shared diff'|update|uninstall|completion)
       (( $# == 0 )) || usage_error "$command${verb:+ $verb} takes no arguments" ;;
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
     shared) usage_error "shared takes a command: new or diff" ;;
@@ -834,29 +839,77 @@ refuse_off_limits() {
   fi
 }
 
+# Prints what shell $1 prints when it runs $2 as an interactive login shell,
+# less what its startup files print, or nothing when there's no such shell.
+shell_says() {
+  command -v "$1" >/dev/null || return 0
+  "$1" -lic "echo clod-start; $2" </dev/null 2>/dev/null | awk 'on; $0 == "clod-start" { on = 1 }'
+}
+
+# Prints the directories zsh loads functions from ($fpath), or with $1 "loaded"
+# only those of a zsh that loads its completion system.
+zsh_fpath() {
+  # shellcheck disable=SC2016 # zsh code, expanded by zsh
+  shell_says zsh "${1:+(( \$+functions[compdef] )) && }"'print -rl -- $fpath'
+}
+
+# Sets REPLY to the directory bash-completion loads clod's completion from, or
+# with $1 "loaded" to that only for a bash that loads bash-completion 2, else
+# to nothing.
+bash_completion_dir() {
+  # shellcheck disable=SC2016 # bash code, expanded by that bash
+  REPLY=$(shell_says bash "${1:+[ -z \"\$(declare -F _comp_load __load_completion)\" ] || }"'echo "${BASH_COMPLETION_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion}"')
+  [[ -z $REPLY ]] || REPLY=${REPLY%%:*}/completions
+}
+
+# Links $2 to $1, unless it is a link to $1 already, and refuses to replace
+# anything else there without --force. True when $2 is then a link to $1.
+install_link() {
+  local target=$1 link=$2
+  if [[ -L $link && $(readlink "$link") == "$target" ]]; then
+    echo "clod: $(tildify "$link") is installed already"
+  elif [[ -e $link || -L $link ]] && [[ -z $force ]]; then
+    echo "clod: $(tildify "$link") already exists; clod --force install replaces it" >&2
+    return 1
+  else
+    mkdir -p "${link%/*}" && ln -sfn "$target" "$link" || return 1
+    echo "clod: installed $(tildify "$link") -> $(tildify "$target")"
+  fi
+}
+
+# Removes $1 if it is a link to $2; true when it does.
+uninstall_link() {
+  [[ -L $1 && $(readlink "$1") == "$2" ]] || return 1
+  rm -f "$1" || exit 1
+  echo "clod: removed $(tildify "$1")"
+}
+
 # The commands.
 
-# Links clod into directory $1, or the first of these on PATH that you can
-# write to, else ~/.local/bin.
+# Links clod into directory $1, or the first of install_dirs on PATH that you
+# can write to, else ~/.local/bin; and its tab completion into the first
+# directory on zsh's $fpath you can write to, and bash-completion's directory,
+# for the shells that load their completion system. Fails when it can't link
+# one of them.
 cmd_install() {
-  local target=$script_dir/clod dir=$1 d link rc
+  local dir=$1 d rc shells='' status=0
   if [[ -z $dir ]]; then
-    for d in "$HOME/.local/bin" "$HOME/bin" /opt/homebrew/bin /usr/local/bin; do
+    for d in "${install_dirs[@]}"; do
       case ":$PATH:" in
         *":$d:"*) if [[ -d $d && -w $d ]]; then dir=$d; break; fi ;;
       esac
     done
     [[ -n $dir ]] || dir=$HOME/.local/bin
   fi
-  link=$dir/clod
-  if [[ -L $link && $(readlink "$link") == "$target" ]]; then
-    echo "clod is already installed as $(tildify "$link")"
-  elif [[ -e $link || -L $link ]] && [[ -z $force ]]; then
-    echo "clod: $(tildify "$link") already exists; clod --force install replaces it" >&2
-    exit 1
-  else
-    mkdir -p "$dir" && ln -sfn "$target" "$link" || exit 1
-    echo "clod: installed $(tildify "$link") -> $(tildify "$target")"
+  install_link "$script_dir/clod" "$dir/clod" || exit 1
+  while IFS= read -r d; do
+    [[ -d $d && -w $d ]] || continue
+    if install_link "$script_dir/completions/_clod" "$d/_clod"; then shells+=' zsh'; else status=1; fi
+    break
+  done < <(zsh_fpath loaded)
+  bash_completion_dir loaded
+  if [[ -n $REPLY ]]; then
+    if install_link "$script_dir/completions/clod.bash" "$REPLY/clod"; then shells+=' bash'; else status=1; fi
   fi
   case ${SHELL##*/} in
     zsh) rc=$(tildify "$HOME/.zshrc") ;;
@@ -871,41 +924,60 @@ cmd_install() {
       echo "  export PATH=\"${dir/#$HOME/\$HOME}:\$PATH\""
       ;;
   esac
-  echo
-  echo "For tab completion, add this line to $rc:"
-  # shellcheck disable=SC2016 # printed for the shell startup file, unexpanded
-  echo '  eval "$(clod completion)"'
+  if [[ " $shells " != *" ${SHELL##*/} "* ]]; then
+    echo
+    echo "For tab completion, add this line to $rc:"
+    # shellcheck disable=SC2016 # printed for the shell startup file, unexpanded
+    echo '  eval "$(clod completion)"'
+  fi
+  return "$status"
 }
 
-# Prints the tab completion shim, for bash and zsh. It hands the words to
-# clod __complete, and completes file names only when that exits 1.
+# Removes the links to this checkout's clod and completion files that install
+# makes: clod in the directories on PATH and install_dirs, _clod on zsh's
+# $fpath and clod in bash-completion's directory. Leaves anything else there.
+cmd_uninstall() {
+  local d removed=''
+  while IFS= read -r d; do
+    [[ -n $d ]] && uninstall_link "$d/clod" "$script_dir/clod" && removed=1
+  done < <(tr : '\n' <<<"$PATH"; printf '%s\n' "${install_dirs[@]}")
+  while IFS= read -r d; do
+    uninstall_link "$d/_clod" "$script_dir/completions/_clod" && removed=1
+  done < <(zsh_fpath)
+  bash_completion_dir
+  [[ -n $REPLY ]] && uninstall_link "$REPLY/clod" "$script_dir/completions/clod.bash" && removed=1
+  [[ -n $removed ]] || echo "clod: found no links to $(tildify "$script_dir") to remove"
+  echo
+  echo "Left in place:"
+  echo "  $(tildify "$script_dir"): clod's checkout"
+  echo "  $(tildify "$clod_dir"): your homes and their logins, variants, shared config and defaults"
+  echo "  the Docker images and volumes clod made, which $(tildify "$script_dir/clod") image,"
+  echo "    home and workspace list, and their rm commands delete"
+  # shellcheck disable=SC2016 # printed as written in the startup file
+  echo '  an eval "$(clod completion)" line in your shell startup file, if you added one'
+}
+
+# Prints file $1 in completions/, less the comments and blank lines it opens
+# with, indented by $2.
+completion_body() {
+  awk -v indent="$2" 'body || (!/^#/ && length($0)) { body = 1; print (length($0) ? indent $0 : "") }' \
+    "$script_dir/completions/$1"
+}
+
+# Prints the tab completion shim, for bash and zsh: the files in completions/,
+# which install links where the shells load them, made into one script.
+# shellcheck disable=SC2016 # shell code, printed unexpanded
 cmd_completion() {
-  cat <<'SHIM'
-# clod's tab completion, for bash and zsh: eval "$(clod completion)"
-if [ -n "${ZSH_VERSION-}" ]; then
-  (( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }
-  _clod() {
-    local -a reply
-    # A file name after = (--workspace=DIR) is completed from the =.
-    reply=(${(f)"$(clod __complete "${(@)words[2,CURRENT]}")"}) ||
-      { [[ $PREFIX == -*=* ]] && compset -P '*='; _files; return; }
-    compadd -a reply
-  }
-  compdef _clod clod
-else
-  _clod() {
-    local IFS=$'\n'
-    COMPREPLY=($(clod __complete "${COMP_WORDS[@]:1:$COMP_CWORD}")) || compopt -o default 2>/dev/null
-  }
-  # bash 3.2 has no compopt, so there it falls back to file names whenever
-  # nothing else matches.
-  if type compopt >/dev/null 2>&1; then
-    complete -F _clod clod
-  else
-    complete -o default -F _clod clod
-  fi
-fi
-SHIM
+  echo '# clod'"'"'s tab completion, for bash and zsh: eval "$(clod completion)"'
+  echo 'if [ -n "${ZSH_VERSION-}" ]; then'
+  echo '  (( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }'
+  echo '  _clod() {'
+  completion_body _clod '    '
+  echo '  }'
+  echo '  compdef _clod clod'
+  echo 'else'
+  completion_body clod.bash '  '
+  echo 'fi'
 }
 
 # Prints the words in $@ that start with the word being completed, $cur, as
@@ -1974,9 +2046,9 @@ cmd_run() {
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }
 
-# The dispatch. install, update and completion run before the envrc is read, and default
-# before the settings it edits are resolved, so a broken one can be fixed with
-# it. The rest run once the home, image and ports are settled. Only a run and
+# The dispatch. install, uninstall, update and completion run before the envrc
+# is read, and default before the settings it edits are resolved, so a broken
+# one can be fixed with it. The rest run once the home, image and ports are settled. Only a run and
 # the commands that change images or volumes, or list volume workspaces, check
 # that Docker is up, and only a run refuses mounts holding secrets.
 # The shell's tab completion runs __complete, which takes no options and reads
@@ -1989,7 +2061,8 @@ fi
 parse_args "$@"
 set -- ${args[@]+"${args[@]}"}
 case $command in
-  install|update|completion) "cmd_$command" "$@"; exit 0 ;;
+  install) cmd_install "$@"; exit ;;
+  update|uninstall|completion) "cmd_$command" "$@"; exit 0 ;;
 esac
 setup_workspace
 load_settings

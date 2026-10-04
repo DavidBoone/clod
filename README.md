@@ -20,9 +20,10 @@ git clone https://github.com/DavidBoone/clod.git ~/.clod/src
 ~/.clod/src/clod install
 ```
 
-`install` links `clod` into a directory on your `PATH`, such as `~/.local/bin`.
-For tab completion, add `eval "$(clod completion)"` to your `~/.zshrc` or
-`~/.bashrc`.
+`install` links `clod` into a directory on your `PATH`, such as `~/.local/bin`,
+and its tab completion where zsh and bash load it; when your shell doesn't load
+it, `install` prints the line to add to your `~/.zshrc` or `~/.bashrc`.
+`clod uninstall` removes the links.
 
 ### Run it
 
