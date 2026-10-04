@@ -31,4 +31,6 @@ to run containers. It gives the agent the Docker host, which is far more than
 this list: see [Letting the agent run containers](docker-socket.md).
 
 Claude Code installs on first run with
-`curl -fsSL https://claude.ai/install.sh | bash`, and Codex from npm.
+`curl -fsSL https://claude.ai/install.sh | bash`, and Codex from npm. The base
+image's packages come from Debian, except Node, from NodeSource's apt
+repository, and the GitHub CLI, from GitHub's.
