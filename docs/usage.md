@@ -10,7 +10,7 @@ clod bash | zsh      # a shell in the container
 clod -i go           # the go image variant (see Image variants)
 clod -H work         # the "work" home (see Homes)
 clod -s              # an empty, throwaway /workspace (see A scratch workspace)
-clod env             # show the home, image, login, ports, envrc and variables that would be used
+clod env             # show the home, image, login, ports, .envrc and variables that would be used
 clod default         # show your defaults
 clod --help          # all commands and options
 ```
@@ -37,7 +37,7 @@ environment](configuration.md).
 `clod --scratch` (`-s`) runs with an empty `/workspace` instead of the current
 directory: a Docker volume that's removed with the container, for a question,
 an experiment or a repository cloned just to look at. Only the home persists,
-so copy out anything worth keeping, or push it somewhere. No envrc is read,
+so copy out anything worth keeping, or push it somewhere. No `.envrc` is read,
 since the current directory isn't the project, and clod runs from anywhere,
 your home directory included. It doesn't combine with `--docker`, which needs a
 workspace on the host.
@@ -106,7 +106,7 @@ your machine's localhost, and the server must listen on all interfaces
 clod -P 5173                 # localhost:5173 -> port 5173 in the container
 clod -P 3000:5173            # localhost:3000 -> port 5173 in the container
 clod -P 5173 -P 8080         # several
-clod -P ''                   # none, even if the envrc or config sets some
+clod -P ''                   # none, even if the .envrc or config sets some
 ```
 
 ## Updating and rebuilding

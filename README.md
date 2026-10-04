@@ -60,7 +60,7 @@ can reach is short and easy to check:
 
 - your project, which it can change or delete, so keep it in git
 - its own home, and whatever logins you make there
-- variables you pass in from the project's envrc
+- variables you pass in from the project's `.envrc`
 - the network, including services on your machine via `host.docker.internal`
 
 Your own home directory, other projects, SSH keys, cloud logins and the rest of

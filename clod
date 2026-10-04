@@ -22,7 +22,7 @@
 #               space-separated: 8080 (the same on both sides), host:container,
 #               or address:host:container to publish on another address
 #
-# The envrc (below) can set these too, as defaults for the shell's, and
+# The .envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
 # defaults for both. A setting set empty, by an option or the shell, still
 # overrides them.
@@ -125,7 +125,7 @@ Commands:
   claude [args]          Claude Code
   codex [args]           Codex
   bash|zsh [args]        a shell in the container
-  env                    show the home, image, ports, envrc and variables
+  env                    show the home, image, ports, .envrc and variables
   images [NAME]          list the base image and the variants, or show how
                          image NAME is built: the images it is FROM
   homes                  list the homes and their logins
@@ -155,7 +155,7 @@ Options (before the command):
                            -P 5173       localhost:5173 -> container port 5173
                            -P 3000:5173  localhost:3000 -> container port 5173
   -s, --scratch          an empty /workspace, discarded on exit, instead of the
-                         current directory; no envrc is read
+                         current directory; no .envrc is read
   -f, --force            run from a directory clod otherwise refuses; replace
                          an existing clod (install) or shared config (new-shared)
       --skip-build       run the image as built, even if its files have changed

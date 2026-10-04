@@ -29,12 +29,12 @@ shell in it. `clod homes` lists volume homes but shows `?` for their logins.
 ## Settings
 
 Each option has a matching setting, which can come from your shell
-environment, per project from an envrc (see [Per-project
+environment, per project from an `.envrc` (see [Per-project
 environment](#per-project-environment)), or as your defaults from
 `~/.clod/config` (see [Your defaults](#your-defaults)). An option wins over
-the shell, the shell over the envrc, and the envrc over the config file. A
-setting given empty still wins and means its default, so `clod -P ''` or
-`CLOD_PORTS='' clod` publishes no ports even when the envrc lists some:
+the shell, the shell over the `.envrc`, and the `.envrc` over the config file.
+A setting given empty still wins and means its default, so `clod -P ''` or
+`CLOD_PORTS='' clod` publishes no ports even when the `.envrc` lists some:
 
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
@@ -43,7 +43,7 @@ setting given empty still wins and means its default, so `clod -P ''` or
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 
-In a direnv `.envrc`, `$PWD` is the `.envrc`'s directory, so
+In an `.envrc`, `$PWD` is the `.envrc`'s directory, so
 `export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
 project directory is also visible under `/workspace`, login included, so
 gitignore it.
@@ -63,8 +63,9 @@ clod default image --reset      # back to the built-in default
 ```
 
 The keys are `image`, `command`, `home` and `ports`. Values are checked when
-you set them, and a home path is stored as an absolute path. Your shell's settings and a project's envrc win over these defaults;
-`clod env` shows what a run will actually use.
+you set them, and a home path is stored as an absolute path. Your shell's
+settings and a project's `.envrc` win over these defaults; `clod env` shows
+what a run will actually use.
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`), and
@@ -74,7 +75,8 @@ Inside the container the same variables hold what the launch resolved to:
 
 `clod` looks up from the current directory for the nearest `.envrc`, loads it
 on the host through your direnv, and passes the variables it exports into the
-container via `--env-file`. It must be approved with `direnv allow`; without
+container via `--env-file`. Only exported variables count: `FOO=bar` without
+`export` isn't passed in. The file must be approved with `direnv allow`; without
 direnv installed it is ignored. Like direnv, `clod` stops at the first match, so
 parent directories' files only count if the file pulls them in (`source_up`).
 Run `clod env` to see which file is used and exactly what would be passed.
@@ -84,7 +86,7 @@ workspace](usage.md#a-scratch-workspace)).
 Values are evaluated on the host but used in the container, so write them for
 the container (`host.docker.internal`, not `localhost` or a host socket path).
 `PATH` is never passed in. Launcher settings (`CLOD_HOME`, `CLOD_IMAGE`,
-`CLOD_PORTS`, `CLOD_COMMAND`) set by the envrc aren't passed in either; they act
+`CLOD_PORTS`, `CLOD_COMMAND`) set by the `.envrc` aren't passed in either; they act
 as defaults for the launcher, and the same variable set in your shell wins.
 `--env-file` can't carry multi-line values, so variables holding one are skipped
 with a warning. Changes take effect on the next `clod` launch.
