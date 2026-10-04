@@ -78,7 +78,10 @@ copying their install steps.
 rebuilds each whenever a file in its directory or an image it is `FROM`
 (in any stage) changes. A variant in `~/.clod/images` takes precedence over a bundled one of
 the same name, so copying one there is how to customise it. Apt lists are kept
-in the base, so variants can `apt-get install` without `apt-get update`. The
+in the base, so variants can `apt-get install` without `apt-get update`. Those
+lists date from the base's build: a variant that adds a package repository, or
+wants packages newer than the base's, runs `apt-get update` first, and its
+versions can then differ from other variants'. The
 directory is the build context, so `COPY` works for files beside the
 `Dockerfile`.
 
@@ -89,6 +92,16 @@ the variant:
 
 ```dockerfile
 COPY CLAUDE.md /etc/clod/.claude/rules/mine.md
+```
+
+The base gets Node from NodeSource's repository for Node 26. A variant
+switches it to another major by editing that repository and reinstalling:
+
+```dockerfile
+USER root
+RUN sed -i 's/node_[0-9]*\.x/node_22.x/' /etc/apt/sources.list.d/nodesource.sources \
+    && apt-get update && apt-get install -y --allow-downgrades nodejs
+USER claude
 ```
 
 Images are never pulled at launch, so `-i` must name a variant or an image

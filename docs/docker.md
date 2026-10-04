@@ -22,6 +22,13 @@ projects under it, or add other folders with `colima start --mount /path:w`. A
 project outside the shared folders appears as an empty `/workspace`, and clod
 warns at launch when that happens.
 
+Colima's virtiofs mounts, which hold the home and workspace, can fail now and
+then with `Permission denied` on files that have the right permissions:
+reported for a database's data files, and for `chmod` while a large package
+unpacks (`uv`, `playwright install`). Keep databases and large binary caches
+off the mounts, in the image or the container's own filesystem, and retry a
+big install that fails this way.
+
 ## Linux
 
 Install Docker Engine with Docker's convenience script, then add yourself to
