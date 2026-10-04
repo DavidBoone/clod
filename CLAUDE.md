@@ -37,6 +37,6 @@ The container defines what the agent can reach; within it, the agent runs unrest
 
 ## Docs
 
-`README.md` is the front page: install, first run, and how clod works and what the agent can reach, short enough to read in one go. Everything else is a page in `docs/` linked from its "More" list: `usage.md`, `images.md`, `configuration.md`, `shared-config.md`, `docker-socket.md` (`--docker` and what it gives away), `security.md`, `docker.md` (installing Docker, Linux host notes) and `without-clod.md`. A new feature's docs go in the page it belongs to, not the README.
+`README.md` is the front page: install, first run, and how clod works and what the agent can reach, short enough to read in one go. Everything else is a page in `docs/` linked from its "More" list: `usage.md`, `images.md`, `configuration.md`, `shared-config.md`, `docker-socket.md` (`--docker` and what it gives away), `security.md`, `docker.md` (installing Docker, Linux host notes) and `without-clod.md`. A new feature's docs go in the page it belongs to, not the README. `container.md` is the agent's view: what it can see in the container, how the user changes clod on the host, and links to these pages on GitHub; keep it in step with them.
 
 `docs/statusline.svg`, shown in `docs/shared-config.md`, is rendered from the real statusline by `docs/statusline-svg.sh > docs/statusline.svg`: it runs `shared/statusline.sh` on sample input and converts the 16-colour output with `docs/ansi2svg.py`. Regenerate it when the statusline's look changes.
