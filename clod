@@ -1032,7 +1032,7 @@ offer_images() {
 # for volume homes and workspaces and image rm's images, so it's quick.
 cmd_complete() {
   local raw=("$@") words=() cur last pre='' strip='' glue='' cmd='' cmd_args=() prev=''
-  local word i s keys='' homes='' variants verb='' given=''
+  local word i s keys='' homes='' variants verb='' given='' path_like=''
   # bash splits a word at = and : (--home=vol:NAME, -P 3000:5173) into pieces,
   # with each = and : a piece of its own; this joins them back up.
   for word in ${raw[@]+"${raw[@]}"}; do
@@ -1069,8 +1069,10 @@ cmd_complete() {
   fi
   variants=$(variant_names)
   # A home is a name, vol:NAME or, with a slash, a path, which the shell
-  # completes.
-  if [[ $cur != */* ]]; then
+  # completes. A word starting with . or ~ is on its way to a path, since no
+  # name starts that way.
+  [[ $cur == */* || $cur == .* || $cur == '~'* ]] && path_like=1
+  if [[ -z $path_like ]]; then
     for word in "$clod_dir"/homes/*/; do
       [[ -d $word ]] && word=${word%/} && homes+=" ${word##*/}"
     done
@@ -1083,7 +1085,7 @@ cmd_complete() {
   if [[ -z $cmd ]]; then
     case $prev in
       -i|--image) offer_images ;;
-      -H|--home) [[ $cur == */* ]] && return 1; offer $homes ;;
+      -H|--home) [[ -n $path_like ]] && return 1; offer $homes ;;
       # A workspace is a path, which the shell completes, or vol:NAME.
       -w|--workspace)
         [[ $cur == vol:* ]] || return 1
@@ -1102,7 +1104,7 @@ cmd_complete() {
       0:*) offer $keys ;;
       1:image) offer_images; offer --reset ;;
       1:command) offer $run_commands --reset ;;
-      1:home) [[ $cur == */* ]] && return 1; offer $homes --reset ;;
+      1:home) [[ -n $path_like ]] && return 1; offer $homes --reset ;;
       1:ports) offer --reset ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
@@ -1130,11 +1132,11 @@ cmd_complete() {
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
       home:rm) offer $homes $(volume_names clod-home- | sed 's/^/vol:/') ;;
       # A new home: nothing completes but a path.
-      home:new) [[ $cur == */* ]] && return 1 ;;
+      home:new) [[ -n $path_like ]] && return 1 ;;
       # The source is a home, and the destination a new one, so nothing
       # completes there but a path.
       home:cp|home:mv)
-        [[ $cur == */* ]] && return 1
+        [[ -n $path_like ]] && return 1
         if (( ${#cmd_args[@]} == 0 )); then
           offer $homes $(volume_names clod-home- | sed 's/^/vol:/')
         fi

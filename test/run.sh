@@ -774,6 +774,15 @@ test_completion() {
   if clod __complete claude --re; then false; fi
   if clod __complete -- ''; then false; fi
   if clod __complete -H ./w; then false; fi
+  # a word starting with . or ~ is a path, never a name; a name that matches
+  # nothing completes to nothing, not to files
+  if clod __complete -H .; then false; fi
+  if clod __complete -H '~'; then false; fi
+  if clod __complete --home='~'; then false; fi
+  if clod __complete default home .; then false; fi
+  if clod __complete home cp '~'; then false; fi
+  if clod __complete home new .; then false; fi
+  test -z "$(clod __complete -H xyz)"
   if clod __complete install ''; then false; fi
   if clod __complete -w ''; then false; fi
   test "$(clod __complete --wor)" = --workspace
@@ -782,7 +791,7 @@ test_completion() {
   # The shim, and the files install links, in real shells, which split words
   # differently: bash at = and :, zsh not at all. A stand-in docker lists the
   # volumes. Directories complete with a / in bash only.
-  mkdir proj bin
+  mkdir proj bin .hdir
   printf '%s\n' '#!/bin/bash' \
     '[[ "$1 $2" == "volume ls" ]] && printf "%s\n" clod-home-vhome clod-workspace-play' > bin/docker
   chmod +x bin/docker
@@ -810,12 +819,12 @@ test_completion() {
       'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
       'clod -w pro' 'clod --workspace=pro' 'clod claude pro' 'clod image sh' 'clod shared d' \
       'clod home rm vol:vh' 'clod workspace rm pl' 'clod workspace rm vol:pl' \
-      'clod workspace rm vo' 'clod home cp wo' 'clod home mv vol:vh' 'clod home rm wo' > out
-    sed 's|proj/$|proj|' out | diff - <(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
+      'clod workspace rm vo' 'clod home cp wo' 'clod home mv vol:vh' 'clod home rm wo' 'clod -H .hd' > out
+    sed 's|/$||' out | diff - <(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
       'clod --home=work' 'clod -H vol:vhome' 'clod --home=vol:vhome' 'clod --workspace=vol:play' \
       'clod -w proj' 'clod --workspace=proj' 'clod claude proj' 'clod image show' 'clod shared diff' \
       'clod home rm vol:vhome' 'clod workspace rm play' 'clod workspace rm vol:play' \
-      'clod workspace rm vol:play' 'clod home cp work' 'clod home mv vol:vhome' 'clod home rm work')
+      'clod workspace rm vol:play' 'clod home cp work' 'clod home mv vol:vhome' 'clod home rm work' 'clod -H .hdir')
   done
 }
 
