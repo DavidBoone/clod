@@ -348,7 +348,7 @@ test_combine() {
 }
 
 # rebuild replaces every image in the chain and prunes the old ones. It runs a
-# copy of clod whose base is a one-line Dockerfile, since rebuilding the real
+# copy of clod whose base Dockerfile only writes a file, since rebuilding the real
 # one without the cache takes half a minute; that replaces the clod image, which
 # the next test to use it rebuilds from the layer cache.
 test_rebuild() {
@@ -356,7 +356,7 @@ test_rebuild() {
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
   mkdir standin
   cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" standin/
-  printf 'FROM debian:trixie\n' > standin/Dockerfile
+  printf 'FROM debian:trixie\nRUN date > /built\n' > standin/Dockerfile
   standin/clod -i first+second build
   test "$(standin/clod -i first+second build 2>&1)" = 'clod: first.second is up to date'
   for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
