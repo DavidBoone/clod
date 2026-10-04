@@ -92,7 +92,7 @@ base_dir=$script_dir
 
 # The commands, and the ones among them that run in the container.
 run_commands='claude codex bash zsh'
-commands="$run_commands env images homes new-image new-shared default build rebuild update install completion"
+commands="$run_commands env images homes new-image remove-image new-shared default build rebuild update install completion"
 # The long options parse_args takes, for tab completion.
 options='--image --home --port --scratch --force --skip-build --docker --help --version'
 
@@ -135,6 +135,8 @@ Commands:
   new-image NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
                          a starter on combination FROM (A+B), a copy of the
                          bundled variant NAME, or a starter
+  remove-image NAME...   remove images clod built; a variant's files stay, and
+                         its next run builds it again
   new-shared             create ~/.clod/shared as a copy of the starter shared
                          config, to customise; if it exists, compare it with the
                          starter (--force replaces it, keeping a backup)
@@ -597,6 +599,7 @@ parse_args() {
       (( $# == 0 )) || usage_error "$command takes no arguments" ;;
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
     new-image) (( $# <= 2 )) || usage_error "new-image takes a NAME and at most one image to start from" ;;
+    remove-image) (( $# )) || usage_error "remove-image takes the images to remove" ;;
   esac
   [[ -n $scratch && -n $docker_socket ]] &&
     usage_error "--scratch and --docker don't combine: a scratch workspace has no host path for sibling containers"
@@ -824,8 +827,8 @@ offer_images() {
 # `clod __complete WORDS...`, which the shim calls: prints the candidates for
 # the last word, given the words before it, one per line, or exits 1 where the
 # word is a file name: a command's arguments, a home's path or install's
-# directory. It reads only directories, never the envrc or Docker, so it's
-# quick.
+# directory. It reads only directories, never the envrc, and asks Docker only
+# for remove-image's images, so it's quick.
 cmd_complete() {
   local cur=${!#} words=("$@") cmd='' cmd_args=() prev='' word i s keys='' homes='' variants
   unset 'words[${#words[@]}-1]'
@@ -877,6 +880,13 @@ cmd_complete() {
     esac
   elif [[ $cmd == images && ${#cmd_args[@]} == 0 ]]; then
     offer_images
+  elif [[ $cmd == remove-image ]]; then
+    # The images clod built, named as clod images lists them, less those named
+    # already.
+    while IFS= read -r word; do
+      is_one_of "$word" "${cmd_args[*]}" || offer "$word"
+    done < <(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
+      sed -n 's/^clod-//p; /^clod$/p' | sort -u)
   elif [[ $cmd == new-image && ${#cmd_args[@]} == 1 ]]; then
     offer_images variants
   fi
@@ -975,13 +985,14 @@ cmd_default() {
   show_setting "$key"
 }
 
-# Prints a row for image $1, tagged $2, from source $3.
+# Prints a row for image $1, tagged $2, from source $3, with the name column
+# $name_width wide.
 image_row() {
   local mark=' '
   [[ $1 == "$image" ]] && mark='*'
   walk_image "$2" state
   [[ $REPLY == stale ]] && any_stale=1
-  printf '%s %-16s %-7s %s\n' "$mark" "$1" "$REPLY" "$3"
+  printf "%s %-${name_width}s  %-7s %s\n" "$mark" "$1" "$REPLY" "$3"
 }
 
 # Adds a row for clod image $1 to the chain_* arrays, then the rows of the clod
@@ -1043,15 +1054,15 @@ show_image() {
 }
 
 cmd_images() {
-  local n src t
+  local n src t i names tags srcs
   (( $# <= 1 )) || usage_error "images takes at most one image name"
   if (( $# )); then
     show_image "$1"
     return 0
   fi
   any_stale=''
-  printf '  %-16s %-7s %s\n' NAME STATE SOURCE
-  image_row clod clod "$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)"
+  names=(clod) tags=(clod)
+  srcs=("$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)")
   for n in $(variant_names); do
     if [[ -f $clod_dir/images/$n/Dockerfile ]]; then
       src=$(tildify "$clod_dir/images/$n")
@@ -1059,19 +1070,62 @@ cmd_images() {
     else
       src=bundled
     fi
-    image_row "$n" "clod-$n" "$src"
+    names+=("$n") tags+=("clod-$n") srcs+=("$src")
   done
-  # Combinations that are built, and the one that runs here.
+  # Combinations that are built, the one that runs here, and images clod built
+  # whose variant has gone.
   for t in $({ docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null
-              [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-.*\.' | sort -u); do
-    image_row "${t#clod-}" "$t" "$(t=${t#clod-}; echo "${t//./ + }")"
+              [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-' | sort -u); do
+    is_one_of "$t" "${tags[*]}" && continue
+    n=${t#clod-}
+    tag_variant "$t"
+    src=${n//./ + }
+    [[ -n $variant_missing ]] && src="$src (no Dockerfile)"
+    names+=("$n") tags+=("$t") srcs+=("$src")
+  done
+  name_width=4
+  for n in "${names[@]}"; do
+    (( ${#n} > name_width )) && name_width=${#n}
+  done
+  printf "  %-${name_width}s  %-7s %s\n" NAME STATE SOURCE
+  for (( i = 0; i < ${#names[@]}; i++ )); do
+    image_row "${names[i]}" "${tags[i]}" "${srcs[i]}"
   done
   echo
   echo "*        runs here by default; clod -i NAME runs another, and clod -i A+B"
   echo "         builds variant B on A as clod-A.B"
   echo "bundled  comes with clod, in $(tildify "$script_dir")"
   [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
+  echo "clod remove-image NAME removes a built image"
   return 0
+}
+
+# Removes the images clod built named $@ (as for -i), or none if any isn't one.
+# An image others are built on loses only its name, keeping the layers they
+# use; they rebuild on their next run, as their base changed.
+cmd_remove_image() {
+  local name n tags=() t out
+  for name; do
+    n=${name//+/.}
+    t=clod-${n#clod-}
+    [[ $name == clod ]] && t=clod
+    if [[ -z $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$t" 2>/dev/null) ]]; then
+      echo "clod: no image clod built named '$name' (clod images lists them)" >&2
+      exit 1
+    fi
+    tags+=("$t")
+  done
+  for t in "${tags[@]}"; do
+    if ! out=$(docker rmi "$t" 2>&1); then
+      echo "clod: can't remove $t: $out" >&2
+      exit 1
+    fi
+    if [[ $out == *Deleted:* ]]; then
+      echo "removed $t"
+    else
+      echo "removed the name $t; its layers stay while images built on it use them"
+    fi
+  done
 }
 
 # Prints a row for home $1 (a directory or vol:NAME), labelled $2. A volume's
@@ -1334,8 +1388,8 @@ cmd_run() {
 
 # The dispatch. install, update and completion run before the envrc is read, and default
 # before the settings it edits are resolved, so a broken one can be fixed with
-# it. The rest run once the home, image and ports are settled. Only rebuild and
-# a run check that Docker is up, and only a run refuses mounts holding secrets.
+# it. The rest run once the home, image and ports are settled. Only build,
+# rebuild, remove-image and a run check that Docker is up, and only a run refuses mounts holding secrets.
 # The shell's tab completion runs __complete, which takes no options and reads
 # no settings.
 if [[ $1 == __complete ]]; then
@@ -1357,6 +1411,7 @@ setup_container
 case $command in
   env|images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
   build|rebuild) need_docker; cmd_build; exit 0 ;;
+  remove-image) need_docker; cmd_remove_image "$@"; exit 0 ;;
 esac
 refuse_secrets
 need_docker

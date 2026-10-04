@@ -23,7 +23,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 lint_tests='lint'
 base_tests='env run-command empty-workspace scratch refuses-home claude codex statusline
   port docker-socket envrc volume-home default new-shared command-line multi-stage
-  combine rebuild completion'
+  combine rebuild remove-image completion'
 classic_tests='classic'
 variant_names='browser docker dotnet go lamp python rust sudo go+sudo'
 variants_tests=$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)
@@ -359,6 +359,29 @@ test_rebuild() {
   grep -q 'building clod-first.second' out
   test "$(docker image inspect -f '{{.Id}}' clod-first)" = "${after[1]}"
   if docker image inspect "${after[2]}" >/dev/null 2>&1; then false; fi
+}
+
+test_remove_image() {
+  mkdir -p ~/.clod/images/gone ~/.clod/images/top ~/.clod/images/a-very-long-variant-name
+  printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' gone > ~/.clod/images/gone/Dockerfile
+  printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' top > ~/.clod/images/top/Dockerfile
+  printf 'FROM clod\n' > ~/.clod/images/a-very-long-variant-name/Dockerfile
+  clod -i gone+top build
+  clod __complete remove-image '' | has -x gone.top
+  if clod __complete remove-image gone '' | grep -qx gone; then false; fi
+  clod images | has '^  a-very-long-variant-name  -'
+  exits 2 clod remove-image
+  exits 1 clod remove-image no-such
+  exits 1 clod remove-image gone no-such
+  docker image inspect clod-gone >/dev/null
+  # gone.top is built on gone
+  clod remove-image gone | has 'clod-gone'
+  if docker image inspect clod-gone >/dev/null 2>&1; then false; fi
+  clod images | has '^  gone  *-'
+  rm -r ~/.clod/images/gone
+  clod images | has '^  gone\.top  *built  *gone + top (no Dockerfile)'
+  clod remove-image gone+top | has -x 'removed clod-gone.top'
+  if clod images | grep -q gone; then false; fi
 }
 
 # Tab completion: clod __complete's candidates, and the shim it prints, in bash
