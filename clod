@@ -1031,10 +1031,10 @@ cmd_complete() {
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
       home:rm) offer $(volume_names clod-home- | sed 's/^/vol:/') ;;
-      # A workspace is named NAME, or vol:NAME once that is typed.
+      # A workspace is named NAME, or vol:NAME once its v is typed.
       workspace:rm)
         offer $(volume_names clod-workspace-)
-        if [[ $cur == vol:* || vol: == "$cur"* ]]; then
+        if [[ -n $cur && ( $cur == vol:* || vol: == "$cur"* ) ]]; then
           offer $(volume_names clod-workspace- | sed 's/^/vol:/')
         fi
         ;;
