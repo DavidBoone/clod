@@ -536,9 +536,9 @@ test_completion() {
     PATH=$PWD/bin:$PATH "$repo/test/tab-complete.py" "$sh" 'clod -i go+su' 'clod --image=go+su' \
       'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
       'clod -w pro' 'clod --workspace=pro' 'clod claude pro' > out
-    test "$(sed 's|proj/$|proj|' out)" = "$(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
+    sed 's|proj/$|proj|' out | diff - <(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
       'clod --home=work' 'clod -H vol:vhome' 'clod --home=vol:vhome' 'clod --workspace=vol:play' \
-      'clod -w proj' 'clod --workspace=proj' 'clod claude proj')"
+      'clod -w proj' 'clod --workspace=proj' 'clod claude proj')
   done
 }
 
