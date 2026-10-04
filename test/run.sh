@@ -724,7 +724,10 @@ test_completion() {
   chmod +x bin/docker
   PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x vol:vhome
   PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x work
-  test -z "$(PATH=$PWD/bin:$PATH clod __complete home rm vol:vhome '')"
+  # a home named already isn't offered again
+  PATH=$PWD/bin:$PATH clod __complete home rm vol:vhome '' > out
+  has -x work < out
+  if grep -qx vol:vhome out; then false; fi
   # home cp and mv: a home, then a new one, which only a path completes
   PATH=$PWD/bin:$PATH clod __complete home cp '' | has -x work
   PATH=$PWD/bin:$PATH clod __complete home mv '' | has -x vol:vhome
