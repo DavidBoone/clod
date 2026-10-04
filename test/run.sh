@@ -570,7 +570,7 @@ test_combine() {
   printf 'FROM clod\n' > ~/.clod/images/fixed/Dockerfile
   clod -i first+second env | has '^image: *first+second '
   clod -i first+second bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
-  clod -i first+second bash -c 'test "$CLOD_IMAGE" = first+second' 2>&1 | has '^clod ⌂ .* ⬢ first+second · '
+  clod -i first+second bash -c 'test "$CLOD_IMAGE" = first+second' 2>&1 | has '^clod · .* · first+second · '
   clod image | has '^  first+second  *built'
   clod -i clod-first.second --skip-build bash -c true
   echo 'RUN true' >> ~/.clod/images/first/Dockerfile

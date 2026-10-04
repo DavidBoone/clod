@@ -1968,7 +1968,7 @@ cmd_run() {
       [[ -n ${!v:-} ]] && run_args+=(-e "$v")
     done
   fi
-  echo "clod ⌂ $home_label ⬢ $image ·${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
+  echo "clod · $home_label · $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }
