@@ -14,7 +14,7 @@ without asking:
   you copy in. So the agent can push to git only
   if you've given that home credentials that allow it. Give each home only
   what its work needs.
-- **The variables you pass in** from `.clod.envrc` or `.envrc`, tokens
+- **The variables you pass in** from `.envrc`, tokens
   included.
 - **The network**, including services on your machine through
   `host.docker.internal`.

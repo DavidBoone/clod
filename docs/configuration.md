@@ -72,38 +72,21 @@ Inside the container the same variables hold what the launch resolved to:
 
 ## Per-project environment
 
-`clod` looks up from the current directory for the nearest directory holding a
-`.clod.envrc` or an `.envrc`, evaluates that one file on the host, and passes
-the variables it sets into the container via `--env-file`. Like direnv, it stops
-at the first match, so parent directories' files only count if the file pulls
-them in (`source_up`). Run `clod env` to see which file is used and exactly what
-would be passed. `clod --scratch` reads none (see [A scratch
+`clod` looks up from the current directory for the nearest `.envrc`, loads it
+on the host through your direnv, and passes the variables it exports into the
+container via `--env-file`. It must be approved with `direnv allow`; without
+direnv installed it is ignored. Like direnv, `clod` stops at the first match, so
+parent directories' files only count if the file pulls them in (`source_up`).
+Run `clod env` to see which file is used and exactly what would be passed.
+`clod --scratch` reads none (see [A scratch
 workspace](usage.md#a-scratch-workspace)).
-
-- **`.envrc`** is used as is, through your host's direnv: it must be approved
-  with `direnv allow`, and only exported variables count. Without direnv
-  installed, `.envrc` is ignored.
-- **`.clod.envrc`**, beside an `.envrc`, replaces it for the container. Use one
-  when the `.envrc` would be wrong inside the container, or isn't approved. It
-  is sourced in bash with every assignment exported, with direnv's commands
-  (`source_env`, `source_up`, `dotenv`, ...) available when direnv is installed,
-  and it doesn't need `direnv allow`. It's your own file, so keep it out of
-  the project's repo, e.g. in `.git/info/exclude` or a global gitignore.
-
-```sh
-# .clod.envrc
-source_env .envrc              # start from the project's .envrc
-PGHOST=host.docker.internal    # but reach the host's Postgres from the container
-```
 
 Values are evaluated on the host but used in the container, so write them for
 the container (`host.docker.internal`, not `localhost` or a host socket path).
 `PATH` is never passed in. Launcher settings (`CLOD_HOME`, `CLOD_IMAGE`,
-`CLOD_PORTS`, `CLOD_COMMAND`) set by the envrc aren't passed in
-either; they act as defaults
-for the launcher, and the same variable set in your shell wins. So a
-`.clod.envrc` can pick the home and image for a project whose `.envrc` you
-can't change. `--env-file` can't carry multi-line values, so variables holding
-one are skipped with a warning. Changes take effect on the next `clod` launch.
+`CLOD_PORTS`, `CLOD_COMMAND`) set by the envrc aren't passed in either; they act
+as defaults for the launcher, and the same variable set in your shell wins.
+`--env-file` can't carry multi-line values, so variables holding one are skipped
+with a warning. Changes take effect on the next `clod` launch.
 
 The container also gets the host's timezone (`$TZ`, else `/etc/localtime`).
