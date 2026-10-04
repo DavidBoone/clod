@@ -47,12 +47,9 @@
 # On a Linux host the clod image's claude user is built with the host user's
 # uid and gid, and host.docker.internal is mapped to the host.
 #
-# The nearest .clod.envrc or .envrc, looking up from the current directory, is
-# evaluated on the host and the variables it sets are passed into the container.
-# In each directory .clod.envrc wins over .envrc. A .clod.envrc is sourced in
-# bash with set -a and direnv's stdlib when direnv is installed; an .envrc is
-# loaded by direnv itself, so it must be allowed and only exports count.
-# Launcher settings it sets are used, not passed in.
+# The nearest .envrc, looking up from the current directory, is loaded on the
+# host by direnv, so it must be allowed, and the variables it exports are passed
+# into the container. Launcher settings it sets are used, not passed in.
 #
 # --docker mounts the Docker socket, which is root on the Docker host (on macOS,
 # the VM, with your home folder mounted). It is an option only, with no setting
@@ -230,12 +227,11 @@ realdir() {
   REPLY=$( (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1")
 }
 
-# Sets REPLY to the nearest .clod.envrc or .envrc from $PWD up, or to nothing.
+# Sets REPLY to the nearest .envrc from $PWD up, or to nothing.
 find_envrc() {
   local dir=$PWD
   REPLY=
   while :; do
-    [[ -f $dir/.clod.envrc ]] && { REPLY=$dir/.clod.envrc; return; }
     [[ -f $dir/.envrc ]] && { REPLY=$dir/.envrc; return; }
     [[ $dir == / ]] && return
     dir=${dir%/*}
@@ -255,32 +251,18 @@ envrc_vars() {
       else print k "=" ENVIRON[k]
     }
   }'
+  command -v direnv >/dev/null ||
+    { echo "clod: ignoring $(tildify "$1"): direnv is not installed" >&2; return 0; }
   [[ -n $XDG_CONFIG_HOME ]] && clean+=(XDG_CONFIG_HOME="$XDG_CONFIG_HOME")
   [[ -n $XDG_DATA_HOME ]] && clean+=(XDG_DATA_HOME="$XDG_DATA_HOME")
   base=$("${clean[@]}" awk "$dump")
-  if [[ $1 == */.clod.envrc ]]; then
-    # shellcheck disable=SC2016 # the script expands its own arguments
-    out=$("${clean[@]}" bash -c '
-      command -v direnv >/dev/null && eval "$(direnv stdlib)"
-      cd "${1%/*}" || exit
-      set -a
-      . "$1"
-      set +a
-      awk "$2"
-    ' _ "$1" "$dump") || { echo "clod: $(tildify "$1") failed" >&2; return 1; }
-  elif command -v direnv >/dev/null; then
-    # Some direnv versions log "loading" and "using" lines even with an empty
-    # DIRENV_LOG_FORMAT; its other messages still get through.
-    err=$(mktemp)
-    out=$("${clean[@]}" direnv exec "$(dirname "$1")" awk "$dump" 2>"$err") || status=$?
-    grep -vE $'^(\e\\[[0-9;]*m)*direnv: (loading|using) ' "$err" >&2
-    rm -f "$err"
-    (( status )) &&
-      { echo "clod: run 'direnv allow' to use $(tildify "$1"), or add a .clod.envrc beside it" >&2; return 1; }
-  else
-    echo "clod: ignoring $(tildify "$1"): direnv is not installed" >&2
-    return 0
-  fi
+  # Some direnv versions log "loading" and "using" lines even with an empty
+  # DIRENV_LOG_FORMAT; its other messages still get through.
+  err=$(mktemp)
+  out=$("${clean[@]}" direnv exec "$(dirname "$1")" awk "$dump" 2>"$err") || status=$?
+  grep -vE $'^(\e\\[[0-9;]*m)*direnv: (loading|using) ' "$err" >&2
+  rm -f "$err"
+  (( status )) && { echo "clod: run 'direnv allow' to use $(tildify "$1")" >&2; return 1; }
   printf '%s\n' "$out" | grep -vxF -f <(printf '%s\n' "$base") |
     grep -vE '^(PATH|PWD|OLDPWD|SHLVL|_|LINES|COLUMNS|DIRENV_[A-Z_]*)=' | sort
   return 0

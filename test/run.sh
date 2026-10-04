@@ -106,7 +106,8 @@ test_empty_workspace() {
 
 test_scratch() {
   touch from-host
-  echo FOO=bar > .clod.envrc
+  echo 'export FOO=bar' > .envrc
+  direnv allow
   volumes=$(docker volume ls -q | wc -l)
   clod -s bash -c '
     set -e
@@ -182,12 +183,15 @@ test_docker_socket() {
 }
 
 test_envrc() {
-  printf 'FOO=bar\nMULTI="a\nb"\nCLOD_HOME=from-envrc\n' > .clod.envrc
+  printf 'export FOO=bar MULTI="a\nb" CLOD_HOME=from-envrc\n' > .envrc
+  exits 1 clod env
+  direnv allow
   clod env 2>&1 | tee out
   grep -q '^FOO=bar$' out
   grep -q 'skipping multi-line variable MULTI' out
   grep -q '^home: *from-envrc' out
-  echo CLOD_PORTS=5000 >> .clod.envrc
+  echo 'export CLOD_PORTS=5000' >> .envrc
+  direnv allow
   clod env | has '^ports: .*5000'
   if CLOD_PORTS='' clod env | has '^ports:'; then false; fi
   if clod -P '' env | has '^ports:'; then false; fi

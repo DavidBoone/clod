@@ -19,8 +19,8 @@ Only `/home/claude` and (unless scratch) `/workspace` persist. System packages (
 You can't run `clod` or see the host's `~/.clod`; the user changes these on the host, and they take effect on the next `clod` run. When something about the container is in the way, say which of these to change, with the exact lines:
 
 - Packages or system setup: a variant, `~/.clod/images/<name>/Dockerfile` (`ARG BASE=clod` / `FROM $BASE`, `USER root` … `USER claude`), run with `clod -i <name>`; `clod new-image <name>` starts one. Variants combine (`-i go+<name>`), and clod rebuilds them when their files change. For root while running, the bundled `sudo` variant
-- Environment variables for the container: `.clod.envrc` in the project (`export FOO=bar`)
-- Defaults for every run: `clod default image|command|home|ports VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.clod.envrc`
+- Environment variables for the container: `.envrc` in the project (`export FOO=bar`), loaded through the host's direnv once it is allowed
+- Defaults for every run: `clod default image|command|home|ports VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.envrc`
 - Instructions or managed settings for every home: `~/.clod/shared/` (`clod new-shared` creates it)
 - Ports: `clod -P 3000` or `CLOD_PORTS`; Docker access: `clod -i docker --docker`, which gives the agent root on the Docker host
 
