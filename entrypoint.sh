@@ -1,11 +1,6 @@
 #!/bin/sh
 set -eu
 
-# The launcher sets CLOD_WORKSPACE_FILES when the host folder has files.
-if [ -n "${CLOD_WORKSPACE_FILES:-}" ] && [ -z "$(ls -A /workspace 2>/dev/null)" ]; then
-    echo "clod: /workspace is empty, but the folder clod ran from isn't: Docker can't see it. Colima shares only your home folder unless started with --mount; see clod's docs/docker.md" >&2
-fi
-
 case "${1:-}" in
     codex)
         shift

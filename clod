@@ -46,9 +46,7 @@
 #
 # Inside the container, CLOD_HOME, CLOD_WORKSPACE and CLOD_IMAGE hold the home
 # and workspace labels and image tag this run resolved to, and CLOD_PORTS the
-# published container ports. CLOD_WORKSPACE_FILES is set when the workspace
-# directory has files, so the container can warn if it sees none. With
-# --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
+# published container ports. With --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
 # With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
 #
 # On a Linux host the clod image's claude user is built with the host user's
@@ -681,8 +679,8 @@ setup_workspace() {
   workspace=$REPLY workspace_label=$(tildify "$REPLY") workspace_src=$REPLY
 }
 
-# Exits unless the workspace directory exists: Docker would create a missing
-# one, as root on Linux.
+# Exits unless the workspace directory exists, which Docker would refuse to
+# mount with a less helpful message.
 check_workspace() {
   [[ -z $workspace || $workspace == vol:* || -d $workspace ]] && return 0
   echo "clod: no directory $workspace_label to mount as /workspace" >&2
@@ -1646,6 +1644,17 @@ cmd_image_build() {
   fi
 }
 
+# Sets REPLY to the --mount value that mounts $1, a host directory (an absolute
+# path) or a Docker volume, at $2, with options $3 (such as ",readonly"). Unlike
+# -v, a bind --mount fails when Docker can't see the directory (outside
+# Colima's shared folders, say) instead of mounting an empty one it creates.
+# The source is CSV-quoted, since commas separate the fields.
+mount_arg() {
+  local type=volume
+  [[ $1 == /* ]] && type=bind
+  REPLY="type=$type,\"src=${1//\"/\"\"}\",dst=$2$3"
+}
+
 # Runs command $command with arguments $@ in the container, building its image
 # first if needed.
 cmd_run() {
@@ -1665,24 +1674,25 @@ cmd_run() {
   # Images replaced by a build are left untagged; remove them.
   [[ -n $built ]] && docker image prune -f --filter label=clod.hash >/dev/null
 
-  run_args=(-i -v "$home_src:/home/claude" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
+  mount_arg "$home_src" /home/claude
+  run_args=(-i --mount "$REPLY" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
   # A scratch workspace is an anonymous volume, which --rm removes. Docker
   # copies the image's /workspace into it, owned by claude.
   # A volume workspace, like a volume home, starts as a copy of it.
   if [[ -n $scratch ]]; then
     run_args+=(-v /workspace -e CLOD_SCRATCH=1)
   else
-    run_args+=(-v "$workspace_src:/workspace" -e "CLOD_WORKSPACE=$workspace_label")
-    # A folder Docker doesn't share (outside Colima's mounts, say) shows up
-    # empty; the entrypoint warns when it sees nothing where this says there
-    # are files.
-    [[ $workspace != vol:* && -n $(ls -A "$workspace" 2>/dev/null) ]] && run_args+=(-e CLOD_WORKSPACE_FILES=1)
+    mount_arg "$workspace_src" /workspace
+    run_args+=(--mount "$REPLY" -e "CLOD_WORKSPACE=$workspace_label")
   fi
   [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
   if (( ${#port_args[@]} )); then
     run_args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
   fi
-  [[ -n $shared_dir ]] && run_args+=(-v "$shared_dir:/etc/claude-code:ro")
+  if [[ -n $shared_dir ]]; then
+    mount_arg "$shared_dir" /etc/claude-code ,readonly
+    run_args+=(--mount "$REPLY")
+  fi
   # Docker Engine on Linux has no built-in host.docker.internal.
   [[ $OSTYPE == linux* ]] && run_args+=(--add-host=host.docker.internal:host-gateway)
   # --docker mounts the socket of the Docker that runs clod, which must be local:
