@@ -86,6 +86,7 @@ test_run_command() {
     set -e
     test "$(id -u)" = "'"$(id -u)"'"
     test "$(cat /proc/1/comm)" = tini
+    test "$USER" = claude && test "$TMPDIR" = /tmp && test "$EDITOR" = vim && test "$PAGER" = less
     test "$(cat /workspace/from-host)" = hello
     test -f /etc/claude-code/managed-settings.json
     test -r /etc/clod/.claude/rules/clod.md
@@ -411,7 +412,7 @@ test_variant() {
     dotnet) check='dotnet --version' ;;
     go) check='go version' ;;
     lamp) check='php -v && composer --version && apache2 -v && mariadb --version' ;;
-    python) check='uv --version && gcc --version | head -1 && python3-config --includes' ;;
+    python) check='test "$UV_LINK_MODE" = copy && uv --version && gcc --version | head -1 && python3-config --includes' ;;
     rust) check='cargo new -q /tmp/hello && cd /tmp/hello && cargo run -q' ;;
     sudo) check='test "$(sudo -n whoami)" = root && test -r /etc/clod/.claude/rules/sudo.md' ;;
     go+sudo) check='go version && test "$(sudo -n whoami)" = root' ;;
