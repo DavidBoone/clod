@@ -107,7 +107,7 @@ what a run will actually use.
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`),
 `CLOD_WORKSPACE` the workspace's path on the host (`~/`-relative) or
-`vol:NAME`, and `CLOD_IMAGE` the image tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`).
+`vol:NAME`, and `CLOD_IMAGE` the image as `-i` names it (`clod`, `go`, `go+sudo`).
 
 ## Per-project environment
 

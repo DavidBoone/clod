@@ -14,7 +14,8 @@
 #               vol:<name> for the Docker volume clod-home-<name> (default: default)
 #   CLOD_IMAGE  image to run (default clod): a variant name, built from
 #               ~/.clod/images/<name>/ or else this script's images/<name>/ as
-#               clod-<name>; variants combined as a+b, b built on a as clod-a.b;
+#               clod-<name>; variants combined as a+b, b built on a (as the
+#               Docker image clod-a.b);
 #               or any local docker image
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
 #               (default), codex, bash or zsh
@@ -122,6 +123,9 @@ settings='image:CLOD_IMAGE:clod command:CLOD_COMMAND:claude home:CLOD_HOME:defau
   ports:CLOD_PORTS:-'
 
 name_re='^[A-Za-z0-9_-]+$'
+# A variant's name, which goes in a Docker image name: lowercase, with no
+# separator at either end or two in a row.
+variant_re='^[a-z0-9]+((_|__|-+)[a-z0-9]+)*$'
 port_re='^((([0-9.]+|\[[0-9a-fA-F:]+\]):)?[0-9]+:)?[0-9]+(/(tcp|udp))?$'
 clod_dir=$HOME/.clod
 config=$clod_dir/config
@@ -494,6 +498,15 @@ resolve_variant() {
   return 0
 }
 
+# Sets REPLY to the name clod shows for image $1, the one -i takes: A+B for
+# clod-A.B, NAME for clod-NAME, and any other image as it is.
+image_name() {
+  REPLY=$1
+  [[ $1 =~ ^clod-[A-Za-z0-9_.-]+$ ]] || return 0
+  REPLY=${1#clod-}
+  REPLY=${REPLY//./+}
+}
+
 # Builds $1 from directory $2, with any further docker build arguments, unless
 # the image is already labelled with hash $3. For `clod image rebuild` it always
 # builds, without the layer cache.
@@ -505,7 +518,8 @@ build_if_changed() {
   else
     [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$3" ]] && return
   fi
-  echo "clod: building $1..." >&2
+  image_name "$1"
+  echo "clod: building $REPLY..." >&2
   docker build -t "$1" --label "clod.hash=$3" ${no_cache[@]+"${no_cache[@]}"} "${@:4}" "$2" || exit 1
   built=1
 }
@@ -527,7 +541,8 @@ walk_image() {
   for t in ${walking[@]+"${walking[@]}"}; do
     [[ $t == "$tag" ]] || continue
     [[ $mode == state ]] && return 0
-    echo "clod: image $tag is built FROM itself" >&2
+    image_name "$tag"
+    echo "clod: image $REPLY is built FROM itself" >&2
     exit 1
   done
   if [[ $mode == build ]]; then
@@ -751,7 +766,7 @@ setup_home() {
 # Sets tag to the image to run, image to its name, and variant_dir to the
 # directory of the variant it is built from (the last, for a combination), or
 # to nothing. A variant NAME is built as clod-NAME, and a combination A+B, B
-# built on A, as clod-A.B; image becomes NAME or A.B.
+# built on A, as clod-A.B; image becomes NAME or A+B.
 setup_image() {
   image=${CLOD_IMAGE:-clod}
   if [[ $image == *[[:space:]]* ]]; then
@@ -761,7 +776,8 @@ setup_image() {
   resolve_variant "$image"
   if [[ -n $REPLY ]]; then
     tag=$REPLY
-    image=${tag#clod-}
+    image_name "$tag"
+    image=$REPLY
     tag_variant "$tag"
     variant_dir=$REPLY
   else
@@ -1037,7 +1053,7 @@ cmd_complete() {
       # The images clod built, named as clod image lists them.
       image:rm)
         offer $(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
-          sed -n 's/^clod-//p; /^clod$/p' | sort -u)
+          sed -n 's/^clod-//p; /^clod$/p' | tr . + | sort -u)
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
       home:rm) offer $homes $(volume_names clod-home- | sed 's/^/vol:/') ;;
@@ -1185,7 +1201,7 @@ image_state() {
 # images it is FROM, in any stage, each once.
 chain_seen=() chain_rows=()
 image_chain() {
-  local tag=$1 dir base='' src from='' parent parents=() t
+  local tag=$1 dir base='' src from='' parent parents=() t state
   for t in ${chain_seen[@]+"${chain_seen[@]}"}; do
     [[ $t == "$tag" ]] && return 0
   done
@@ -1202,11 +1218,14 @@ image_chain() {
   if [[ -n $dir ]]; then
     while IFS= read -r parent; do
       parents+=("$parent")
-      from+="${from:+, }$parent"
+      image_name "$parent"
+      from+="${from:+, }$REPLY"
     done < <(variant_parents "$dir" "$base")
   fi
   image_state "$tag"
-  chain_rows+=("${tag#clod-}" "$REPLY" "${from:--}" "$src")
+  state=$REPLY
+  image_name "$tag"
+  chain_rows+=("$REPLY" "$state" "${from:--}" "$src")
   for parent in ${parents[@]+"${parents[@]}"}; do
     [[ $parent == clod || $parent == clod-* ]] && image_chain "$parent"
   done
@@ -1260,9 +1279,10 @@ cmd_image() {
   for t in $({ docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null
               [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-' | sort -u); do
     is_one_of "$t" "${tags[*]}" && continue
-    n=${t#clod-}
+    image_name "$t"
+    n=$REPLY
     tag_variant "$t"
-    src=${n//./ + }
+    src=${n//+/ + }
     [[ -n $variant_missing ]] && src="$src (no Dockerfile)"
     names+=("$n") tags+=("$t") srcs+=("$src")
   done
@@ -1281,7 +1301,7 @@ cmd_image() {
   done
   echo
   echo "*        runs here by default; clod -i NAME runs another, and clod -i A+B"
-  echo "         builds variant B on A as clod-A.B"
+  echo "         builds variant B on A"
   echo "bundled  comes with clod, in $(tildify "$script_dir")"
   [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
   [[ -n $any_used ]] && echo "in use   a container, maybe a stopped one, uses it (docker ps -a), so it can't be removed"
@@ -1292,15 +1312,17 @@ cmd_image() {
 # Removes image $1. An image others are built on loses only its name, keeping
 # the layers they use; they rebuild on their next run, as their base changed.
 remove_tag() {
-  local out
+  local out name
+  image_name "$1"
+  name=$REPLY
   if ! out=$(docker rmi "$1" 2>&1); then
-    echo "clod: can't remove $1: $out" >&2
+    echo "clod: can't remove $name: $out" >&2
     exit 1
   fi
   if [[ $out == *Deleted:* ]]; then
-    echo "removed $1"
+    echo "removed $name"
   else
-    echo "removed the name $1; its layers stay while images built on it use them"
+    echo "removed the name $name; its layers stay while images built on it use them"
   fi
 }
 
@@ -1318,7 +1340,8 @@ cmd_image_rm() {
       exit 1
     fi
     if in_use "$t"; then
-      echo "clod: a container uses $t, so it can't be removed; docker ps -a lists the containers" >&2
+      image_name "$t"
+      echo "clod: a container uses $REPLY, so it can't be removed; docker ps -a lists the containers" >&2
       exit 1
     fi
     tags+=("$t")
@@ -1345,7 +1368,8 @@ cmd_image_prune() {
     remove_tag "$t"
   done
   for t in ${used[@]+"${used[@]}"}; do
-    echo "kept $t: a container uses it (docker ps -a lists them)"
+    image_name "$t"
+    echo "kept $REPLY: a container uses it (docker ps -a lists them)"
   done
   docker image prune -f --filter label=clod.hash >/dev/null
   (( ${#stale[@]} + ${#used[@]} )) || echo "clod: no stale images"
@@ -1699,7 +1723,8 @@ cmd_shared_diff() {
 
 cmd_image_new() {
   local name=$1 from=$2 target src='' combo='' variants from_lines
-  [[ $name =~ $name_re ]] || usage_error "invalid image name '$name'"
+  [[ $name =~ $variant_re ]] ||
+    usage_error "invalid image name '$name': lowercase letters and digits, joined by - or _"
   target=$clod_dir/images/$name
   if [[ -e $target ]]; then
     echo "clod: $(tildify "$target") already exists" >&2
@@ -1724,13 +1749,14 @@ cmd_image_new() {
   else
     mkdir "$target"
     if [[ -n $combo ]]; then
-      variants=${combo#clod-}
-      from_lines="# Built as clod-$name and run with \`clod -i $name\`. It rebuilds whenever a
-# file in this directory or in ${variants//./, } changes.
+      image_name "$combo"
+      variants=$REPLY
+      from_lines="# Run with \`clod -i $name\`. It rebuilds whenever a file in this directory or
+# in ${variants//+/, } changes. FROM names $variants as Docker does: $combo.
 FROM $combo"
     else
-      from_lines="# Built as clod-$name and run with \`clod -i $name\`. It rebuilds whenever a
-# file in this directory or the image it is FROM changes. BASE lets it go on top
+      from_lines="# Run with \`clod -i $name\`. It rebuilds whenever a file in this directory or
+# the image it is FROM changes. BASE lets it go on top
 # of another variant, as in \`clod -i go+$name\`.
 ARG BASE=clod
 FROM \$BASE"
@@ -1743,7 +1769,7 @@ USER claude
 # Instructions for Claude about this image, from a CLAUDE.md beside this file:
 # COPY CLAUDE.md /etc/clod/.claude/rules/$name.md
 STARTER
-    echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, FROM $combo}"
+    echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, built on $variants}"
   fi
   echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
 }
@@ -1762,15 +1788,15 @@ cmd_env() {
     field home "$home_label ($home_path)"
   fi
   if [[ $tag == clod-*.* ]]; then
-    IFS=. read -ra parts <<< "$image"
+    IFS=+ read -ra parts <<< "$image"
     from=''
     for p in "${parts[@]}"; do
       find_variant "$p"
       from+="${from:+ + }$(tildify "$REPLY")"
     done
-    field image "$tag ($from)"
+    field image "$image ($from)"
   else
-    field image "$tag${variant_dir:+ ($(tildify "$variant_dir"))}"
+    field image "$image${variant_dir:+ ($(tildify "$variant_dir"))}"
   fi
   field command "${CLOD_COMMAND:-claude} (what a bare clod runs)"
   if [[ -n $scratch ]]; then
@@ -1824,7 +1850,8 @@ cmd_image_build() {
     docker image prune -f --filter label=clod.hash >/dev/null
   else
     for t in "${tags[@]}"; do
-      echo "clod: ${t#clod-} is up to date"
+      image_name "$t"
+      echo "clod: $REPLY is up to date"
     done
   fi
 }
@@ -1869,7 +1896,7 @@ cmd_run() {
   need_home
 
   if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
-    echo "clod: running $tag as built" >&2
+    echo "clod: running $image as built" >&2
   elif [[ $tag == clod || -n $variant_dir ]]; then
     walk_image "$tag" build
   elif ! docker image inspect "$tag" >/dev/null 2>&1; then
@@ -1881,7 +1908,7 @@ cmd_run() {
   [[ -n $built ]] && docker image prune -f --filter label=clod.hash >/dev/null
 
   mount_arg "$home_src" /home/claude
-  run_args=(-i --mount "$REPLY" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
+  run_args=(-i --mount "$REPLY" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$image")
   # A scratch workspace is an anonymous volume, which --rm removes. Docker
   # copies the image's /workspace into it, owned by claude.
   # A volume workspace, like a volume home, starts as a copy of it.
@@ -1926,7 +1953,7 @@ cmd_run() {
       exit 1
     fi
     if [[ $probe == *no-cli ]]; then
-      echo "clod: --docker: $tag has no docker CLI, so only the socket is there; the docker variant has it (clod -i docker --docker)" >&2
+      echo "clod: --docker: $image has no docker CLI, so only the socket is there; the docker variant has it (clod -i docker --docker)" >&2
     fi
     run_args+=("${mount[@]}" --group-add "${sock_stat#socket }")
     # A volume workspace has no path on the Docker host.
@@ -1941,7 +1968,7 @@ cmd_run() {
       [[ -n ${!v:-} ]] && run_args+=(-e "$v")
     done
   fi
-  echo "clod · $home_label · $tag · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
+  echo "clod · $home_label · $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }
