@@ -123,7 +123,7 @@ test_scratch() {
   test "$(docker volume ls -q | wc -l)" = "$volumes"
   clod -s env | has '^scratch:'
   if clod -s env | has '^envrc:'; then false; fi
-  exits 2 clod -s --docker bash -c true
+  clod -s --docker bash -c 'test -z "${CLOD_HOST_WORKSPACE:-}"'
   cd ~
   clod -s bash -c true
 }
