@@ -88,11 +88,31 @@ combine with `-w`.
 or else creates `~/.local/bin` and prints the line that adds it to your
 `PATH`. `clod install DIR` links it into a directory of your choice.
 
-For tab completion in bash or zsh, add this to your `~/.bashrc` or `~/.zshrc`:
+It also sets up tab completion, asking zsh and bash, each started as a login
+shell, where they load it from. For a zsh that runs `compinit`, it links
+`_clod` into the first directory on zsh's `$fpath` you can write to; for a
+bash that loads bash-completion 2, it links `clod` into
+`~/.local/share/bash-completion/completions` (with `XDG_DATA_HOME` set, into
+`bash-completion/completions` there, and with `BASH_COMPLETION_USER_DIR` set,
+into `completions` in the first directory it lists). It takes effect in a new
+terminal. When your login shell gets neither, `install`
+prints the line to add to your `~/.zshrc` or `~/.bashrc` instead:
 
 ```bash
 eval "$(clod completion)"
 ```
+
+`install` won't replace a file it didn't make; `clod --force install` does.
+Running it again only reports what's installed already.
+
+`clod uninstall` removes the links `install` made, and nothing else: `clod` in
+the directories on your `PATH` and the four above, `_clod` on zsh's `$fpath`
+and `clod` in bash-completion's directory. A link `clod install DIR` made in a
+directory off your `PATH` stays, as do clod's checkout, `~/.clod` (your homes
+and their logins, variants, shared config and defaults) and the Docker images
+and volumes clod made, which `clod image`, `clod home` and `clod workspace`
+list and their `rm` commands delete. Take out an `eval "$(clod completion)"`
+line yourself.
 
 ## Git and GitHub
 

@@ -197,6 +197,6 @@ Without the script:
 - **Settings.** Homes by name or as Docker volumes (`-H`), the project's
   `.envrc` passed in as variables, ports published on localhost from a short
   form (`-P`), and defaults kept with `clod default`.
-- **Maintenance.** `clod update`, `clod install`, listing and removing volume
+- **Maintenance.** `clod update`, `clod install` and `uninstall`, listing and removing volume
   homes and workspaces (`clod home`, `clod workspace`), `clod shared`, and the
   check that Docker is installed and running before anything else.

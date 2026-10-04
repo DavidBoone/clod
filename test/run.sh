@@ -23,7 +23,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude codex statusline
   port docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line
-  multi-stage combine rebuild image-rm image-prune completion'
+  multi-stage combine rebuild image-rm image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -75,7 +75,8 @@ exits() {
 
 test_lint() {
   cd "$repo"
-  shellcheck clod entrypoint.sh shared/statusline.sh docs/statusline-svg.sh test/run.sh
+  shellcheck clod completions/clod.bash entrypoint.sh shared/statusline.sh docs/statusline-svg.sh \
+    test/run.sh
 }
 
 test_env() {
@@ -737,6 +738,8 @@ test_completion() {
   test "$(clod __complete --sk)" = --skip-build
   # the nouns and their verbs; build and rebuild only after image
   test "$(clod __complete i)" = "$(printf 'image\ninstall')"
+  test "$(clod __complete u)" = "$(printf 'update\nuninstall')"
+  test -z "$(clod __complete uninstall '')"
   if clod __complete '' | grep -qxE 'build|rebuild'; then false; fi
   test "$(clod __complete image '')" = "$(printf 'show\nnew\nbuild\nrebuild\nrm\nprune')"
   test "$(clod __complete image re)" = rebuild
@@ -776,9 +779,9 @@ test_completion() {
   test "$(clod __complete --wor)" = --workspace
   test -z "$(clod __complete -P '')"
   clod __complete -P ''
-  # The shim in real shells, which split words differently: bash at = and :,
-  # zsh not at all. A stand-in docker lists the volumes. Directories complete
-  # with a / in bash only.
+  # The shim, and the files install links, in real shells, which split words
+  # differently: bash at = and :, zsh not at all. A stand-in docker lists the
+  # volumes. Directories complete with a / in bash only.
   mkdir proj bin
   printf '%s\n' '#!/bin/bash' \
     '[[ "$1 $2" == "volume ls" ]] && printf "%s\n" clod-home-vhome clod-workspace-play' > bin/docker
@@ -799,9 +802,11 @@ test_completion() {
   PATH=$PWD/bin:$PATH clod __complete workspace rm vol : '' | has -x play
   test "$(PATH=$PWD/bin:$PATH clod __complete workspace rm vo)" = vol:play
   test -z "$(PATH=$PWD/bin:$PATH clod __complete workspace rm vol:play '')"
-  for sh in bash zsh; do
-    [[ $sh == bash ]] || command -v "$sh" >/dev/null || continue
-    PATH=$PWD/bin:$PATH "$repo/test/tab-complete.py" "$sh" 'clod -i go+su' 'clod --image=go+su' \
+  for sh in bash zsh bash:files zsh:files; do
+    [[ $sh == bash* ]] || command -v zsh >/dev/null || continue
+    files=()
+    [[ $sh == *:files ]] && files=(--files "$repo/completions")
+    PATH=$PWD/bin:$PATH "$repo/test/tab-complete.py" ${files[@]+"${files[@]}"} "${sh%:*}" 'clod -i go+su' 'clod --image=go+su' \
       'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
       'clod -w pro' 'clod --workspace=pro' 'clod claude pro' 'clod image sh' 'clod shared d' \
       'clod home rm vol:vh' 'clod workspace rm pl' 'clod workspace rm vol:pl' \
@@ -812,6 +817,110 @@ test_completion() {
       'clod home rm vol:vhome' 'clod workspace rm play' 'clod workspace rm vol:play' \
       'clod workspace rm vol:play' 'clod home cp work' 'clod home mv vol:vhome' 'clod home rm work')
   done
+}
+
+# Puts stand-ins for zsh and bash first on PATH, in directory fake. Run by
+# install as interactive login shells (-lic), they skip the startup files:
+# zsh has a completion system when FAKE_FPATH is set, with those directories
+# on $fpath, and bash has bash-completion 2 when FAKE_BASH_COMPLETION is set.
+# Otherwise they are the real shells.
+fake_shells() {
+  local zsh bash
+  zsh=$(command -v zsh) bash=$(command -v bash)
+  mkdir -p fake
+  cat > fake/zsh <<EOF
+#!/bin/bash
+[[ \$1 == -lic ]] || exec $zsh "\$@"
+[[ -n \${FAKE_FPATH+set} ]] && set -- "\$1" "compdef() { :; }; fpath=(\$FAKE_FPATH); \$2"
+exec $zsh -f -c "\$2"
+EOF
+  cat > fake/bash <<EOF
+#!/bin/bash
+[[ \$1 == -lic ]] || exec $bash "\$@"
+[[ -n \$FAKE_BASH_COMPLETION ]] && set -- "\$1" "_comp_load() { :; }; \$2"
+exec $bash --norc --noprofile -c "\$2"
+EOF
+  chmod +x fake/zsh fake/bash
+  export PATH=$PWD/fake:$PATH
+}
+
+# install and uninstall, in a HOME of their own, with PATH holding only the
+# directories here and the system's commands. Needs no Docker.
+# shellcheck disable=SC2088 # clod shows $HOME as ~
+test_install() {
+  command -v zsh >/dev/null
+  export HOME=$PWD/home XDG_DATA_HOME=$PWD/xdg SHELL=/bin/zsh
+  unset BASH_COMPLETION_USER_DIR FAKE_FPATH FAKE_BASH_COMPLETION
+  mkdir -p "$HOME/bin" zfn ro elsewhere
+  chmod a-w ro
+  export PATH=$HOME/.local/bin:$HOME/bin:/usr/bin:/bin
+  fake_shells
+  # the first install dir on PATH that exists: ~/bin; run through a link, it
+  # links the real script
+  ln -s "$repo/clod" via
+  ./via install > out
+  test "$(readlink "$HOME/bin/clod")" = "$repo/clod"
+  # no completion system in either shell: the eval line, for zsh's file
+  has -F 'add this line to ~/.zshrc' < out
+  has -F 'eval "$(clod completion)"' < out
+  test ! -e zfn/_clod
+  # zsh's first writable $fpath directory, and bash-completion's under
+  # XDG_DATA_HOME; then no eval line
+  FAKE_FPATH="$PWD/ro $PWD/zfn" FAKE_BASH_COMPLETION=1 clod install > out
+  test "$(readlink zfn/_clod)" = "$repo/completions/_clod"
+  test "$(readlink xdg/bash-completion/completions/clod)" = "$repo/completions/clod.bash"
+  test ! -e ro/_clod
+  has -F '~/bin/clod is installed already' < out
+  if grep -q eval out; then false; fi
+  # again: all installed already
+  FAKE_FPATH="$PWD/zfn" FAKE_BASH_COMPLETION=1 clod install > out
+  test "$(grep -c 'installed already' out)" = 3
+  # BASH_COMPLETION_USER_DIR's first directory
+  BASH_COMPLETION_USER_DIR=$PWD/bc1:$PWD/bc2 FAKE_BASH_COMPLETION=1 clod install >/dev/null
+  test "$(readlink bc1/completions/clod)" = "$repo/completions/clod.bash"
+  # only a read-only $fpath directory: the eval line, unless bash is the login
+  # shell and has it
+  FAKE_FPATH=$PWD/ro clod install | has -F 'eval "$(clod completion)"'
+  if SHELL=/bin/bash FAKE_FPATH=$PWD/ro FAKE_BASH_COMPLETION=1 clod install | grep -q eval; then false; fi
+  # a directory off PATH: the PATH line, for the login shell's file
+  SHELL=/bin/bash clod install "$PWD/elsewhere" > out
+  test "$(readlink elsewhere/clod)" = "$repo/clod"
+  has -F 'add this line to ~/.bashrc' < out
+  has -F "export PATH=\"$PWD/elsewhere:\$PATH\"" < out
+  # someone else's files: refused, then replaced with --force
+  mkdir taken
+  touch taken/clod
+  exits 1 clod install "$PWD/taken" 2>&1 | has 'taken/clod already exists; clod --force install replaces it'
+  test ! -L taken/clod
+  clod --force install "$PWD/taken" >/dev/null
+  test "$(readlink taken/clod)" = "$repo/clod"
+  mkdir zfn2
+  touch zfn2/_clod
+  FAKE_FPATH=$PWD/zfn2 exits 1 clod install > out 2>&1
+  has -F 'zfn2/_clod already exists' < out
+  has -F 'eval "$(clod completion)"' < out
+  FAKE_FPATH=$PWD/zfn2 clod --force install >/dev/null
+  test "$(readlink zfn2/_clod)" = "$repo/completions/_clod"
+  # with no install dir on PATH: ~/.local/bin, created
+  HOME=$PWD/home2 PATH=$PWD/fake:/usr/bin:/bin "$repo/clod" install > out
+  test "$(readlink home2/.local/bin/clod)" = "$repo/clod"
+  has -F 'export PATH="$HOME/.local/bin:$PATH"' < out
+  # uninstall: our links on PATH, in install's dirs, on $fpath and in
+  # bash-completion's directory; not a file or someone else's link there
+  rm zfn2/_clod
+  touch zfn2/_clod
+  mkdir -p "$HOME/.local/bin"
+  ln -s /bin/true "$HOME/.local/bin/clod"
+  PATH=$PATH:$PWD/elsewhere:$PWD/taken FAKE_FPATH="$PWD/zfn $PWD/zfn2" "$repo/clod" uninstall > out
+  for f in ~/bin/clod elsewhere/clod taken/clod zfn/_clod xdg/bash-completion/completions/clod; do
+    test ! -e "$f" && test ! -L "$f"
+  done
+  test "$(grep -c '^clod: removed' out)" = 5
+  test "$(readlink "$HOME/.local/bin/clod")" = /bin/true
+  test -f zfn2/_clod
+  has -F '~/.clod: your homes' < out
+  # nothing left to remove
+  FAKE_FPATH=$PWD/zfn "$repo/clod" uninstall | has -F "found no links to $repo to remove"
 }
 
 # Homebrew's docker on macOS has no buildx, so clod's builds there use the
