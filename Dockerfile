@@ -20,13 +20,19 @@ ENV LC_ALL=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
 # Language runtimes for agent tooling (MCP servers, scripts, npm-installed CLIs).
-# Node comes from NodeSource; its nodejs package includes npm.
+# Node comes from NodeSource; its nodejs package includes npm. The GitHub CLI
+# comes from GitHub's own repository, installed with the CLI tools below.
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
        -o /etc/apt/keyrings/nodesource.asc \
     && printf '%s\n' 'Types: deb' 'URIs: https://deb.nodesource.com/node_26.x' \
        'Suites: nodistro' 'Components: main' 'Signed-By: /etc/apt/keyrings/nodesource.asc' \
        > /etc/apt/sources.list.d/nodesource.sources \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       -o /etc/apt/keyrings/githubcli.gpg \
+    && printf '%s\n' 'Types: deb' 'URIs: https://cli.github.com/packages' \
+       'Suites: stable' 'Components: main' 'Signed-By: /etc/apt/keyrings/githubcli.gpg' \
+       > /etc/apt/sources.list.d/githubcli.sources \
     && apt-get update \
     && apt-get install -y \
        python3 python3-venv \

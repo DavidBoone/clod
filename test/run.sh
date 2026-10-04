@@ -93,6 +93,7 @@ test_run_command() {
     test -f /etc/claude-code/managed-settings.json
     test -r /etc/clod/.claude/rules/clod.md
     touch /workspace/from-container
+    apt-cache policy gh | grep -A1 "^ *\*\*\*" | grep -q cli.github.com
     git --version; gh --version | head -1; node --version; python3 --version; jq --version; fd --version
   '
   test "$(stat -c %u from-container)" = "$(id -u)"
