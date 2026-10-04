@@ -2,19 +2,18 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [master]
   schedule:
     - cron: "0 6 * * 1"   # weekly, to catch upstream changes (Debian, NodeSource, vendor repos)
   workflow_dispatch:
 
 jobs:
-  # test/run.sh holds the tests; each job runs one group of them, or one variant.
-  lint:
+  # test/run.sh holds the tests; each job runs some of them. Each job builds the
+  # base image before its tests, so the quick variants share one.
+  lint-classic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: test/run.sh lint
+      - run: test/run.sh lint classic
 
   base:
     runs-on: ubuntu-latest
@@ -23,18 +22,12 @@ jobs:
       - run: sudo apt-get install -y direnv
       - run: test/run.sh base
 
-  classic-builder:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: test/run.sh classic
-
   variant:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        image: [browser, docker, dotnet, go, lamp, python, rust, sudo, go+sudo]
+        tests: [variant-browser, variant-lamp, variant-rust, variant-dotnet variant-python variant-go+sudo]
     steps:
       - uses: actions/checkout@v4
-      - run: test/run.sh variant-${{ matrix.image }}
+      - run: test/run.sh ${{ matrix.tests }}
