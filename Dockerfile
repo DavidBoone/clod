@@ -39,7 +39,7 @@ RUN apt-get install -y \
        binutils bsdextrautils strace lsof \
        psmisc procps rsync zip unzip xz-utils \
        openssh-client dnsutils netcat-openbsd iputils-ping socat iproute2 \
-       sqlite3 \
+       sqlite3 tini \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
 # Bind mounts can report owners git doesn't trust (macOS file sharing), and
@@ -72,5 +72,7 @@ ENV CLAUDE_CONFIG_DIR=/home/claude/.claude
 ENV CODEX_HOME=/home/claude/.codex
 
 WORKDIR /workspace
-ENTRYPOINT ["clod-entrypoint"]
+# tini is PID 1, so orphaned processes (browsers a test run leaves behind) are
+# reaped instead of piling up as zombies.
+ENTRYPOINT ["tini", "--", "clod-entrypoint"]
 CMD []

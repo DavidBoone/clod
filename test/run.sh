@@ -85,6 +85,7 @@ test_run_command() {
   clod bash -c '
     set -e
     test "$(id -u)" = "'"$(id -u)"'"
+    test "$(cat /proc/1/comm)" = tini
     test "$(cat /workspace/from-host)" = hello
     test -f /etc/claude-code/managed-settings.json
     test -r /etc/clod/.claude/rules/clod.md
