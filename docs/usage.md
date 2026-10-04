@@ -39,8 +39,8 @@ directory: a Docker volume that's removed with the container, for a question,
 an experiment or a repository cloned just to look at. Only the home persists,
 so copy out anything worth keeping, or push it somewhere. No `.envrc` is read,
 since the current directory isn't the project, and clod runs from anywhere,
-your home directory included. It doesn't combine with `--docker`, which needs a
-workspace on the host.
+your home directory included. With `--docker`, the agent's containers can't
+bind-mount a scratch workspace, which has no path on the Docker host.
 
 Claude Code keys its history and memory by the workspace path, which is
 `/workspace` in every clod run, so a scratch session shares them with the

@@ -584,8 +584,6 @@ parse_args() {
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
     new-image) (( $# <= 2 )) || usage_error "new-image takes a NAME and at most one image to start from" ;;
   esac
-  [[ -n $scratch && -n $docker_socket ]] &&
-    usage_error "--scratch and --docker don't combine: a scratch workspace has no host path for sibling containers"
   args=("$@")
   (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
   return 0
@@ -1436,7 +1434,9 @@ cmd_run() {
     if [[ $probe == *no-cli ]]; then
       echo "clod: --docker: $tag has no docker CLI, so only the socket is there; the docker variant has it (clod -i docker --docker)" >&2
     fi
-    run_args+=("${mount[@]}" --group-add "${sock_stat#socket }" -e "CLOD_HOST_WORKSPACE=$PWD")
+    run_args+=("${mount[@]}" --group-add "${sock_stat#socket }")
+    # A scratch workspace is a volume, with no path on the Docker host.
+    [[ -z $scratch ]] && run_args+=(-e "CLOD_HOST_WORKSPACE=$PWD")
   fi
   [[ -t 0 && -t 1 ]] && run_args+=(-t)
   echo "clod · $home_label · $tag · ${#vars[@]} vars${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
