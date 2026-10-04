@@ -22,12 +22,11 @@ projects under it, or add other folders with `colima start --mount /path:w`. A
 project outside the shared folders appears as an empty `/workspace`, and clod
 warns at launch when that happens.
 
-Colima's virtiofs mounts, which hold the home and workspace, can fail now and
-then with `Permission denied` on files that have the right permissions:
-reported for a database's data files, and for `chmod` while a large package
-unpacks (`uv`, `playwright install`). Keep databases and large binary caches
-off the mounts, in the image or the container's own filesystem, and retry a
-big install that fails this way.
+Colima's shared folders, which hold the home and workspace, don't allow every
+ownership and permission change: `chown`, and sometimes `chmod`, fail with
+`Permission denied`. Databases trip over this, so keep a database's data
+directory in the container's own filesystem rather than in the home or
+workspace.
 
 ## Linux
 

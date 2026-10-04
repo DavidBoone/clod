@@ -78,10 +78,7 @@ copying their install steps.
 rebuilds each whenever a file in its directory or an image it is `FROM`
 (in any stage) changes. A variant in `~/.clod/images` takes precedence over a bundled one of
 the same name, so copying one there is how to customise it. Apt lists are kept
-in the base, so variants can `apt-get install` without `apt-get update`. Those
-lists date from the base's build: a variant that adds a package repository, or
-wants packages newer than the base's, runs `apt-get update` first, and its
-versions can then differ from other variants'. The
+in the base, so variants can `apt-get install` without `apt-get update`. The
 directory is the build context, so `COPY` works for files beside the
 `Dockerfile`.
 
@@ -94,8 +91,10 @@ the variant:
 COPY CLAUDE.md /etc/clod/.claude/rules/mine.md
 ```
 
-The base gets Node from NodeSource's repository for Node 26. A variant
-switches it to another major by editing that repository and reinstalling:
+Node is in the base for the agents' own tooling: Codex installs with npm, and
+many MCP servers run with `npx`. Claude Code doesn't need it. The base gets Node
+26 from NodeSource's repository, and a project that needs another major gets it
+from a variant that edits that repository and reinstalls:
 
 ```dockerfile
 USER root
