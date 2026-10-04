@@ -1726,7 +1726,15 @@ cmd_run() {
     # A volume workspace has no path on the Docker host.
     [[ -n $workspace && $workspace != vol:* ]] && run_args+=(-e "CLOD_HOST_WORKSPACE=$workspace")
   fi
-  [[ -t 0 && -t 1 ]] && run_args+=(-t)
+  # In a terminal, the host terminal's name, version and colour support go in
+  # too, so programs inside can tell what it supports, such as links. TERM
+  # stays Docker's xterm: the container may lack the host's terminfo entry.
+  if [[ -t 0 && -t 1 ]]; then
+    run_args+=(-t)
+    for v in TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION COLORTERM; do
+      [[ -n ${!v:-} ]] && run_args+=(-e "$v")
+    done
+  fi
   echo "clod · $home_label · $tag · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"

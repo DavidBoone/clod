@@ -104,4 +104,8 @@ as defaults for the launcher, and the same variable set in your shell wins.
 `--env-file` can't carry multi-line values, so variables holding one are skipped
 with a warning. Changes take effect on the next `clod` launch.
 
-The container also gets the host's timezone (`$TZ`, else `/etc/localtime`).
+The container also gets the host's timezone (`$TZ`, else `/etc/localtime`). When
+clod runs in a terminal, it passes in the terminal's `TERM_PROGRAM`,
+`TERM_PROGRAM_VERSION`, `LC_TERMINAL`, `LC_TERMINAL_VERSION` and `COLORTERM`, where
+they're set, so programs inside can tell what the terminal supports, such as links.
+`TERM` stays Docker's `xterm`.

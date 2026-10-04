@@ -8,6 +8,7 @@ Running in a disposable Docker container (`docker run --rm`) started by the user
 - `/etc/clod/.claude/rules/` holds this file and any instructions the image's variants add
 - `$CLOD_HOME`, `$CLOD_WORKSPACE` and `$CLOD_IMAGE` name this run's home, workspace and image; a `~` in a path there is the user's home on the host
 - `$CLOD_PORTS`, when set, lists the container ports published to the user's machine, comma-separated (`5000,8080`); a server must listen on `0.0.0.0` to be reachable through them
+- `$TERM` is `xterm`. When clod runs in a terminal, `$TERM_PROGRAM`, `$TERM_PROGRAM_VERSION`, `$LC_TERMINAL`, `$LC_TERMINAL_VERSION` and `$COLORTERM` are the host terminal's, where it sets them
 - The host is `host.docker.internal`. The Docker socket is mounted only with `clod --docker` (then `$CLOD_HOST_WORKSPACE` is the project's host path, unset for a volume or scratch workspace)
 
 When the home and workspace are virtiofs mounts (`mount` shows it; usual on a macOS host), GNU `sed -i` leaves the file mode 600 (it restores the mode through an ACL, which the mount stores but doesn't apply); edit files with your own tools or `perl -i` instead.
