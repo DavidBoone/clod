@@ -37,10 +37,10 @@ your defaults, so a project can't turn it on: it applies only when you type it.
 ## How the agent's containers behave
 
 The containers the agent starts run beside clod's, on your Docker, and outlive
-it. Their bind mounts take paths on your machine, so the container gets the
-project's path as `$CLOD_HOST_WORKSPACE` (except with `--scratch`, whose
-workspace has no such path), and the agent reaches their published
-ports at `host.docker.internal`. The `docker` variant tells Claude all this.
+it. The container gets the project's host path as `$CLOD_HOST_WORKSPACE`,
+unset for a volume or scratch workspace, and the agent reaches their published
+ports at `host.docker.internal`. The `docker` variant tells Claude how they
+behave.
 
 `--docker` works with any image that has the Docker CLI, such as a combination
 like `-i go+docker`; with one that doesn't, clod warns at launch. It fails if

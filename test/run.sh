@@ -21,7 +21,7 @@
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
-base_tests='env run-command empty-workspace scratch refuses-home claude codex statusline
+base_tests='env run-command empty-workspace scratch workspace refuses-home claude codex statusline
   port docker-socket envrc volume-home default new-shared command-line multi-stage
   combine rebuild remove-image prune completion'
 classic_tests='classic'
@@ -128,6 +128,48 @@ test_scratch() {
   clod -s bash -c true
 }
 
+test_workspace() {
+  local here=$PWD
+  mkdir proj
+  echo from-proj > proj/file
+  echo 'export FOO=proj' > proj/.envrc
+  echo 'export FOO=here' > .envrc
+  direnv allow proj
+  direnv allow
+  clod -w proj env | has "^workspace: *$here/proj\$"
+  clod -w proj env | has '^envrc: .*/proj/.envrc$'
+  clod -w proj bash -c '
+    set -e
+    test "$(cat /workspace/file)" = from-proj
+    test "$FOO" = proj
+    test "$CLOD_WORKSPACE" = "'"$here/proj"'"
+  '
+  exits 1 clod -w nope bash -c true
+  exits 1 clod -w nope env
+  clod -w nope homes >/dev/null
+  exits 2 clod -s -w proj bash -c true
+  exits 1 clod -w ~ bash -c true 2>&1 | has 'refusing to mount'
+  mkdir -p ~/.clod/homes/x
+  exits 1 clod -w ~/.clod/homes/x bash -c true 2>&1 | has 'refusing to mount'
+  cd ~
+  clod -w "$here/proj" bash -c 'test "$(cat /workspace/file)" = from-proj && test "$FOO" = proj'
+  # a volume workspace is claude's, kept between runs, and reads no .envrc
+  cd "$here/proj"
+  docker volume rm -f clod-workspace-wtest >/dev/null
+  clod -w vol:wtest bash -c '
+    set -e
+    test "$CLOD_WORKSPACE" = vol:wtest
+    test "$(stat -c %U /workspace)" = claude
+    test -z "${FOO:-}"
+    echo kept > /workspace/kept
+  '
+  clod -w vol:wtest bash -c 'test "$(cat /workspace/kept)" = kept'
+  clod -w vol:wtest env | has '^workspace: *vol:wtest (Docker volume clod-workspace-wtest)'
+  if clod -w vol:wtest env | has '^envrc:'; then false; fi
+  exits 1 clod -w vol:./x env
+  docker volume rm clod-workspace-wtest >/dev/null
+}
+
 test_refuses_home() {
   cd ~
   exits 1 clod bash -c true
@@ -184,6 +226,17 @@ test_docker_socket() {
     test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
   ' 2>&1 | tee out
   if grep -q 'no docker CLI' out; then false; fi
+  mkdir sub
+  clod -i docker --docker -w sub bash -c 'test "$CLOD_HOST_WORKSPACE" = "'"$PWD/sub"'"'
+  # a volume workspace has no host path; the agent's containers mount it by name
+  docker volume rm -f clod-workspace-dtest >/dev/null
+  clod -i docker --docker -w vol:dtest bash -c '
+    set -e
+    test -z "${CLOD_HOST_WORKSPACE:-}"
+    echo sibling > /workspace/from-agent
+    test "$(docker run --rm --entrypoint cat -v clod-workspace-dtest:/w clod /w/from-agent)" = sibling
+  '
+  docker volume rm clod-workspace-dtest >/dev/null
 }
 
 test_envrc() {
@@ -440,8 +493,8 @@ test_prune() {
   test "$(clod prune)" = 'removed clod-keep'
 }
 
-# Tab completion: clod __complete's candidates, and the shim it prints, in bash
-# and (if installed) zsh. Needs no Docker.
+# Tab completion: clod __complete's candidates, and the shim it prints, typed
+# into bash and (if installed) zsh. Needs no Docker.
 test_completion() {
   mkdir -p ~/.clod/homes/work ~/.clod/images/plain
   printf 'FROM clod\n' > ~/.clod/images/plain/Dockerfile
@@ -467,19 +520,26 @@ test_completion() {
   if clod __complete -- ''; then false; fi
   if clod __complete -H ./w; then false; fi
   if clod __complete install ''; then false; fi
+  if clod __complete -w ''; then false; fi
+  test "$(clod __complete --wor)" = --workspace
   test -z "$(clod __complete -P '')"
   clod __complete -P ''
-  printf '%s\n' 'eval "$(clod completion)"' 'COMP_WORDS=(clod -i go+su); COMP_CWORD=2; _clod' \
-    'echo "${COMPREPLY[*]}"' > shim-test
-  test "$(bash shim-test)" = go+sudo
-  if command -v zsh >/dev/null; then
-    # outside a completion widget, compadd and _files stand in as printers
-    printf '%s\n' 'eval "$(clod completion)"' \
-      'compadd() { print -r -- ${(P)2}; }; _files() { print files; }' \
-      'words=(clod -i go+su); CURRENT=3; _clod' \
-      "words=(clod claude ''); CURRENT=3; _clod" > shim-test
-    test "$(zsh -f shim-test 2>/dev/null)" = "$(printf 'go+sudo\nfiles')"
-  fi
+  # The shim in real shells, which split words differently: bash at = and :,
+  # zsh not at all. A stand-in docker lists the volumes. Directories complete
+  # with a / in bash only.
+  mkdir proj bin
+  printf '%s\n' '#!/bin/bash' \
+    '[[ "$1 $2" == "volume ls" ]] && printf "%s\n" clod-home-vhome clod-workspace-play' > bin/docker
+  chmod +x bin/docker
+  for sh in bash zsh; do
+    [[ $sh == bash ]] || command -v "$sh" >/dev/null || continue
+    PATH=$PWD/bin:$PATH "$repo/test/tab-complete.py" "$sh" 'clod -i go+su' 'clod --image=go+su' \
+      'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
+      'clod -w pro' 'clod --workspace=pro' 'clod claude pro' > out
+    sed 's|proj/$|proj|' out | diff - <(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
+      'clod --home=work' 'clod -H vol:vhome' 'clod --home=vol:vhome' 'clod --workspace=vol:play' \
+      'clod -w proj' 'clod --workspace=proj' 'clod claude proj')
+  done
 }
 
 # Homebrew's docker on macOS has no buildx, so clod's builds there use the

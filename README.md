@@ -40,8 +40,8 @@ printed URL in your browser and paste the code back. Both happen once; every
 
 Each `clod` starts a fresh container from three pieces:
 
-- **Your project.** The directory you run `clod` from is mounted read-write at
-  `/workspace`. The agent works on your real files, not a copy.
+- **Your project.** The directory you run `clod` from (or the one `-w` names)
+  is mounted read-write at `/workspace`. The agent works on your real files, not a copy.
 - **A home.** `~/.clod/homes/default` is mounted as the container's home. It
   persists between runs and holds the login, settings, history and Claude Code
   itself, which updates itself. It is not your own home directory: it starts

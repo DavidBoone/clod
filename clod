@@ -38,16 +38,21 @@
 # starter set in this script's shared/ directory is mounted instead. What Claude
 # is told about the container comes with the image, from container.md.
 #
-# Inside the container, CLOD_HOME and CLOD_IMAGE hold the home label and image
-# tag this run resolved to, and CLOD_PORTS the published container ports. CLOD_WORKSPACE_FILES is set when the
-# current directory has files, so the container can warn if it sees none. With
-# --docker, CLOD_HOST_WORKSPACE is the current directory's path on the host.
+# /workspace is the current directory, or with -w another directory or, as
+# vol:NAME, the Docker volume clod-workspace-NAME. It is an option only: the
+# workspace is the project, so no setting picks it.
+#
+# Inside the container, CLOD_HOME, CLOD_WORKSPACE and CLOD_IMAGE hold the home
+# and workspace labels and image tag this run resolved to, and CLOD_PORTS the
+# published container ports. CLOD_WORKSPACE_FILES is set when the workspace
+# directory has files, so the container can warn if it sees none. With
+# --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
 # With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
 #
 # On a Linux host the clod image's claude user is built with the host user's
 # uid and gid, and host.docker.internal is mapped to the host.
 #
-# The nearest .envrc, looking up from the current directory, is loaded on the
+# The nearest .envrc, looking up from the workspace directory, is loaded on the
 # host by direnv, so it must be allowed, and the variables it exports are passed
 # into the container. Launcher settings it sets are used, not passed in.
 #
@@ -57,7 +62,8 @@
 #
 # --scratch mounts nothing at /workspace: it is an empty volume, discarded with
 # the container. No envrc is read, since the current directory isn't the
-# project, and nothing is refused there, since nothing there is mounted.
+# project, and nothing is refused there, since nothing there is mounted. A
+# vol:NAME workspace is the same, except that the volume is kept.
 
 # Written for bash 3.2, the /bin/bash macOS ships.
 #
@@ -91,7 +97,7 @@ base_dir=$script_dir
 run_commands='claude codex bash zsh'
 commands="$run_commands env images homes new-image remove-image prune new-shared default build rebuild update install completion"
 # The long options parse_args takes, for tab completion.
-options='--image --home --port --scratch --force --skip-build --docker --help --version'
+options='--image --home --workspace --port --scratch --force --skip-build --docker --help --version'
 
 # The launcher settings, as KEY:VARIABLE:BUILT-IN (- for none), in the order
 # clod default lists them.
@@ -155,11 +161,15 @@ Options (before the command):
                            -i go+sudo    the sudo variant built on go
   -H, --home NAME|PATH   container home                     (CLOD_HOME)
                            -H vol:NAME   the Docker volume clod-home-NAME
+  -w, --workspace PATH|vol:NAME
+                         the directory to mount as /workspace, instead of the
+                         current one
+                           -w vol:NAME   the Docker volume clod-workspace-NAME
   -P, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
                            -P 5173       localhost:5173 -> container port 5173
                            -P 3000:5173  localhost:3000 -> container port 5173
   -s, --scratch          an empty /workspace, discarded on exit, instead of the
-                         current directory; no .envrc is read
+                         current directory; no .envrc is read. Not with -w
   -f, --force            run from a directory clod otherwise refuses; replace
                          an existing clod (install) or shared config (new-shared)
       --skip-build       run the image as built, even if its files have changed
@@ -181,6 +191,7 @@ Examples:
   clod -i go -P 5173       the go variant, with port 5173 published
   clod -H work codex       Codex in the "work" home
   clod -s                  Claude Code in an empty, throwaway /workspace
+  clod -w vol:play         Claude Code in the workspace kept in a Docker volume
 USAGE
 }
 
@@ -231,9 +242,9 @@ realdir() {
   REPLY=$( (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1")
 }
 
-# Sets REPLY to the nearest .envrc from $PWD up, or to nothing.
+# Sets REPLY to the nearest .envrc from directory $1 up, or to nothing.
 find_envrc() {
-  local dir=$PWD
+  local dir=$1
   REPLY=
   while :; do
     [[ -f $dir/.envrc ]] && { REPLY=$dir/.envrc; return; }
@@ -539,26 +550,29 @@ holds_secrets() {
 
 # The setup phases.
 
-# Reads the command line into scratch, force, skip_build, docker_socket,
-# command (empty for the default command) and args, the command's arguments.
+# Reads the command line into scratch, workspace_opt, force, skip_build,
+# docker_socket, command (empty for the default command) and args, the
+# command's arguments.
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
   local opt_ports=() dashdash=''
-  scratch='' force='' skip_build='' docker_socket='' command=''
+  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' command=''
   while (( $# )); do
     case $1 in
-      -i|--image|-H|--home|-P|--port)
+      -i|--image|-H|--home|-w|--workspace|-P|--port)
         [[ $# -ge 2 ]] || usage_error "$1 needs a value"
         case $1 in
           -i|--image) CLOD_IMAGE=$2 ;;
           -H|--home) CLOD_HOME=$2 ;;
+          -w|--workspace) workspace_opt=$2 ;;
           -P|--port) opt_ports+=("$2") ;;
         esac
         shift 2
         ;;
       --image=*) CLOD_IMAGE=${1#*=}; shift ;;
       --home=*) CLOD_HOME=${1#*=}; shift ;;
+      --workspace=*) workspace_opt=${1#*=}; shift ;;
       --port=*) opt_ports+=("${1#*=}"); shift ;;
       -s|--scratch) scratch=1; shift ;;
       -f|--force) force=1; shift ;;
@@ -584,19 +598,48 @@ parse_args() {
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
     new-image) (( $# <= 2 )) || usage_error "new-image takes a NAME and at most one image to start from" ;;
   esac
+  [[ -n $scratch && -n $workspace_opt ]] && usage_error "--scratch and --workspace don't combine"
   args=("$@")
   (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
   return 0
 }
 
-# Sets envrc to the envrc in use (none with --scratch) and vars to the
-# variables it sets, except the launcher settings: those, and then
-# ~/.clod/config's, are defaults for the shell's.
+# Sets workspace to the directory mounted as /workspace, vol:NAME for a volume
+# workspace or nothing for a scratch one, workspace_label to its label and
+# workspace_src to what is mounted: the directory, or the Docker volume
+# clod-workspace-NAME.
+setup_workspace() {
+  local w=${workspace_opt:-.}
+  workspace='' workspace_label='' workspace_src=''
+  [[ -n $scratch ]] && return 0
+  if [[ $w == vol:* ]]; then
+    if [[ ! ${w#vol:} =~ $name_re ]]; then
+      echo "clod: invalid workspace volume name '${w#vol:}'" >&2
+      exit 1
+    fi
+    workspace=$w workspace_label=$w workspace_src=clod-workspace-${w#vol:}
+    return 0
+  fi
+  abspath "$w"
+  workspace=$REPLY workspace_label=$(tildify "$REPLY") workspace_src=$REPLY
+}
+
+# Exits unless the workspace directory exists: Docker would create a missing
+# one, as root on Linux.
+check_workspace() {
+  [[ -z $workspace || $workspace == vol:* || -d $workspace ]] && return 0
+  echo "clod: no directory $workspace_label to mount as /workspace" >&2
+  exit 1
+}
+
+# Sets envrc to the envrc in use (none with --scratch or a volume workspace)
+# and vars to the variables it sets, except the launcher settings: those, and
+# then ~/.clod/config's, are defaults for the shell's.
 load_settings() {
   local out line
   envrc=''
-  if [[ -z $scratch ]]; then
-    find_envrc
+  if [[ -n $workspace && $workspace != vol:* ]]; then
+    find_envrc "$workspace"
     envrc=$REPLY
   fi
   vars=()
@@ -689,13 +732,17 @@ setup_container() {
 
 # Exits, unless --force, when the workspace or the home holds secrets.
 refuse_secrets() {
-  local workspace
+  local real
   realdir "$HOME"; host_home=$REPLY
   realdir "$clod_dir"; clod_real=$REPLY
   [[ -n $force ]] && return 0
-  workspace=$(pwd -P)
-  if [[ -z $scratch ]] && { holds_secrets "$workspace" || [[ $workspace == "$clod_real/homes"/* ]]; }; then
-    echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
+  if [[ -n $workspace && $workspace != vol:* ]]; then
+    realdir "$workspace"; real=$REPLY
+  else
+    real=''
+  fi
+  if [[ -n $real ]] && { holds_secrets "$real" || [[ $real == "$clod_real/homes"/* ]]; }; then
+    echo "clod: refusing to mount $workspace_label as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
     exit 1
   fi
   if [[ $home != vol:* ]] && holds_secrets "$home"; then
@@ -756,7 +803,9 @@ if [ -n "${ZSH_VERSION-}" ]; then
   (( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }
   _clod() {
     local -a reply
-    reply=(${(f)"$(clod __complete "${(@)words[2,CURRENT]}")"}) || { _files; return; }
+    # A file name after = (--workspace=DIR) is completed from the =.
+    reply=(${(f)"$(clod __complete "${(@)words[2,CURRENT]}")"}) ||
+      { [[ $PREFIX == -*=* ]] && compset -P '*='; _files; return; }
     compadd -a reply
   }
   compdef _clod clod
@@ -776,12 +825,26 @@ fi
 SHIM
 }
 
-# Prints the words in $@ that start with the word being completed, $cur.
+# Prints the words in $@ that start with the word being completed, $cur, as
+# the shell completes them: after $pre (an option's --NAME=), less $strip (what
+# bash, which splits words at = and :, has before its own current word).
 offer() {
-  local word
+  local word out
   for word in "$@"; do
-    [[ $word == "$cur"* ]] && printf '%s\n' "$word"
+    [[ $word == "$cur"* ]] || continue
+    out=$pre$word
+    printf '%s\n' "${out#"$strip"}"
   done
+  return 0
+}
+
+# Prints the names of the Docker volumes named $1NAME, as NAME, if Docker is
+# up; the name filter matches anywhere in a name.
+volume_names() {
+  local v
+  while IFS= read -r v; do
+    [[ $v == "$1"* ]] && printf '%s\n' "${v#"$1"}"
+  done < <(docker volume ls -q --filter "name=$1" 2>/dev/null)
   return 0
 }
 
@@ -809,10 +872,26 @@ offer_images() {
 # the last word, given the words before it, one per line, or exits 1 where the
 # word is a file name: a command's arguments, a home's path or install's
 # directory. It reads only directories, never the envrc, and asks Docker only
-# for remove-image's images, so it's quick.
+# for volume homes and workspaces and remove-image's images, so it's quick.
 cmd_complete() {
-  local cur=${!#} words=("$@") cmd='' cmd_args=() prev='' word i s keys='' homes='' variants
+  local raw=("$@") words=() cur last pre='' strip='' glue='' cmd='' cmd_args=() prev=''
+  local word i s keys='' homes='' variants
+  # bash splits a word at = and : (--home=vol:NAME, -P 3000:5173) into pieces,
+  # with each = and : a piece of its own; this joins them back up.
+  for word in ${raw[@]+"${raw[@]}"}; do
+    if [[ -n $glue || $word == [=:] ]] && (( ${#words[@]} )); then
+      words[${#words[@]}-1]+=$word
+    else
+      words+=("$word")
+    fi
+    if [[ $word == [=:] ]]; then glue=1; else glue=''; fi
+  done
+  (( ${#words[@]} )) || words=('')
+  cur=${words[${#words[@]}-1]}
   unset 'words[${#words[@]}-1]'
+  last=${raw[${#raw[@]}-1]}
+  [[ $last == [=:] ]] && last=''
+  strip=${cur%"$last"}
   for (( i = 0; i < ${#words[@]}; i++ )); do
     word=${words[i]}
     if [[ -n $cmd ]]; then
@@ -821,22 +900,26 @@ cmd_complete() {
     fi
     case $word in
       --) return 1 ;;
-      -i|--image|-H|--home|-P|--port)
-        (( i++ ))
-        # bash splits a word at colons (vol:NAME, 3000:5173) into word, :, word.
-        while [[ ${words[i+1]} == : ]]; do (( i += 2 )); done
-        ;;
+      -i|--image|-H|--home|-w|--workspace|-P|--port) (( i++ )) ;;
       -*) ;;
       *) cmd=$word ;;
     esac
   done
   (( ${#words[@]} )) && prev=${words[${#words[@]}-1]}
+  # An option's value in the same word: --home=NAME.
+  if [[ -z $cmd && $cur == --*=* ]]; then
+    prev=${cur%%=*} pre=${cur%%=*}= cur=${cur#*=}
+  fi
   variants=$(variant_names)
-  # A home is a name or, with a slash, a path, which the shell completes.
+  # A home is a name, vol:NAME or, with a slash, a path, which the shell
+  # completes.
   if [[ $cur != */* ]]; then
     for word in "$clod_dir"/homes/*/; do
       [[ -d $word ]] && word=${word%/} && homes+=" ${word##*/}"
     done
+    if [[ $prev == -H || $prev == --home || ${cmd_args[0]} == home ]]; then
+      while IFS= read -r word; do homes+=" vol:$word"; done < <(volume_names clod-home-)
+    fi
   fi
   for s in $settings; do keys+=" ${s%%:*}"; done
   # shellcheck disable=SC2086 # the lists are words without spaces or globs
@@ -844,6 +927,12 @@ cmd_complete() {
     case $prev in
       -i|--image) offer_images ;;
       -H|--home) [[ $cur == */* ]] && return 1; offer $homes ;;
+      # A workspace is a path, which the shell completes, or vol:NAME.
+      -w|--workspace)
+        [[ $cur == vol:* ]] || return 1
+        # shellcheck disable=SC2046 # volume names are words
+        offer $(volume_names clod-workspace- | sed 's/^/vol:/')
+        ;;
       -P|--port) ;;
       *) if [[ $cur == -* ]]; then offer $options; else offer $commands; fi ;;
     esac
@@ -1295,7 +1384,7 @@ STARTER
 }
 
 # Prints a line of clod env: field $1 with value $2.
-field() { printf '%-9s%s\n' "$1:" "$2"; }
+field() { printf '%-11s%s\n' "$1:" "$2"; }
 
 cmd_env() {
   local home_path parts p from shown
@@ -1319,7 +1408,13 @@ cmd_env() {
     field image "$tag${variant_dir:+ ($(tildify "$variant_dir"))}"
   fi
   field command "${CLOD_COMMAND:-claude} (what a bare clod runs)"
-  [[ -n $scratch ]] && field scratch "an empty /workspace, discarded on exit"
+  if [[ -n $scratch ]]; then
+    field scratch "an empty /workspace, discarded on exit"
+  elif [[ $workspace == vol:* ]]; then
+    field workspace "$workspace_label (Docker volume $workspace_src)"
+  else
+    field workspace "$workspace_label"
+  fi
   field tz "${tz:-UTC}"
   [[ -n $envrc ]] && field envrc "$(tildify "$envrc")"
   [[ $OSTYPE == linux* ]] && field user "claude as $(id -u):$(id -g)"
@@ -1391,14 +1486,15 @@ cmd_run() {
   run_args=(-i -v "$home_src:/home/claude" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
   # A scratch workspace is an anonymous volume, which --rm removes. Docker
   # copies the image's /workspace into it, owned by claude.
+  # A volume workspace, like a volume home, starts as a copy of it.
   if [[ -n $scratch ]]; then
     run_args+=(-v /workspace -e CLOD_SCRATCH=1)
   else
-    run_args+=(-v "$PWD:/workspace")
+    run_args+=(-v "$workspace_src:/workspace" -e "CLOD_WORKSPACE=$workspace_label")
     # A folder Docker doesn't share (outside Colima's mounts, say) shows up
     # empty; the entrypoint warns when it sees nothing where this says there
     # are files.
-    [[ -n $(ls -A 2>/dev/null) ]] && run_args+=(-e CLOD_WORKSPACE_FILES=1)
+    [[ $workspace != vol:* && -n $(ls -A "$workspace" 2>/dev/null) ]] && run_args+=(-e CLOD_WORKSPACE_FILES=1)
   fi
   [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
   if (( ${#port_args[@]} )); then
@@ -1435,11 +1531,11 @@ cmd_run() {
       echo "clod: --docker: $tag has no docker CLI, so only the socket is there; the docker variant has it (clod -i docker --docker)" >&2
     fi
     run_args+=("${mount[@]}" --group-add "${sock_stat#socket }")
-    # A scratch workspace is a volume, with no path on the Docker host.
-    [[ -z $scratch ]] && run_args+=(-e "CLOD_HOST_WORKSPACE=$PWD")
+    # A volume workspace has no path on the Docker host.
+    [[ -n $workspace && $workspace != vol:* ]] && run_args+=(-e "CLOD_HOST_WORKSPACE=$workspace")
   fi
   [[ -t 0 && -t 1 ]] && run_args+=(-t)
-  echo "clod · $home_label · $tag · ${#vars[@]} vars${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
+  echo "clod · $home_label · $tag · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }
@@ -1460,6 +1556,7 @@ set -- ${args[@]+"${args[@]}"}
 case $command in
   install|update|completion) "cmd_$command" "$@"; exit 0 ;;
 esac
+setup_workspace
 load_settings
 [[ $command == default ]] && { cmd_default "$@"; exit 0; }
 [[ -n $command ]] || default_command
@@ -1467,11 +1564,13 @@ setup_home
 setup_image
 setup_container
 case $command in
-  env|images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
+  env) check_workspace; cmd_env; exit 0 ;;
+  images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
   build|rebuild) need_docker; cmd_build "$@"; exit 0 ;;
   remove-image) need_docker; cmd_remove_image "$@"; exit 0 ;;
   prune) need_docker; cmd_prune; exit 0 ;;
 esac
+check_workspace
 refuse_secrets
 need_docker
 cmd_run "$@"

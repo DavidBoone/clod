@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get install -y direnv
+      - run: sudo apt-get install -y direnv zsh
       - run: test/run.sh base
 
   variant:

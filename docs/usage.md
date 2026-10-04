@@ -9,8 +9,10 @@ clod codex [args]    # Codex
 clod bash | zsh      # a shell in the container
 clod -i go           # the go image variant (see Image variants)
 clod -H work         # the "work" home (see Homes)
+clod -w ~/src/app    # that directory as /workspace (see Another workspace)
+clod -w vol:play     # a workspace kept in a Docker volume
 clod -s              # an empty, throwaway /workspace (see A scratch workspace)
-clod env             # show the home, image, login, ports, .envrc and variables that would be used
+clod env             # show the home, workspace, image, ports, .envrc and variables that would be used
 clod default         # show your defaults
 clod --help          # all commands and options
 ```
@@ -25,12 +27,29 @@ include `--permission-mode`, `--dangerously-skip-permissions` or
 `--allow-dangerously-skip-permissions`, so `clod claude --permission-mode plan`
 brings the prompts back. `clod claude -p "..." | ...` works without a terminal.
 
-`clod` refuses to run from your home directory or any directory above it, from
-`~/.clod`, or from `~/.clod/homes` or anything under it, since the agent could
-then read your credentials and every home's login. `clod --force` runs anyway.
+`clod` refuses to mount your home directory or any directory above it,
+`~/.clod`, or `~/.clod/homes` or anything under it as the workspace, since the
+agent could then read your credentials and every home's login. `clod --force`
+runs anyway.
 
 See also [Image variants](images.md) and [Homes, settings and per-project
 environment](configuration.md).
+
+## Another workspace
+
+`clod -w PATH` (`--workspace`) mounts that directory as `/workspace` instead of
+the current one, from wherever you run it; the `.envrc` is looked up from it.
+It must exist.
+
+`clod -w vol:NAME` uses the Docker volume `clod-workspace-NAME` instead: it
+lives on Docker's own disk, not in a folder on your machine, and is kept
+between runs, for a repository cloned just for the agent, say. Docker creates it
+on first use, owned by the container's user. No `.envrc` is read, and clod runs
+from anywhere. To get files out, push them somewhere or copy them into the home;
+`docker volume rm clod-workspace-NAME` deletes it.
+
+`-w` is an option only, with no setting in the environment, an `.envrc` or your
+defaults.
 
 ## A scratch workspace
 
@@ -44,7 +63,8 @@ bind-mount a scratch workspace, which has no path on the Docker host.
 
 Claude Code keys its history and memory by the workspace path, which is
 `/workspace` in every clod run, so a scratch session shares them with the
-home's other sessions: `clod -s claude --resume` lists them all.
+home's other sessions: `clod -s claude --resume` lists them all. `-s` doesn't
+combine with `-w`.
 
 ## Install and tab completion
 
