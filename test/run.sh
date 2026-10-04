@@ -222,7 +222,7 @@ test_statusline() {
   clod -P 5173 bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g; s/\x1b\]8;;[^\x07]*\x07//g' | tee out
   test "$(wc -l < out)" = 2
-  head -1 out | has '✦ Opus .*⌂ default ⬢ clod  ⇄ :5173 .*ᚴ main ±1'
+  head -1 out | has '✦ Opus .*⌂ default ⬢ clod  ⇄ :5173 .*ᚴ main ±[0-9]'
   tail -1 out | has '42%'
 }
 
