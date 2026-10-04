@@ -534,6 +534,7 @@ test_command_line() {
   grep -q '^home: *other' out
   grep -q '^image: *python ' out
   grep -q '^ports: *127.0.0.1:3000 → 8080$' out
+  clod -P 6000/udp env | has '^ports: *127.0.0.1:6000 → 6000/udp$'
   clod bash -c true
   clod image | has '^\* clod  *built'
   clod home | has '^\* default'
