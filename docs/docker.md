@@ -25,8 +25,9 @@ warns at launch when that happens.
 Colima's shared folders, which hold the home and workspace, don't allow every
 ownership and permission change: `chown`, and sometimes `chmod`, fail with
 `Permission denied`. Databases trip over this, so keep a database's data
-directory in the container's own filesystem rather than in the home or
-workspace.
+directory in the container's own filesystem rather than in the workspace, and
+for one that should persist, use a [volume home](configuration.md#volume-homes)
+(`clod -H vol:NAME`), which is on the VM's own disk.
 
 ## Linux
 

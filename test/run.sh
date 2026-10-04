@@ -22,7 +22,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
 base_tests='env run-command empty-workspace scratch refuses-home claude codex statusline
-  port docker-socket envrc creds default new-shared command-line multi-stage
+  port docker-socket envrc creds volume-home default new-shared command-line multi-stage
   combine rebuild completion'
 classic_tests='classic'
 variant_names='browser docker dotnet go lamp python rust sudo go+sudo'
@@ -202,6 +202,26 @@ test_creds() {
   test "$(stat -c %u ~/.clod/homes/borrower/.claude)" = "$(id -u)"
 }
 
+test_volume_home() {
+  docker volume rm -f clod-home-vtest >/dev/null
+  clod -H vol:vtest bash -c '
+    set -e
+    test "$CLOD_HOME" = vol:vtest
+    test "$(stat -c %U ~)" = claude
+    echo kept > ~/kept
+    mkdir ~/owned && chown claude:claude ~/owned
+  '
+  clod -H vol:vtest bash -c 'test "$(cat ~/kept)" = kept'
+  test ! -e ~/.clod/homes/vol:vtest
+  clod -H vol:vtest env | has '^home: *vol:vtest (Docker volume clod-home-vtest)'
+  clod -H vol:vtest homes | has '^\* vol:vtest '
+  exits 1 clod -H vol:vtest --creds default bash -c true
+  exits 1 clod --creds vol:vtest bash -c true
+  exits 1 clod -H vol:./x env
+  exits 2 clod default creds vol:vtest
+  docker volume rm clod-home-vtest >/dev/null
+}
+
 test_default() {
   exits 1 clod default image no-such-image
   clod default image python
@@ -367,6 +387,9 @@ test_completion() {
   if clod __complete -i go+ | grep -qxE 'go\+(go|plain)'; then false; fi
   clod __complete -H w | has -x work
   test -z "$(clod __complete -H ./w)"
+  # bash splits words at colons
+  clod __complete -H vol : work '' | has -x claude
+  clod __complete -P 3000 : 5173 '' | has -x claude
   test "$(clod __complete default co)" = command
   clod __complete default command '' | has -x codex
   if clod __complete new-image mine '' | grep -qx clod; then false; fi

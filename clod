@@ -9,14 +9,15 @@
 # Launcher settings come from the command line (-i, -H, --creds, -P) or else the
 # calling shell's environment:
 #
-#   CLOD_HOME   container home: a name (~/.clod/homes/<name>) or, if it contains a
-#               slash, a host path relative to the current directory (default: default)
+#   CLOD_HOME   container home: a name (~/.clod/homes/<name>), a host path
+#               relative to the current directory if it contains a slash, or
+#               vol:<name> for the Docker volume clod-home-<name> (default: default)
 #   CLOD_IMAGE  image to run (default clod): a variant name, built from
 #               ~/.clod/images/<name>/ or else this script's images/<name>/ as
 #               clod-<name>; variants combined as a+b, b built on a as clod-a.b;
 #               or any local docker image
-#   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME);
-#               unset = the home keeps its own
+#   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME;
+#               not between volume homes); unset = the home keeps its own
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
 #               (default), codex, bash or zsh
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
@@ -153,6 +154,7 @@ Options (before the command):
   -i, --image NAME       image or variant to run            (CLOD_IMAGE)
                            -i go+sudo    the sudo variant built on go
   -H, --home NAME|PATH   container home                     (CLOD_HOME)
+                           -H vol:NAME   the Docker volume clod-home-NAME
       --creds HOME       borrow another home's login        (CLOD_CREDS)
   -P, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
                            -P 5173       localhost:5173 -> container port 5173
@@ -307,9 +309,16 @@ default_setting() {
   [[ -n ${!setting_var+set} ]] || printf -v "$setting_var" '%s' "${1#*=}"
 }
 
-# Resolves a CLOD_HOME-style value ($2, named $1 in errors) into $REPLY.
+# Resolves a CLOD_HOME-style value ($2, named $1 in errors) into $REPLY: a
+# directory, or vol:NAME for a volume home.
 resolve_home() {
-  if [[ $2 == */* ]]; then
+  if [[ $2 == vol:* ]]; then
+    if [[ ! ${2#vol:} =~ $name_re ]]; then
+      echo "clod: invalid $1 volume name '${2#vol:}'" >&2
+      exit 1
+    fi
+    REPLY=$2
+  elif [[ $2 == */* ]]; then
     abspath "$2"
   elif [[ $2 =~ $name_re ]]; then
     REPLY=$clod_dir/homes/$2
@@ -640,16 +649,25 @@ default_command() {
   exit 1
 }
 
-# Sets home and home_label to the container home, and creds, creds_home and
-# creds_label to a borrowed login, or creds to nothing when the home keeps its
-# own.
+# Sets home and home_label to the container home, home_src to what is mounted
+# as /home/claude (its directory, or the Docker volume clod-home-NAME for
+# vol:NAME), and creds, creds_home and creds_label to a borrowed login, or
+# creds to nothing when the home keeps its own.
 setup_home() {
   resolve_home CLOD_HOME "${CLOD_HOME:-default}"
   home=$REPLY
   home_label=$(tildify "${home#"$clod_dir/homes/"}")
+  home_src=$home
+  [[ $home == vol:* ]] && home_src=clod-home-${home#vol:}
   creds=
   if [[ -n $CLOD_CREDS ]]; then
     resolve_home CLOD_CREDS "$CLOD_CREDS"
+    # The login is a file mounted from the host, and a volume's files aren't
+    # on the host.
+    if [[ $home == vol:* || $REPLY == vol:* ]]; then
+      echo "clod: a volume home can't borrow or lend a login; log in in the home itself" >&2
+      exit 1
+    fi
     creds=$REPLY/.claude/.credentials.json
     if [[ ! -s $creds ]]; then
       echo "clod: CLOD_CREDS home has no login yet: $(tildify "$creds")" >&2
@@ -722,7 +740,7 @@ refuse_secrets() {
     echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
     exit 1
   fi
-  if holds_secrets "$home"; then
+  if [[ $home != vol:* ]] && holds_secrets "$home"; then
     echo "clod: refusing to use $(tildify "$home") as the container's home: it holds your credentials or every home's login (clod --force to run anyway)" >&2
     exit 1
   fi
@@ -849,7 +867,11 @@ cmd_complete() {
     fi
     case $word in
       --) return 1 ;;
-      -i|--image|-H|--home|--creds|-P|--port) (( i++ )) ;;
+      -i|--image|-H|--home|--creds|-P|--port)
+        (( i++ ))
+        # bash splits a word at colons (vol:NAME, 3000:5173) into word, :, word.
+        while [[ ${words[i+1]} == : ]]; do (( i += 2 )); done
+        ;;
       -*) ;;
       *) cmd=$word ;;
     esac
@@ -965,6 +987,8 @@ cmd_default() {
       home|creds)
         # A path is stored absolute, since the config applies everywhere.
         resolve_home "$var" "$value"
+        [[ $key == creds && $REPLY == vol:* ]] &&
+          usage_error "a volume home can't lend its login"
         [[ $value == */* ]] && value=$REPLY
         ;;
       ports)
@@ -1082,26 +1106,38 @@ cmd_images() {
   return 0
 }
 
-# Prints a row for home directory $1, labelled $2.
+# Prints a row for home $1 (a directory or vol:NAME), labelled $2. A volume's
+# logins aren't on the host, so they show as ?.
 home_row() {
   local mark=' ' claude=- codex=-
   [[ $1 == "$home" ]] && mark='*'
-  [[ -s $1/.claude/.credentials.json ]] && claude=yes
-  [[ -s $1/.codex/auth.json ]] && codex=yes
+  if [[ $1 == vol:* ]]; then
+    claude='?' codex='?'
+  else
+    [[ -s $1/.claude/.credentials.json ]] && claude=yes
+    [[ -s $1/.codex/auth.json ]] && codex=yes
+  fi
   printf '%s %-20s %-7s %s\n' "$mark" "$2" "$claude" "$codex"
 }
 
 cmd_homes() {
-  local d listed=''
+  local d v listed=''
   printf '  %-20s %-7s %s\n' HOME CLAUDE CODEX
   for d in "$clod_dir"/homes/*; do
     [[ -d $d ]] || continue
     home_row "$d" "$(basename "$d")"
     [[ $d == "$home" ]] && listed=1
   done
+  # Volume homes, if Docker is up; the name filter matches anywhere in a name.
+  while IFS= read -r v; do
+    [[ $v == clod-home-* ]] || continue
+    home_row "vol:${v#clod-home-}" "vol:${v#clod-home-}"
+    [[ vol:${v#clod-home-} == "$home" ]] && listed=1
+  done < <(docker volume ls -q --filter name=clod-home- 2>/dev/null)
   [[ -n $listed ]] || home_row "$home" "$home_label"
   echo
   echo "* used here; clod -H NAME uses another, and a new name creates it"
+  echo "  (vol:NAME, a Docker volume; ? means its logins can't be checked from here)"
 }
 
 cmd_new_shared() {
@@ -1203,7 +1239,9 @@ field() { printf '%-9s%s\n' "$1:" "$2"; }
 cmd_env() {
   local home_path parts p from shown
   home_path=$(tildify "$home")
-  if [[ $home_label == "$home_path" ]]; then
+  if [[ $home == vol:* ]]; then
+    field home "$home_label (Docker volume $home_src)"
+  elif [[ $home_label == "$home_path" ]]; then
     field home "$home_label"
   else
     field home "$home_label ($home_path)"
@@ -1262,7 +1300,8 @@ cmd_build() {
 # first if needed.
 cmd_run() {
   local run_args variants endpoint sock mount probe sock_stat
-  mkdir -p "$home"
+  # Docker creates a missing volume, copying the image's /home/claude into it.
+  [[ $home == vol:* ]] || mkdir -p "$home"
 
   if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
     echo "clod: running $tag as built" >&2
@@ -1284,7 +1323,7 @@ cmd_run() {
     [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
   fi
 
-  run_args=(-i -v "$home:/home/claude" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
+  run_args=(-i -v "$home_src:/home/claude" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
   # A scratch workspace is an anonymous volume, which --rm removes. Docker
   # copies the image's /workspace into it, owned by claude.
   if [[ -n $scratch ]]; then

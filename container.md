@@ -2,7 +2,7 @@
 
 Running in a disposable Docker container (`docker run --rm`) started by the user's `clod` launcher (https://github.com/DavidBoone/clod), a bash script on their macOS (Colima or Docker Desktop) or Linux host. Image is `clod` or a variant built `FROM clod`.
 
-- `/home/claude` ← host `~/.clod/homes/<name>` (or another path chosen by `CLOD_HOME`)
+- `/home/claude` ← host `~/.clod/homes/<name>` (or another path chosen by `CLOD_HOME`), or, when `$CLOD_HOME` is `vol:<name>`, the Docker volume `clod-home-<name>` on Docker's own disk
 - `/workspace` ← the host directory `clod` was run from: the user's real project, not a scratch dir. Unless `$CLOD_SCRATCH` is set: then it's an empty volume (`clod --scratch`), discarded with the container, so anything worth keeping goes in the home or to a remote
 - `/etc/claude-code` ← `~/.clod/shared`, or clod's own `shared/` until that exists (read-only here): managed settings, the statusline, and the user's own instructions in its `CLAUDE.md`, if any
 - `/etc/clod/.claude/rules/` holds this file and any instructions the image's variants add
