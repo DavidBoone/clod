@@ -22,7 +22,7 @@ On a Linux host, where bind mounts keep host ownership, the launcher builds the 
 
 ## Tests
 
-`test/run.sh` is the test suite: shellcheck (`lint`), the launcher's behaviour end to end (`base`), builds without BuildKit (`classic`), and each bundled variant plus a combination (`variant-NAME`). CI runs one group or variant per job on a fresh GitHub runner. It needs Linux and a Docker it can have to itself, since it builds, replaces and prunes the clod images and mounts the socket into containers, so outside CI it runs only on a throwaway VM, with `--yes`; `test/run.sh lint` runs anywhere. Each run gets a fresh `HOME`. A new feature gets a `test_*` function in its group's list.
+`test/run.sh` is the test suite: shellcheck (`lint`), the launcher's behaviour end to end (`base`), builds without BuildKit (`classic`), and each bundled variant (`variant-NAME`; `go+sudo` covers go and sudo, and `docker-socket` the docker variant). CI runs a few of them per job on fresh GitHub runners, the quick variants together, since every job builds the base image first. It needs Linux and a Docker it can have to itself, since it builds, replaces and prunes the clod images and mounts the socket into containers, so outside CI it runs only on a throwaway VM, with `--yes`; `test/run.sh lint` runs anywhere. Each run gets a fresh `HOME`. A new feature gets a `test_*` function in its group's list.
 
 ## Security
 

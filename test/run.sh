@@ -1,7 +1,7 @@
 #!/bin/bash
 # clod's test suite: builds images through the launcher, as a Linux user would,
-# and checks the containers it runs. CI runs it on a fresh GitHub runner, one
-# group per job.
+# and checks the containers it runs. CI runs it on fresh GitHub runners, a few
+# tests per job.
 #
 # It needs Linux, and a Docker it can have to itself: it builds, replaces and
 # prunes the clod images on the Docker it uses, and starts containers with that
@@ -25,7 +25,9 @@ base_tests='env run-command empty-workspace scratch refuses-home claude codex st
   port docker-socket envrc volume-home default new-shared command-line multi-stage
   combine rebuild remove-image completion'
 classic_tests='classic'
-variant_names='browser docker dotnet go lamp python rust sudo go+sudo'
+# The bundled variants: go and sudo are checked together as go+sudo, and docker
+# by docker-socket.
+variant_names='browser dotnet lamp python rust go+sudo'
 variants_tests=$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)
 
 # Prints the tests in group $1, or fails if there's no such group.
@@ -176,6 +178,8 @@ test_docker_socket() {
   clod -i docker --docker bash -c '
     set -e
     test "$(id -un)" = claude
+    docker compose version && docker buildx version
+    test -r /etc/clod/.claude/rules/docker.md
     docker ps
     test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
   ' 2>&1 | tee out
@@ -343,14 +347,20 @@ test_combine() {
   grep -q 'building clod-ontop' out
 }
 
-# rebuild replaces every image in the chain and prunes the old ones.
+# rebuild replaces every image in the chain and prunes the old ones. It runs a
+# copy of clod whose base is a one-line Dockerfile, since rebuilding the real
+# one without the cache takes half a minute; that replaces the clod image, which
+# the next test to use it rebuilds from the layer cache.
 test_rebuild() {
   local t i before=() after=()
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
-  clod -i first+second bash -c true
-  test "$(clod -i first+second build 2>&1)" = 'clod: first.second is up to date'
+  mkdir standin
+  cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" standin/
+  printf 'FROM debian:trixie\n' > standin/Dockerfile
+  standin/clod -i first+second build
+  test "$(standin/clod -i first+second build 2>&1)" = 'clod: first.second is up to date'
   for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
-  clod -i first+second rebuild
+  standin/clod -i first+second rebuild
   for t in clod clod-first clod-first.second; do after+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
   for i in 0 1 2; do
     test "${before[i]}" != "${after[i]}"
@@ -358,7 +368,7 @@ test_rebuild() {
   done
   # build rebuilds only what changed, and prunes what it replaced
   echo 'RUN true' >> ~/.clod/images/second/Dockerfile
-  clod -i first+second build 2>&1 | tee out
+  standin/clod -i first+second build 2>&1 | tee out
   if grep -q 'building clod-first\.\.\.' out; then false; fi
   grep -q 'building clod-first.second' out
   test "$(docker image inspect -f '{{.Id}}' clod-first)" = "${after[1]}"
@@ -445,16 +455,11 @@ test_variant() {
       check='echo "<h1>clod</h1>" > /tmp/page.html &&
         chromium --headless --screenshot=/tmp/shot.png --window-size=800,600 file:///tmp/page.html &&
         test -s /tmp/shot.png && test -r /etc/clod/.claude/rules/browser.md' ;;
-    docker)
-      check='docker --version && docker compose version && docker buildx version &&
-        test -r /etc/clod/.claude/rules/docker.md' ;;
     dotnet) check='dotnet --version' ;;
-    go) check='go version' ;;
     lamp) check='php -v && composer --version && apache2 -v && mariadb --version' ;;
     python) check='test "$UV_LINK_MODE" = copy && uv --version && gcc --version | head -1 && python3-config --includes' ;;
     rust) check='cargo new -q /tmp/hello && cd /tmp/hello && cargo run -q' ;;
-    sudo) check='test "$(sudo -n whoami)" = root && test -r /etc/clod/.claude/rules/sudo.md' ;;
-    go+sudo) check='go version && test "$(sudo -n whoami)" = root' ;;
+    go+sudo) check='go version && test "$(sudo -n whoami)" = root && test -r /etc/clod/.claude/rules/sudo.md' ;;
   esac
   clod -i "$1" bash -c "set -e; $check"
 }
