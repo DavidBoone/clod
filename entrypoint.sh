@@ -27,8 +27,7 @@ case "${1:-}" in
         ;;
 esac
 
-# A fresh home skips first-run prompts; its login comes from /login or from a
-# home borrowed via CLOD_CREDS.
+# A fresh home skips first-run prompts; its login comes from /login.
 config=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 mkdir -p "$config"
 [ -e "$config/.claude.json" ] ||

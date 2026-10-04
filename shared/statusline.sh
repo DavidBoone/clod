@@ -158,10 +158,9 @@ bar() {
 
 parts=()
 
-# clod launch context: home (+ borrowed login source) @ image tag.
+# clod launch context: home @ image tag.
 if [ -n "${CLOD_HOME:-}" ]; then
     clod_part="${MAGENTA}⌂ ${BR_MAGENTA}${CLOD_HOME}${RST}"
-    [ -n "${CLOD_CREDS:-}" ] && clod_part+="${DIM}(login:${CLOD_CREDS})${RST}"
     [ -n "${CLOD_IMAGE:-}" ] && clod_part+="${DIM}@${RST}${CYAN}${CLOD_IMAGE}${RST}"
     parts+=("$clod_part")
 fi

@@ -194,8 +194,8 @@ Without the script:
   image they are `FROM`, change, builds a variant's base first, and prunes the
   images builds replace. The bundled variants, `rebuild`, `images` and
   `new-image` go too.
-- **Settings.** Homes by name (`-H`), borrowed logins (`--creds`), the
-  project's `.clod.envrc` or `.envrc` passed in as variables, ports published
-  on localhost from a short form (`-P`), and defaults kept with `clod default`.
+- **Settings.** Homes by name or as Docker volumes (`-H`), the project's
+  `.clod.envrc` or `.envrc` passed in as variables, ports published on
+  localhost from a short form (`-P`), and defaults kept with `clod default`.
 - **Maintenance.** `clod update`, `clod install`, and the check that Docker is
   installed and running before anything else.

@@ -22,7 +22,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
 base_tests='env run-command empty-workspace scratch refuses-home claude codex statusline
-  port docker-socket envrc creds volume-home default new-shared command-line multi-stage
+  port docker-socket envrc volume-home default new-shared command-line multi-stage
   combine rebuild completion'
 classic_tests='classic'
 variant_names='browser docker dotnet go lamp python rust sudo go+sudo'
@@ -194,14 +194,6 @@ test_envrc() {
   clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc'
 }
 
-test_creds() {
-  mkdir -p ~/.clod/homes/owner/.claude
-  echo '{"token":"ci"}' > ~/.clod/homes/owner/.claude/.credentials.json
-  CLOD_HOME=borrower CLOD_CREDS=owner clod bash -c 'cat ~/.claude/.credentials.json; touch ~/.claude/written' | tee out
-  grep -q '"ci"' out
-  test "$(stat -c %u ~/.clod/homes/borrower/.claude)" = "$(id -u)"
-}
-
 test_volume_home() {
   docker volume rm -f clod-home-vtest >/dev/null
   clod -H vol:vtest bash -c '
@@ -215,10 +207,7 @@ test_volume_home() {
   test ! -e ~/.clod/homes/vol:vtest
   clod -H vol:vtest env | has '^home: *vol:vtest (Docker volume clod-home-vtest)'
   clod -H vol:vtest homes | has '^\* vol:vtest '
-  exits 1 clod -H vol:vtest --creds default bash -c true
-  exits 1 clod --creds vol:vtest bash -c true
   exits 1 clod -H vol:./x env
-  exits 2 clod default creds vol:vtest
   docker volume rm clod-home-vtest >/dev/null
 }
 

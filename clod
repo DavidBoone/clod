@@ -6,8 +6,8 @@
 # anything under ~/.clod/homes as /workspace, since the agent could then read
 # your credentials and every home's login.
 #
-# Launcher settings come from the command line (-i, -H, --creds, -P) or else the
-# calling shell's environment:
+# Launcher settings come from the command line (-i, -H, -P) or else the calling
+# shell's environment:
 #
 #   CLOD_HOME   container home: a name (~/.clod/homes/<name>), a host path
 #               relative to the current directory if it contains a slash, or
@@ -16,8 +16,6 @@
 #               ~/.clod/images/<name>/ or else this script's images/<name>/ as
 #               clod-<name>; variants combined as a+b, b built on a as clod-a.b;
 #               or any local docker image
-#   CLOD_CREDS  borrow another home's Claude login (name or path, as CLOD_HOME;
-#               not between volume homes); unset = the home keeps its own
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
 #               (default), codex, bash or zsh
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
@@ -40,9 +38,8 @@
 # starter set in this script's shared/ directory is mounted instead. What Claude
 # is told about the container comes with the image, from container.md.
 #
-# Inside the container, CLOD_HOME, CLOD_IMAGE and (when borrowed) CLOD_CREDS
-# hold the home label, image tag and login source this run resolved to, and
-# CLOD_PORTS the published container ports. CLOD_WORKSPACE_FILES is set when the
+# Inside the container, CLOD_HOME and CLOD_IMAGE hold the home label and image
+# tag this run resolved to, and CLOD_PORTS the published container ports. CLOD_WORKSPACE_FILES is set when the
 # current directory has files, so the container can warn if it sees none. With
 # --docker, CLOD_HOST_WORKSPACE is the current directory's path on the host.
 # With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
@@ -97,12 +94,12 @@ base_dir=$script_dir
 run_commands='claude codex bash zsh'
 commands="$run_commands env images homes new-image new-shared default build rebuild update install completion"
 # The long options parse_args takes, for tab completion.
-options='--image --home --creds --port --scratch --force --skip-build --docker --help --version'
+options='--image --home --port --scratch --force --skip-build --docker --help --version'
 
 # The launcher settings, as KEY:VARIABLE:BUILT-IN (- for none), in the order
 # clod default lists them.
 settings='image:CLOD_IMAGE:clod command:CLOD_COMMAND:claude home:CLOD_HOME:default
-  creds:CLOD_CREDS:- ports:CLOD_PORTS:-'
+  ports:CLOD_PORTS:-'
 
 name_re='^[A-Za-z0-9_-]+$'
 port_re='^((([0-9.]+|\[[0-9a-fA-F:]+\]):)?[0-9]+:)?[0-9]+(/(tcp|udp))?$'
@@ -131,7 +128,7 @@ Commands:
   claude [args]          Claude Code
   codex [args]           Codex
   bash|zsh [args]        a shell in the container
-  env                    show the home, image, login, ports, envrc and variables
+  env                    show the home, image, ports, envrc and variables
   images [NAME]          list the base image and the variants, or show how
                          image NAME is built: the images it is FROM
   homes                  list the homes and their logins
@@ -142,7 +139,7 @@ Commands:
                          config, to customise; if it exists, compare it with the
                          starter (--force replaces it, keeping a backup)
   default [KEY [VALUE]]  show or set your defaults: image, command, home,
-                         creds, ports (VALUE --reset removes one)
+                         ports (VALUE --reset removes one)
   build                  build the image and its bases where they're stale
   rebuild                rebuild the image and its bases from scratch
   update                 update clod itself (git pull in its checkout)
@@ -155,7 +152,6 @@ Options (before the command):
                            -i go+sudo    the sudo variant built on go
   -H, --home NAME|PATH   container home                     (CLOD_HOME)
                            -H vol:NAME   the Docker volume clod-home-NAME
-      --creds HOME       borrow another home's login        (CLOD_CREDS)
   -P, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
                            -P 5173       localhost:5173 -> container port 5173
                            -P 3000:5173  localhost:3000 -> container port 5173
@@ -564,19 +560,17 @@ parse_args() {
   scratch='' force='' skip_build='' docker_socket='' command=''
   while (( $# )); do
     case $1 in
-      -i|--image|-H|--home|--creds|-P|--port)
+      -i|--image|-H|--home|-P|--port)
         [[ $# -ge 2 ]] || usage_error "$1 needs a value"
         case $1 in
           -i|--image) CLOD_IMAGE=$2 ;;
           -H|--home) CLOD_HOME=$2 ;;
-          --creds) CLOD_CREDS=$2 ;;
           -P|--port) opt_ports+=("$2") ;;
         esac
         shift 2
         ;;
       --image=*) CLOD_IMAGE=${1#*=}; shift ;;
       --home=*) CLOD_HOME=${1#*=}; shift ;;
-      --creds=*) CLOD_CREDS=${1#*=}; shift ;;
       --port=*) opt_ports+=("${1#*=}"); shift ;;
       -s|--scratch) scratch=1; shift ;;
       -f|--force) force=1; shift ;;
@@ -649,34 +643,15 @@ default_command() {
   exit 1
 }
 
-# Sets home and home_label to the container home, home_src to what is mounted
-# as /home/claude (its directory, or the Docker volume clod-home-NAME for
-# vol:NAME), and creds, creds_home and creds_label to a borrowed login, or
-# creds to nothing when the home keeps its own.
+# Sets home and home_label to the container home, and home_src to what is
+# mounted as /home/claude: its directory, or the Docker volume clod-home-NAME
+# for vol:NAME.
 setup_home() {
   resolve_home CLOD_HOME "${CLOD_HOME:-default}"
   home=$REPLY
   home_label=$(tildify "${home#"$clod_dir/homes/"}")
   home_src=$home
   [[ $home == vol:* ]] && home_src=clod-home-${home#vol:}
-  creds=
-  if [[ -n $CLOD_CREDS ]]; then
-    resolve_home CLOD_CREDS "$CLOD_CREDS"
-    # The login is a file mounted from the host, and a volume's files aren't
-    # on the host.
-    if [[ $home == vol:* || $REPLY == vol:* ]]; then
-      echo "clod: a volume home can't borrow or lend a login; log in in the home itself" >&2
-      exit 1
-    fi
-    creds=$REPLY/.claude/.credentials.json
-    if [[ ! -s $creds ]]; then
-      echo "clod: CLOD_CREDS home has no login yet: $(tildify "$creds")" >&2
-      exit 1
-    fi
-    [[ $REPLY == "$home" ]] && creds=
-  fi
-  creds_home=${creds%/.claude/.credentials.json}
-  creds_label=$(tildify "${creds_home#"$clod_dir/homes/"}")
 }
 
 # Sets tag to the image to run, image to its name, and variant_dir to the
@@ -728,8 +703,7 @@ setup_container() {
   tz=${tz##*zoneinfo/}
 }
 
-# Exits, unless --force, when the workspace, the home or a borrowed login's
-# home holds secrets.
+# Exits, unless --force, when the workspace or the home holds secrets.
 refuse_secrets() {
   local workspace
   realdir "$HOME"; host_home=$REPLY
@@ -742,10 +716,6 @@ refuse_secrets() {
   fi
   if [[ $home != vol:* ]] && holds_secrets "$home"; then
     echo "clod: refusing to use $(tildify "$home") as the container's home: it holds your credentials or every home's login (clod --force to run anyway)" >&2
-    exit 1
-  fi
-  if [[ -n $creds ]] && holds_secrets "$creds_home"; then
-    echo "clod: refusing to borrow the login in $(tildify "$creds_home"): it isn't a clod home (clod --force to run anyway)" >&2
     exit 1
   fi
 }
@@ -867,7 +837,7 @@ cmd_complete() {
     fi
     case $word in
       --) return 1 ;;
-      -i|--image|-H|--home|--creds|-P|--port)
+      -i|--image|-H|--home|-P|--port)
         (( i++ ))
         # bash splits a word at colons (vol:NAME, 3000:5173) into word, :, word.
         while [[ ${words[i+1]} == : ]]; do (( i += 2 )); done
@@ -889,7 +859,7 @@ cmd_complete() {
   if [[ -z $cmd ]]; then
     case $prev in
       -i|--image) offer_images ;;
-      -H|--home|--creds) [[ $cur == */* ]] && return 1; offer $homes ;;
+      -H|--home) [[ $cur == */* ]] && return 1; offer $homes ;;
       -P|--port) ;;
       *) if [[ $cur == -* ]]; then offer $options; else offer $commands; fi ;;
     esac
@@ -902,7 +872,7 @@ cmd_complete() {
       0:*) offer $keys ;;
       1:image) offer_images; offer --reset ;;
       1:command) offer $run_commands --reset ;;
-      1:home|1:creds) [[ $cur == */* ]] && return 1; offer $homes --reset ;;
+      1:home) [[ $cur == */* ]] && return 1; offer $homes --reset ;;
       1:ports) offer --reset ;;
     esac
   elif [[ $cmd == images && ${#cmd_args[@]} == 0 ]]; then
@@ -984,11 +954,9 @@ cmd_default() {
         is_one_of "$value" "$run_commands" ||
           usage_error "the default command is one of ${run_commands// /, }"
         ;;
-      home|creds)
+      home)
         # A path is stored absolute, since the config applies everywhere.
         resolve_home "$var" "$value"
-        [[ $key == creds && $REPLY == vol:* ]] &&
-          usage_error "a volume home can't lend its login"
         [[ $value == */* ]] && value=$REPLY
         ;;
       ports)
@@ -1258,11 +1226,6 @@ cmd_env() {
     field image "$tag${variant_dir:+ ($(tildify "$variant_dir"))}"
   fi
   field command "${CLOD_COMMAND:-claude} (what a bare clod runs)"
-  if [[ -n $creds ]]; then
-    field login "borrowed from $creds_label"
-  else
-    field login own
-  fi
   [[ -n $scratch ]] && field scratch "an empty /workspace, discarded on exit"
   field tz "${tz:-UTC}"
   [[ -n $envrc ]] && field envrc "$(tildify "$envrc")"
@@ -1315,14 +1278,6 @@ cmd_run() {
   # Images replaced by a build are left untagged; remove them.
   [[ -n $built ]] && docker image prune -f --filter label=clod.hash >/dev/null
 
-  # Docker creates a missing mount target as root, which on a Linux host leaves
-  # the home's .claude unwritable for claude, so the borrowed login's target is
-  # created here first.
-  if [[ -n $creds ]]; then
-    mkdir -p "$home/.claude"
-    [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
-  fi
-
   run_args=(-i -v "$home_src:/home/claude" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
   # A scratch workspace is an anonymous volume, which --rm removes. Docker
   # copies the image's /workspace into it, owned by claude.
@@ -1335,7 +1290,6 @@ cmd_run() {
     # are files.
     [[ -n $(ls -A 2>/dev/null) ]] && run_args+=(-e CLOD_WORKSPACE_FILES=1)
   fi
-  [[ -n $creds ]] && run_args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
   [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
   if (( ${#port_args[@]} )); then
     run_args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")

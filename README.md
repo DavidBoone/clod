@@ -76,7 +76,7 @@ Everything below is optional; plain `clod` is all most work needs.
 - [Image variants](docs/images.md): the bundled Go, Rust, Python, .NET, LAMP,
   browser and Docker images, combining them, and writing your own
 - [Homes, settings and per-project environment](docs/configuration.md): one
-  home per client, borrowing a login, defaults, and `.envrc` variables
+  home per client, volume homes, defaults, and `.envrc` variables
 - [Shared config and the statusline](docs/shared-config.md): managed settings
   and instructions for every home
 - [Letting the agent run containers](docs/docker-socket.md): `--docker`, and
