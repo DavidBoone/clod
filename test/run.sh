@@ -212,15 +212,18 @@ test_codex() {
 
 test_statusline() {
   echo '{"model":{"display_name":"Opus"},"effort":{"level":"high"},"session_id":"ci","prompt_id":"p1",
+         "workspace":{"current_dir":"/workspace"},
          "context_window":{"total_input_tokens":48200,"total_output_tokens":12100,"used_percentage":42,
            "current_usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},
          "cost":{"total_lines_added":120,"total_lines_removed":35},
          "rate_limits":{"five_hour":{"used_percentage":12}}}' > input.json
-  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
-    sed 's/\x1b\[[0-9;]*m//g' | tee out
-  grep -q 'default@clod' out
-  grep -q 'Opus' out
-  grep -q '42%' out
+  git init -q -b main .
+  # the model, clod's home, image and ports, and git on one line; the meters on the next
+  clod -P 5173 bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+    sed 's/\x1b\[[0-9;]*m//g; s/\x1b\]8;;[^\x07]*\x07//g' | tee out
+  test "$(wc -l < out)" = 2
+  head -1 out | has '✦ Opus .*⌂ default ⬢ clod  ⇄ :5173 .*ᚴ main ±1'
+  tail -1 out | has '42%'
 }
 
 test_port() {
