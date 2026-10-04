@@ -69,7 +69,8 @@ borrowed, the home it came from.
 the variables it sets into the container via `--env-file`. Like direnv, it stops
 at the first match, so parent directories' files only count if the file pulls
 them in (`source_up`). Run `clod env` to see which file is used and exactly what
-would be passed.
+would be passed. `clod --scratch` reads none (see [A scratch
+workspace](usage.md#a-scratch-workspace)).
 
 - **`.envrc`** is used as is, through your host's direnv: it must be approved
   with `direnv allow`, and only exported variables count. Without direnv

@@ -43,6 +43,7 @@
 # CLOD_PORTS the published container ports. CLOD_WORKSPACE_FILES is set when the
 # current directory has files, so the container can warn if it sees none. With
 # --docker, CLOD_HOST_WORKSPACE is the current directory's path on the host.
+# With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
 #
 # On a Linux host the clod image's claude user is built with the host user's
 # uid and gid, and host.docker.internal is mapped to the host.
@@ -57,6 +58,10 @@
 # --docker mounts the Docker socket, which is root on the Docker host (on macOS,
 # the VM, with your home folder mounted). It is an option only, with no setting
 # in the environment, envrc or config, so a project can't turn it on.
+#
+# --scratch mounts nothing at /workspace: it is an empty volume, discarded with
+# the container. No envrc is read, since the current directory isn't the
+# project, and nothing is refused there, since nothing there is mounted.
 
 # Written for bash 3.2, the /bin/bash macOS ships.
 #
@@ -90,7 +95,7 @@ base_dir=$script_dir
 run_commands='claude codex bash zsh'
 commands="$run_commands env images homes new-image new-shared default build rebuild update install completion"
 # The long options parse_args takes, for tab completion.
-options='--image --home --creds --port --force --skip-build --docker --help --version'
+options='--image --home --creds --port --scratch --force --skip-build --docker --help --version'
 
 # The launcher settings, as KEY:VARIABLE:BUILT-IN (- for none), in the order
 # clod default lists them.
@@ -151,6 +156,8 @@ Options (before the command):
   -P, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
                            -P 5173       localhost:5173 -> container port 5173
                            -P 3000:5173  localhost:3000 -> container port 5173
+  -s, --scratch          an empty /workspace, discarded on exit, instead of the
+                         current directory; no envrc is read
   -f, --force            run from a directory clod otherwise refuses; replace
                          an existing clod (install) or shared config (new-shared)
       --skip-build       run the image as built, even if its files have changed
@@ -171,6 +178,7 @@ Examples:
   clod -- --resume         Claude Code with its own arguments
   clod -i go -P 5173       the go variant, with port 5173 published
   clod -H work codex       Codex in the "work" home
+  clod -s                  Claude Code in an empty, throwaway /workspace
 USAGE
 }
 
@@ -536,12 +544,13 @@ holds_secrets() {
 
 # The setup phases.
 
-# Reads the command line into force, skip_build, docker_socket, command (empty
-# for the default command) and args, the command's arguments. Options set the
-# launcher settings, winning over the environment, the envrc and ~/.clod/config.
+# Reads the command line into scratch, force, skip_build, docker_socket,
+# command (empty for the default command) and args, the command's arguments.
+# Options set the launcher settings, winning over the environment, the envrc and
+# ~/.clod/config.
 parse_args() {
   local opt_image='' opt_home='' opt_creds='' opt_ports=() dashdash=''
-  force='' skip_build='' docker_socket='' command=''
+  scratch='' force='' skip_build='' docker_socket='' command=''
   while (( $# )); do
     case $1 in
       -i|--image|-H|--home|--creds|-P|--port)
@@ -558,6 +567,7 @@ parse_args() {
       --home=*) opt_home=${1#*=}; shift ;;
       --creds=*) opt_creds=${1#*=}; shift ;;
       --port=*) opt_ports+=("${1#*=}"); shift ;;
+      -s|--scratch) scratch=1; shift ;;
       -f|--force) force=1; shift ;;
       --skip-build) skip_build=1; shift ;;
       --docker) docker_socket=1; shift ;;
@@ -583,6 +593,8 @@ parse_args() {
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
     new-image) (( $# <= 2 )) || usage_error "new-image takes a NAME and at most one image to start from" ;;
   esac
+  [[ -n $scratch && -n $docker_socket ]] &&
+    usage_error "--scratch and --docker don't combine: a scratch workspace has no host path for sibling containers"
   args=("$@")
   [[ -n $opt_image ]] && CLOD_IMAGE=$opt_image
   [[ -n $opt_home ]] && CLOD_HOME=$opt_home
@@ -591,13 +603,16 @@ parse_args() {
   return 0
 }
 
-# Sets envrc to the envrc in use and vars to the variables it sets, except the
-# launcher settings: those, and then ~/.clod/config's, are defaults for the
-# shell's.
+# Sets envrc to the envrc in use (none with --scratch) and vars to the
+# variables it sets, except the launcher settings: those, and then
+# ~/.clod/config's, are defaults for the shell's.
 load_settings() {
   local out line
-  find_envrc
-  envrc=$REPLY
+  envrc=''
+  if [[ -z $scratch ]]; then
+    find_envrc
+    envrc=$REPLY
+  fi
   vars=()
   if [[ -n $envrc ]]; then
     out=$(envrc_vars "$envrc") || exit 1
@@ -704,7 +719,7 @@ refuse_secrets() {
   realdir "$clod_dir"; clod_real=$REPLY
   [[ -n $force ]] && return 0
   workspace=$(pwd -P)
-  if holds_secrets "$workspace" || [[ $workspace == "$clod_real/homes"/* ]]; then
+  if [[ -z $scratch ]] && { holds_secrets "$workspace" || [[ $workspace == "$clod_real/homes"/* ]]; }; then
     echo "clod: refusing to mount $(tildify "$PWD") as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
     exit 1
   fi
@@ -1211,6 +1226,7 @@ cmd_env() {
   else
     field login own
   fi
+  [[ -n $scratch ]] && field scratch "an empty /workspace, discarded on exit"
   field tz "${tz:-UTC}"
   [[ -n $envrc ]] && field envrc "$(tildify "$envrc")"
   [[ $OSTYPE == linux* ]] && field user "claude as $(id -u):$(id -g)"
@@ -1269,12 +1285,20 @@ cmd_run() {
     [[ -e $home/.claude/.credentials.json ]] || : > "$home/.claude/.credentials.json"
   fi
 
-  run_args=(-i -v "$home:/home/claude" -v "$PWD:/workspace" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
+  run_args=(-i -v "$home:/home/claude" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$tag")
+  # A scratch workspace is an anonymous volume, which --rm removes. Docker
+  # copies the image's /workspace into it, owned by claude.
+  if [[ -n $scratch ]]; then
+    run_args+=(-v /workspace -e CLOD_SCRATCH=1)
+  else
+    run_args+=(-v "$PWD:/workspace")
+    # A folder Docker doesn't share (outside Colima's mounts, say) shows up
+    # empty; the entrypoint warns when it sees nothing where this says there
+    # are files.
+    [[ -n $(ls -A 2>/dev/null) ]] && run_args+=(-e CLOD_WORKSPACE_FILES=1)
+  fi
   [[ -n $creds ]] && run_args+=(-v "$creds:/home/claude/.claude/.credentials.json" -e "CLOD_CREDS=$creds_label")
   [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
-  # A folder Docker doesn't share (outside Colima's mounts, say) shows up empty;
-  # the entrypoint warns when it sees nothing where this says there are files.
-  [[ -n $(ls -A 2>/dev/null) ]] && run_args+=(-e CLOD_WORKSPACE_FILES=1)
   if (( ${#port_args[@]} )); then
     run_args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
   fi
@@ -1311,7 +1335,7 @@ cmd_run() {
     run_args+=("${mount[@]}" --group-add "${sock_stat#socket }" -e "CLOD_HOST_WORKSPACE=$PWD")
   fi
   [[ -t 0 && -t 1 ]] && run_args+=(-t)
-  echo "clod · $home_label · $tag · ${#vars[@]} vars${docker_socket:+ · Docker socket}" >&2
+  echo "clod · $home_label · $tag · ${#vars[@]} vars${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }

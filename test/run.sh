@@ -21,7 +21,7 @@
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
-base_tests='env run-command empty-workspace refuses-home claude codex statusline
+base_tests='env run-command empty-workspace scratch refuses-home claude codex statusline
   port docker-socket envrc creds default new-shared command-line multi-stage
   combine rebuild completion'
 classic_tests='classic'
@@ -100,6 +100,27 @@ test_empty_workspace() {
   if grep -q 'workspace is empty' out; then false; fi
   docker run --rm -e CLOD_WORKSPACE_FILES=1 -v "$(mktemp -d):/workspace" clod bash -c true 2>&1 |
     has 'workspace is empty'
+}
+
+test_scratch() {
+  touch from-host
+  echo FOO=bar > .clod.envrc
+  volumes=$(docker volume ls -q | wc -l)
+  clod -s bash -c '
+    set -e
+    test "$CLOD_SCRATCH" = 1
+    test -z "$(ls -A /workspace)"
+    test -z "${FOO:-}"
+    touch /workspace/written
+  ' 2>&1 | tee out
+  if grep -q 'workspace is empty' out; then false; fi
+  test ! -e written
+  test "$(docker volume ls -q | wc -l)" = "$volumes"
+  clod -s env | has '^scratch:'
+  if clod -s env | has '^envrc:'; then false; fi
+  exits 2 clod -s --docker bash -c true
+  cd ~
+  clod -s bash -c true
 }
 
 test_refuses_home() {
