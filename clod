@@ -42,7 +42,7 @@
 # vol:NAME, the Docker volume clod-workspace-NAME. It is an option only: the
 # workspace is the project, so no setting picks it. `clod workspace` lists the
 # volume workspaces and `clod workspace rm` deletes them; `clod home rm` deletes
-# volume homes. Both ask first in a terminal, and need --force without one.
+# homes. Both ask first in a terminal, and need --force without one.
 #
 # Inside the container, CLOD_HOME, CLOD_WORKSPACE and CLOD_IMAGE hold the home
 # and workspace labels and image tag this run resolved to, and CLOD_PORTS the
@@ -178,9 +178,9 @@ Commands:
                          or the other way round
   home mv SRC DEST       move home SRC to a new home DEST, as cp then deleting
                          SRC; a directory home moved to a directory is renamed
-  home rm vol:NAME...    delete volume homes, logins included; asks first
-                         (--force doesn't). Delete a directory home's folder
-                         yourself
+  home rm NAME...        delete homes, logins included: names (in
+                         ~/.clod/homes) or vol:NAME; asks first (--force
+                         doesn't). Delete a home at a path yourself
 
   workspace              list the volume workspaces, and which are in use
   workspace rm NAME...   delete volume workspaces, named NAME or vol:NAME;
@@ -578,9 +578,10 @@ need_docker() {
 }
 
 # True when directory $1 is /, your home directory or one above it, ~/.clod or
-# ~/.clod/homes: mounting it would show the agent your credentials and every
-# home's login.
-holds_secrets() {
+# ~/.clod/homes, which clod won't mount without --force, since the agent would
+# see your credentials and every home's login, nor copy, move or delete as a
+# home.
+off_limits() {
   realdir "$1"
   [[ $REPLY == / || $host_home == "$REPLY" || $host_home == "$REPLY"/* ||
      $REPLY == "$clod_real" || $REPLY == "$clod_real/homes" ]]
@@ -648,15 +649,15 @@ parse_args() {
     'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
     'home cp'|'home mv') (( $# == 2 )) || usage_error "home $verb takes a SRC and a DEST home" ;;
-    'home rm') (( $# )) || usage_error "home rm takes one or more vol:NAME" ;;
+    'home rm') (( $# )) || usage_error "home rm takes one or more NAME or vol:NAME" ;;
     'workspace rm') (( $# )) || usage_error "workspace rm takes one or more NAME or vol:NAME" ;;
   esac
   case $command${verb:+ $verb} in
     'home '*|'workspace rm')
       for arg; do
         [[ $arg == -* ]] && usage_error "clod's options go before the command"
-        [[ $verb == rm && $command == home && $arg != vol:* ]] &&
-          usage_error "home rm removes only volume homes, named vol:NAME; to remove the home $arg, delete its folder"
+        [[ $command$verb == homerm && $arg == */* ]] &&
+          usage_error "home rm takes home names and vol:NAME; delete the home $arg yourself"
       done
       ;;
   esac
@@ -792,8 +793,8 @@ setup_container() {
   tz=${tz##*zoneinfo/}
 }
 
-# Exits, unless --force, when the workspace or the home holds secrets.
-refuse_secrets() {
+# Exits, unless --force, when the workspace or the home is off limits.
+refuse_off_limits() {
   local real
   realdir "$HOME"; host_home=$REPLY
   realdir "$clod_dir"; clod_real=$REPLY
@@ -803,11 +804,11 @@ refuse_secrets() {
   else
     real=''
   fi
-  if [[ -n $real ]] && { holds_secrets "$real" || [[ $real == "$clod_real/homes"/* ]]; }; then
+  if [[ -n $real ]] && { off_limits "$real" || [[ $real == "$clod_real/homes"/* ]]; }; then
     echo "clod: refusing to mount $workspace_label as /workspace: it holds your credentials or a home's login (clod --force to run anyway)" >&2
     exit 1
   fi
-  if [[ $home != vol:* ]] && holds_secrets "$home"; then
+  if [[ $home != vol:* ]] && off_limits "$home"; then
     echo "clod: refusing to use $(tildify "$home") as the container's home: it holds your credentials or every home's login (clod --force to run anyway)" >&2
     exit 1
   fi
@@ -1035,7 +1036,7 @@ cmd_complete() {
           sed -n 's/^clod-//p; /^clod$/p' | sort -u)
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
-      home:rm) offer $(volume_names clod-home- | sed 's/^/vol:/') ;;
+      home:rm) offer $homes $(volume_names clod-home- | sed 's/^/vol:/') ;;
       # The source is a home, and the destination a new one, so nothing
       # completes there but a path.
       home:cp|home:mv)
@@ -1384,11 +1385,31 @@ volume_in_use() {
   [[ -n $(docker ps -aq --filter "volume=$1" 2>/dev/null) ]]
 }
 
-# Removes the Docker volumes $1NAME for the names in $3..., volume $2s (home or
-# workspace), once they're listed and, unless --force, the answer to a y/N
+# Unless --force, lists $2... as the $1s to delete, and exits unless the answer
+# to a y/N question is yes.
+confirm_delete() {
+  local kind=$1 line answer
+  shift
+  [[ -n $force ]] && return 0
+  if [[ ! -t 0 ]]; then
+    echo "clod: there's no terminal to ask in; clod --force $kind rm deletes without asking" >&2
+    exit 1
+  fi
+  echo "clod: deleting, with every file in them:" >&2
+  for line; do
+    echo "  $line" >&2
+  done
+  read -r -p "Delete? [y/N] " answer
+  case $answer in
+    y|Y|yes|YES) ;;
+    *) echo "clod: nothing deleted" >&2; exit 1 ;;
+  esac
+}
+
+# Removes the Docker volumes $1NAME for the names in $3..., volume $2s, once they're listed and, unless --force, the answer to a y/N
 # question is yes. Removes none if any isn't one or a container uses it.
 remove_volumes() {
-  local prefix=$1 kind=$2 name v vols=() answer out
+  local prefix=$1 kind=$2 name v vols=() lines out
   shift 2
   for name; do
     v=$prefix$name
@@ -1403,21 +1424,11 @@ remove_volumes() {
     fi
     vols+=("$v")
   done
-  if [[ -z $force ]]; then
-    if [[ ! -t 0 ]]; then
-      echo "clod: there's no terminal to ask in; clod --force $kind rm deletes without asking" >&2
-      exit 1
-    fi
-    echo "clod: deleting, with every file in them:" >&2
-    for v in "${vols[@]}"; do
-      echo "  vol:${v#"$prefix"} (Docker volume $v)" >&2
-    done
-    read -r -p "Delete? [y/N] " answer
-    case $answer in
-      y|Y|yes|YES) ;;
-      *) echo "clod: nothing deleted" >&2; exit 1 ;;
-    esac
-  fi
+  lines=()
+  for v in "${vols[@]}"; do
+    lines+=("vol:${v#"$prefix"} (Docker volume $v)")
+  done
+  confirm_delete "$kind" "${lines[@]}"
   for v in "${vols[@]}"; do
     if ! out=$(docker volume rm "$v" 2>&1); then
       echo "clod: can't remove $v: $out" >&2
@@ -1425,15 +1436,6 @@ remove_volumes() {
     fi
     echo "removed vol:${v#"$prefix"} ($v)"
   done
-}
-
-# Removes the volume homes named $@, as vol:NAME.
-cmd_home_rm() {
-  local name names=()
-  for name; do
-    names+=("${name#vol:}")
-  done
-  remove_volumes clod-home- home "${names[@]}"
 }
 
 # True when a container, running or stopped, mounts home $1: a directory or
@@ -1451,12 +1453,17 @@ home_in_use() {
   return 1
 }
 
-# Sets REPLY to home $1, resolved, and checks it for clod home cp and mv, as
-# the source when $2 is src and otherwise the destination: a source must
+# Sets REPLY to home $1, resolved, and checks it for clod home cp, mv or rm,
+# as the source when $2 is src and otherwise the destination: a source must
 # exist and a destination must not, neither can be in use, and a directory
-# can't be one that holds secrets.
+# can't be off limits.
 check_home_arg() {
-  local h label
+  local h label did
+  case $verb in
+    cp) did=copied ;;
+    mv) did=moved ;;
+    *) did=removed ;;
+  esac
   resolve_home "home $verb" "$1"
   h=$REPLY
   label=$(tildify "${h#"$clod_dir/homes/"}")
@@ -1467,8 +1474,8 @@ check_home_arg() {
       [[ $2 != src ]] || { echo "clod: no home $label (clod home lists them)" >&2; exit 1; }
     fi
   else
-    if holds_secrets "$h"; then
-      echo "clod: $label holds your credentials or every home's login, so it can't be a home to $verb" >&2
+    if off_limits "$h"; then
+      echo "clod: $label can't be $did: clod won't touch /, your home folder, a folder above it, ~/.clod or ~/.clod/homes" >&2
       exit 1
     fi
     if [[ -e $h || -L $h ]]; then
@@ -1479,10 +1486,41 @@ check_home_arg() {
     fi
   fi
   if home_in_use "$h"; then
-    echo "clod: a container uses $label, so it can't be copied or moved now; docker ps -a lists the containers" >&2
+    echo "clod: a container uses $label, so it can't be $did now; docker ps -a lists the containers" >&2
     exit 1
   fi
   REPLY=$h
+}
+
+# Deletes the homes $@, named NAME (in ~/.clod/homes) or vol:NAME. Deletes
+# none if any doesn't exist or a container uses it.
+cmd_home_rm() {
+  local arg h homes=() lines=() i
+  realdir "$HOME"; host_home=$REPLY
+  realdir "$clod_dir"; clod_real=$REPLY
+  for arg; do
+    check_home_arg "$arg" src
+    h=$REPLY
+    for i in ${homes[@]+"${!homes[@]}"}; do
+      [[ ${homes[i]} == "$h" ]] && continue 2
+    done
+    homes+=("$h")
+    if [[ $h == vol:* ]]; then
+      lines+=("$arg (Docker volume clod-home-${h#vol:})")
+    else
+      lines+=("$arg (the folder $(tildify "$h"))")
+    fi
+  done
+  confirm_delete home "${lines[@]}"
+  for i in "${!homes[@]}"; do
+    h=${homes[i]}
+    if [[ $h == vol:* ]]; then
+      docker volume rm "clod-home-${h#vol:}" >/dev/null || exit 1
+    else
+      rm -rf "$h" || exit 1
+    fi
+    echo "removed ${lines[i]}"
+  done
 }
 
 # Copies home $1 to the new home $2, each a directory or vol:NAME, in a
@@ -1899,6 +1937,6 @@ case $command${verb:+ $verb} in
   'image '*|'home '*|workspace*) need_docker; "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
 esac
 check_workspace
-refuse_secrets
+refuse_off_limits
 need_docker
 cmd_run "$@"

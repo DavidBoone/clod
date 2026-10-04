@@ -12,8 +12,7 @@ clod -H work                    # ~/.clod/homes/work, created on first use
 clod home                       # list the homes and which have logins
 ```
 
-A directory home is a folder under `~/.clod/homes`, or the path `-H` names;
-deleting the folder deletes the home and its login.
+A directory home is a folder under `~/.clod/homes`, or the path `-H` names.
 
 ### Volume homes
 
@@ -26,16 +25,20 @@ starting it with the image's `/home/claude`.
 
 Its files aren't visible from the host; `clod -H vol:NAME bash` gets you a
 shell in it. `clod home` lists volume homes but shows `?` for their logins.
+`colima delete` and `docker system prune --volumes` delete volume homes.
+
+### Deleting homes
 
 ```bash
-clod home rm vol:work           # delete clod-home-work, login included, after asking
-clod --force home rm vol:work   # delete it without asking
+clod home rm work               # delete ~/.clod/homes/work, login included, after asking
+clod home rm vol:work           # delete the volume clod-home-work, after asking
+clod --force home rm work       # delete it without asking
 ```
 
 In a terminal, `clod home rm` lists what it will delete and asks first;
-without one, it needs `--force`. It deletes only volume homes, and Docker
-won't remove one a container uses. `colima delete` and
-`docker system prune --volumes` delete volume homes too.
+without one, it needs `--force`. It takes names and `vol:NAME`, not paths: a
+home at a path is a folder you delete yourself. It won't delete a home a
+container uses, even a stopped one (`docker ps -a` lists them).
 
 ### Copying and moving homes
 
@@ -52,8 +55,9 @@ clod home mv work old-work      # rename a directory home
 The copy runs in a container of the `clod` image, as `claude`, so its files
 are `claude`'s (yours, for a directory). `mv` deletes the source only once the
 copy is complete; a directory moved to a directory is renamed. Both refuse a
-destination that exists, and a source or destination a container uses, even a
-stopped one (`docker ps -a` lists them).
+destination that exists, a source or destination a container uses, even a
+stopped one, and `/`, your home folder, a folder above it, `~/.clod` and
+`~/.clod/homes`.
 
 ## Settings
 

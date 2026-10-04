@@ -291,10 +291,10 @@ test_volume_home() {
   clod -H vol:vtest env | has '^home: *vol:vtest (Docker volume clod-home-vtest)'
   clod -H vol:vtest home | has '^\* vol:vtest '
   exits 1 clod -H vol:./x env
-  # home rm takes only volume homes, asks first, and needs --force without a
-  # terminal
-  exits 2 clod home rm default 2>&1 | has 'only volume homes'
-  exits 2 clod --force home rm vol:vtest default
+  # home rm takes names and vol:NAME, not paths, asks first, and needs --force
+  # without a terminal
+  exits 2 clod home rm ./x 2>&1 | has 'delete the home ./x yourself'
+  exits 2 clod --force home rm vol:vtest ~/.clod/homes/x
   exits 2 clod home rm -f vol:vtest 2>&1 | has "options go before the command"
   # a name it doesn't know removes none of them
   exits 1 clod --force home rm vol:vtest vol:no-such
@@ -309,14 +309,25 @@ test_volume_home() {
   exits 1 clod --force home rm vol:vtest 2>&1 | has 'a container uses vol:vtest'
   docker rm clod-test-home >/dev/null
   docker volume inspect clod-home-vtest >/dev/null
-  clod --force home rm vol:vtest | has -x 'removed vol:vtest (clod-home-vtest)'
+  clod --force home rm vol:vtest | has -x 'removed vol:vtest (Docker volume clod-home-vtest)'
   if docker volume inspect clod-home-vtest >/dev/null 2>&1; then false; fi
   if clod home | grep -q vtest; then false; fi
+  # a directory home, the same way
+  mkdir -p ~/.clod/homes/dtest/.claude
+  exits 1 clod home rm dtest < /dev/null 2>&1 | has 'no terminal'
+  test -d ~/.clod/homes/dtest
+  docker create --name clod-test-home --mount "type=bind,src=$HOME/.clod/homes/dtest,dst=/h" clod >/dev/null
+  exits 1 clod --force home rm dtest 2>&1 | has 'a container uses dtest'
+  docker rm clod-test-home >/dev/null
+  test -d ~/.clod/homes/dtest
+  clod --force home rm dtest dtest | has -x "removed dtest (the folder ~/.clod/homes/dtest)"
+  test ! -e ~/.clod/homes/dtest
+  exits 1 clod --force home rm dtest 2>&1 | has 'no home dtest'
 }
 
 # home cp and mv, between directory and volume homes both ways: the copy is
 # claude's, and they refuse a missing source, an existing destination, a home a
-# container uses and a directory that holds secrets.
+# container uses and a directory that's off limits.
 test_home_copy() {
   docker volume rm -f clod-home-cp1 clod-home-cp2 >/dev/null
   docker rm -f clod-test-cp clod-test-cp-dir clod-test-cp-gone >/dev/null 2>&1 || true
@@ -352,9 +363,9 @@ test_home_copy() {
   mkdir -p ~/.clod/homes/taken
   exits 1 clod home mv vol:cp1 taken 2>&1 | has 'taken already exists'
   exits 1 clod home cp ./moved ./moved/here/inside 2>&1 | has 'into itself'
-  exits 1 clod home mv ~ vol:x 2>&1 | has 'holds your credentials'
-  exits 1 clod home cp ~/.clod/homes vol:x 2>&1 | has 'holds your credentials'
-  exits 1 clod home cp vol:cp1 ~/.clod 2>&1 | has 'holds your credentials'
+  exits 1 clod home mv ~ vol:x 2>&1 | has "won't touch"
+  exits 1 clod home cp ~/.clod/homes vol:x 2>&1 | has "won't touch"
+  exits 1 clod home cp vol:cp1 ~/.clod 2>&1 | has "won't touch"
   # neither a source nor a destination a container uses, even a stopped one
   docker create --name clod-test-cp -v clod-home-cp1:/h clod >/dev/null
   exits 1 clod home mv vol:cp1 elsewhere 2>&1 | has 'a container uses vol:cp1'
@@ -712,6 +723,7 @@ test_completion() {
     '[[ "$1 $2" == "volume ls" ]] && printf "%s\n" clod-home-vhome clod-workspace-play' > bin/docker
   chmod +x bin/docker
   PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x vol:vhome
+  PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x work
   test -z "$(PATH=$PWD/bin:$PATH clod __complete home rm vol:vhome '')"
   # home cp and mv: a home, then a new one, which only a path completes
   PATH=$PWD/bin:$PATH clod __complete home cp '' | has -x work
@@ -729,12 +741,12 @@ test_completion() {
       'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
       'clod -w pro' 'clod --workspace=pro' 'clod claude pro' 'clod image sh' 'clod shared d' \
       'clod home rm vol:vh' 'clod workspace rm pl' 'clod workspace rm vol:pl' \
-      'clod workspace rm vo' 'clod home cp wo' 'clod home mv vol:vh' > out
+      'clod workspace rm vo' 'clod home cp wo' 'clod home mv vol:vh' 'clod home rm wo' > out
     sed 's|proj/$|proj|' out | diff - <(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
       'clod --home=work' 'clod -H vol:vhome' 'clod --home=vol:vhome' 'clod --workspace=vol:play' \
       'clod -w proj' 'clod --workspace=proj' 'clod claude proj' 'clod image show' 'clod shared diff' \
       'clod home rm vol:vhome' 'clod workspace rm play' 'clod workspace rm vol:play' \
-      'clod workspace rm vol:play' 'clod home cp work' 'clod home mv vol:vhome')
+      'clod workspace rm vol:play' 'clod home cp work' 'clod home mv vol:vhome' 'clod home rm work')
   done
 }
 
