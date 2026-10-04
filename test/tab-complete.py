@@ -43,8 +43,10 @@ def wait_for(marker, timeout=30):
     return head
 
 
-# zsh picks vi keys when $EDITOR mentions vi, and Ctrl-A needs emacs keys.
-setup = "bindkey -e" if shell == "zsh" else "set -o emacs"
+# zsh picks vi keys when $EDITOR mentions vi, and Ctrl-A needs emacs keys. Its
+# compinit asks before using group-writable function directories, as a CI
+# runner's are; -u skips that, and the shim then finds compinit already run.
+setup = "bindkey -e; autoload -Uz compinit && compinit -u" if shell == "zsh" else "set -o emacs"
 wait_for(prompt.encode())
 os.write(fd, f'{setup}; eval "$(clod completion)"\n'.encode())
 wait_for(prompt.encode())
