@@ -2,8 +2,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [master]
   schedule:
     - cron: "0 6 * * 1"   # weekly, to catch upstream changes (Debian, NodeSource, vendor repos)
   workflow_dispatch:
