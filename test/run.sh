@@ -248,7 +248,8 @@ test_command_line() {
   exits 1 clod -H ~ bash -c true
   exits 2 clod --resume
   exits 2 clod 'a prompt'
-  exits 2 clod build mine
+  exits 1 clod build mine
+  exits 2 clod prune extra
   exits 2 clod env extra
   exits 2 clod new-image a b c
   clod -i clod-python env | has '^image: *clod-python (.*images/python)'
