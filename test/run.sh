@@ -333,12 +333,14 @@ test_home_copy() {
   docker rm -f clod-test-cp clod-test-cp-dir clod-test-cp-gone >/dev/null 2>&1 || true
   mkdir -p ~/.clod/homes/src/.config
   echo hi > ~/.clod/homes/src/.config/f
+  chmod 600 ~/.clod/homes/src/.config/f
   test "$(clod home cp src vol:cp1)" = 'copied src to vol:cp1'
   test -f ~/.clod/homes/src/.config/f
   clod -H vol:cp1 bash -c '
     set -e
     test "$(cat ~/.config/f)" = hi
     test "$(stat -c %U ~ ~/.config ~/.config/f | sort -u)" = claude
+    test "$(stat -c %a ~/.config/f)" = 600
     touch ~/written
   '
   test "$(clod home cp vol:cp1 back)" = 'copied vol:cp1 to back'

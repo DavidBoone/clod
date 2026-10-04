@@ -1527,7 +1527,9 @@ cmd_home_rm() {
 # container of the clod image. The copy runs as claude, so its files are
 # claude's: a new volume is mounted at /workspace, which the image makes
 # claude's, so Docker gives the volume that owner, and a new directory is made
-# here, as you. A failed copy is removed.
+# here, as you. A failed copy is removed. rsync -a keeps modes with chmod, where
+# cp -a copies ACLs too, which the macOS shared folders refuse ("preserving
+# permissions ... No data available").
 copy_home() {
   local src=$1 dest=$2 from to
   docker image inspect clod >/dev/null 2>&1 || walk_image clod build
@@ -1540,10 +1542,10 @@ copy_home() {
   mount_arg "$src" /from ,readonly; from=$REPLY
   mount_arg "$dest" /workspace; to=$REPLY
   echo "clod: copying..." >&2
-  if ! docker run --rm --pull=never --user claude --entrypoint cp \
-      --mount "$from" --mount "$to" clod -a /from/. /workspace/; then
+  if ! docker run --rm --pull=never --user claude --entrypoint rsync \
+      --mount "$from" --mount "$to" clod -a /from/ /workspace/; then
     if [[ $dest == /* ]]; then rm -rf "$dest"; else docker volume rm "$dest" >/dev/null 2>&1; fi
-    echo "clod: the copy failed (Docker's message is above), so there's no new home" >&2
+    echo "clod: the copy failed (the message is above), so there's no new home" >&2
     exit 1
   fi
 }
