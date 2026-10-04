@@ -761,21 +761,32 @@ cmd_install() {
   echo '  eval "$(clod completion)"'
 }
 
-# Prints the tab completion shim, for bash and zsh (through its bash
-# compatibility). It hands the words to clod __complete, and lets the shell
-# complete file names when that prints nothing.
+# Prints the tab completion shim, for bash and zsh. It hands the words to
+# clod __complete, and completes file names only when that exits 1.
 cmd_completion() {
   cat <<'SHIM'
 # clod's tab completion, for bash and zsh: eval "$(clod completion)"
 if [ -n "${ZSH_VERSION-}" ]; then
   (( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }
-  autoload -Uz bashcompinit && bashcompinit
+  _clod() {
+    local -a reply
+    reply=(${(f)"$(clod __complete "${(@)words[2,CURRENT]}")"}) || { _files; return; }
+    compadd -a reply
+  }
+  compdef _clod clod
+else
+  _clod() {
+    local IFS=$'\n'
+    COMPREPLY=($(clod __complete "${COMP_WORDS[@]:1:$COMP_CWORD}")) || compopt -o default 2>/dev/null
+  }
+  # bash 3.2 has no compopt, so there it falls back to file names whenever
+  # nothing else matches.
+  if type compopt >/dev/null 2>&1; then
+    complete -F _clod clod
+  else
+    complete -o default -F _clod clod
+  fi
 fi
-_clod() {
-  local IFS=$'\n'
-  COMPREPLY=($(clod __complete "${COMP_WORDS[@]:1:$COMP_CWORD}"))
-}
-complete -o default -F _clod clod
 SHIM
 }
 
@@ -809,8 +820,10 @@ offer_images() {
 }
 
 # `clod __complete WORDS...`, which the shim calls: prints the candidates for
-# the last word, given the words before it, one per line. It reads only
-# directories, never the envrc or Docker, so it's quick.
+# the last word, given the words before it, one per line, or exits 1 where the
+# word is a file name: a command's arguments, a home's path or install's
+# directory. It reads only directories, never the envrc or Docker, so it's
+# quick.
 cmd_complete() {
   local cur=${!#} words=("$@") cmd='' cmd_args=() prev='' word i s keys='' homes='' variants
   unset 'words[${#words[@]}-1]'
@@ -821,7 +834,7 @@ cmd_complete() {
       continue
     fi
     case $word in
-      --) return 0 ;;
+      --) return 1 ;;
       -i|--image|-H|--home|--creds|-P|--port) (( i++ )) ;;
       -*) ;;
       *) cmd=$word ;;
@@ -840,16 +853,20 @@ cmd_complete() {
   if [[ -z $cmd ]]; then
     case $prev in
       -i|--image) offer_images ;;
-      -H|--home|--creds) offer $homes ;;
+      -H|--home|--creds) [[ $cur == */* ]] && return 1; offer $homes ;;
       -P|--port) ;;
       *) if [[ $cur == -* ]]; then offer $options; else offer $commands; fi ;;
     esac
+  elif [[ " $run_commands " == *" $cmd "* ]]; then
+    return 1
+  elif [[ $cmd == install && ${#cmd_args[@]} == 0 ]]; then
+    return 1
   elif [[ $cmd == default ]]; then
     case ${#cmd_args[@]}:${cmd_args[0]} in
       0:*) offer $keys ;;
       1:image) offer_images; offer --reset ;;
       1:command) offer $run_commands --reset ;;
-      1:home|1:creds) offer $homes --reset ;;
+      1:home|1:creds) [[ $cur == */* ]] && return 1; offer $homes --reset ;;
       1:ports) offer --reset ;;
     esac
   elif [[ $cmd == images && ${#cmd_args[@]} == 0 ]]; then
@@ -1308,7 +1325,7 @@ cmd_run() {
 if [[ $1 == __complete ]]; then
   shift
   cmd_complete "$@"
-  exit 0
+  exit
 fi
 parse_args "$@"
 set -- ${args[@]+"${args[@]}"}
