@@ -551,23 +551,23 @@ holds_secrets() {
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
-  local opt_image opt_home opt_creds opt_ports=() dashdash=''
+  local opt_ports=() dashdash=''
   scratch='' force='' skip_build='' docker_socket='' command=''
   while (( $# )); do
     case $1 in
       -i|--image|-H|--home|--creds|-P|--port)
         [[ $# -ge 2 ]] || usage_error "$1 needs a value"
         case $1 in
-          -i|--image) opt_image=$2 ;;
-          -H|--home) opt_home=$2 ;;
-          --creds) opt_creds=$2 ;;
+          -i|--image) CLOD_IMAGE=$2 ;;
+          -H|--home) CLOD_HOME=$2 ;;
+          --creds) CLOD_CREDS=$2 ;;
           -P|--port) opt_ports+=("$2") ;;
         esac
         shift 2
         ;;
-      --image=*) opt_image=${1#*=}; shift ;;
-      --home=*) opt_home=${1#*=}; shift ;;
-      --creds=*) opt_creds=${1#*=}; shift ;;
+      --image=*) CLOD_IMAGE=${1#*=}; shift ;;
+      --home=*) CLOD_HOME=${1#*=}; shift ;;
+      --creds=*) CLOD_CREDS=${1#*=}; shift ;;
       --port=*) opt_ports+=("${1#*=}"); shift ;;
       -s|--scratch) scratch=1; shift ;;
       -f|--force) force=1; shift ;;
@@ -598,9 +598,6 @@ parse_args() {
   [[ -n $scratch && -n $docker_socket ]] &&
     usage_error "--scratch and --docker don't combine: a scratch workspace has no host path for sibling containers"
   args=("$@")
-  [[ -n ${opt_image+set} ]] && CLOD_IMAGE=$opt_image
-  [[ -n ${opt_home+set} ]] && CLOD_HOME=$opt_home
-  [[ -n ${opt_creds+set} ]] && CLOD_CREDS=$opt_creds
   (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
   return 0
 }
