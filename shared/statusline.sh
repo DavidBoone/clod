@@ -231,21 +231,26 @@ fi
 # the elapsed share of the window and blank cells stand for the time still to
 # come, with a gray background marking out all ten cells (256-color gray; 232
 # is black, 255 white; 236 suits a black terminal background); the green fill
-# is usage, and fill past the track (ahead of pace) is red. Both round to the
-# nearest cell, and usage at or behind pace never passes the track. Any
-# nonzero usage fills at least one cell.
+# is usage, and fill past the track is red. Usage rounds up to whole cells,
+# elapsed to the nearest. The last usage cell shows the pace from the
+# percentages themselves: red when usage is ahead of elapsed, yellow within 5
+# points behind it, green otherwise. Rounding moves usage at most one cell past
+# the track, and that cell is the last, so red shows only when usage is ahead.
 qbar() {
-    local u=$1 e=$2 W=10 s="" i
+    local u=$1 e=$2 W=10 s="" i pace
     local BG=$'\033[48;5;236m' FUT=" "
     # Alternative: no background, dim ▁ line for the future.
     # local BG="" FUT="${DIM}▁"
-    local nu=$(( (u * W + 50) / 100 )) ne=$(( (e * W + 50) / 100 ))
-    [ "$u" -le "$e" ] && [ "$nu" -gt "$ne" ] && nu=$ne
-    [ "$u" -gt 0 ] && [ "$nu" -eq 0 ] && nu=1
+    local nu=$(( (u * W + 99) / 100 )) ne=$(( (e * W + 50) / 100 ))
     [ "$nu" -gt "$W" ] && nu=$W
     [ "$ne" -gt "$W" ] && ne=$W
+    if [ "$u" -gt "$e" ]; then pace=$RED
+    elif [ $((u + 5)) -ge "$e" ]; then pace=$YELLOW
+    else pace=$GREEN
+    fi
     for ((i = 0; i < W; i++)); do
-        if [ "$i" -lt "$nu" ] && [ "$i" -lt "$ne" ]; then s+="${RST}${BG}${GREEN}▰"
+        if [ "$i" -eq $((nu - 1)) ]; then s+="${RST}${BG}${pace}▰"
+        elif [ "$i" -lt "$nu" ] && [ "$i" -lt "$ne" ]; then s+="${RST}${BG}${GREEN}▰"
         elif [ "$i" -lt "$nu" ]; then s+="${RST}${BG}${RED}▰"
         elif [ "$i" -lt "$ne" ]; then s+="${RST}${BG}${DIM}▱"
         else s+="${RST}${BG}${FUT}"

@@ -11,8 +11,9 @@ this repo's [`shared/`](../shared) there, which updates with `git pull`:
   `localhost` where the terminal supports them, right when the host port is
   the container's) and the git branch with its count of
   changed files; then tokens, context use, cache idle time and rate limits.
-  A rate limit's bar shows usage against how much of its window has passed,
-  red where usage is ahead.
+  A rate limit's bar shows usage against how much of its window has passed.
+  Its last usage cell is red when usage is ahead, yellow when it's within 5
+  points behind, and green otherwise; any usage past the elapsed part is red.
 - `managed-settings.json` turns that statusline on.
 
 To customise them, make your own copy and edit that:
