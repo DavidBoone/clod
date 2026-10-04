@@ -23,7 +23,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 lint_tests='lint'
 base_tests='env run-command empty-workspace scratch refuses-home claude codex statusline
   port docker-socket envrc volume-home default new-shared command-line multi-stage
-  combine rebuild remove-image completion'
+  combine rebuild remove-image prune completion'
 classic_tests='classic'
 variant_names='browser docker dotnet go lamp python rust sudo go+sudo'
 variants_tests=$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)
@@ -248,7 +248,8 @@ test_command_line() {
   exits 1 clod -H ~ bash -c true
   exits 2 clod --resume
   exits 2 clod 'a prompt'
-  exits 2 clod build mine
+  exits 1 clod build mine
+  exits 2 clod prune extra
   exits 2 clod env extra
   exits 2 clod new-image a b c
   clod -i clod-python env | has '^image: *clod-python (.*images/python)'
@@ -363,6 +364,14 @@ test_rebuild() {
   grep -q 'building clod-first.second' out
   test "$(docker image inspect -f '{{.Id}}' clod-first)" = "${after[1]}"
   if docker image inspect "${after[2]}" >/dev/null 2>&1; then false; fi
+  # build takes names, which win over -i, and builds a shared base once
+  exits 1 clod build no-such
+  echo 'RUN true' >> ~/.clod/images/first/Dockerfile
+  clod -i no-such build first first+second 2>&1 | tee out
+  test "$(grep -c 'building clod-first\.\.\.' out)" = 1
+  grep -q 'building clod-first.second' out
+  test "$(clod -i no-such build first first+second)" = \
+    "$(printf 'clod: first is up to date\nclod: first.second is up to date')"
 }
 
 test_remove_image() {
@@ -371,21 +380,54 @@ test_remove_image() {
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' top > ~/.clod/images/top/Dockerfile
   printf 'FROM clod\n' > ~/.clod/images/a-very-long-variant-name/Dockerfile
   clod -i gone+top build
+  clod -i top build
   clod __complete remove-image '' | has -x gone.top
   if clod __complete remove-image gone '' | grep -qx gone; then false; fi
   clod images | has '^  a-very-long-variant-name  -'
-  exits 2 clod remove-image
+  exits 1 clod -i no-such remove-image
   exits 1 clod remove-image no-such
   exits 1 clod remove-image gone no-such
   docker image inspect clod-gone >/dev/null
-  # gone.top is built on gone
-  clod remove-image gone | has 'clod-gone'
+  # gone.top is built on gone; a name wins over -i
+  clod -i top remove-image gone | has 'clod-gone'
   if docker image inspect clod-gone >/dev/null 2>&1; then false; fi
+  docker image inspect clod-top >/dev/null
+  clod -i top remove-image | has -x 'removed clod-top'
   clod images | has '^  gone  *-'
   rm -r ~/.clod/images/gone
   clod images | has '^  gone\.top  *built  *gone + top (no Dockerfile)'
   clod remove-image gone+top | has -x 'removed clod-gone.top'
   if clod images | grep -q gone; then false; fi
+}
+
+# prune removes the stale images, those built on others first, and keeps the
+# rest.
+test_prune() {
+  mkdir -p ~/.clod/images/keep ~/.clod/images/old
+  printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' keep > ~/.clod/images/keep/Dockerfile
+  printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' old > ~/.clod/images/old/Dockerfile
+  clod -i keep build
+  clod -i old+keep build
+  clod prune
+  test "$(clod prune)" = 'clod: no stale images'
+  echo 'LABEL changed=1' >> ~/.clod/images/old/Dockerfile
+  clod images | has '^  old\.keep  *stale'
+  test "$(clod prune)" = "$(printf 'removed clod-old.keep\nremoved clod-old')"
+  docker image inspect clod-keep >/dev/null
+  clod images | has '^  keep  *built'
+  clod images | has '^  old  *-'
+  if clod images | grep -q 'old\.keep'; then false; fi
+  # an image a container uses, even a stopped one, stays, and shows as in use
+  docker rm -f clod-test-in-use >/dev/null 2>&1 || true
+  docker create --name clod-test-in-use clod-keep >/dev/null
+  echo 'LABEL changed=1' >> ~/.clod/images/keep/Dockerfile
+  clod images | has '^  keep  *stale, in use  '
+  clod images | has '^in use '
+  test "$(clod prune)" = 'kept clod-keep: a container uses it (docker ps -a lists them)'
+  exits 1 clod remove-image keep
+  docker image inspect clod-keep >/dev/null
+  docker rm clod-test-in-use >/dev/null
+  test "$(clod prune)" = 'removed clod-keep'
 }
 
 # Tab completion: clod __complete's candidates, and the shim it prints, in bash
@@ -396,6 +438,7 @@ test_completion() {
   test "$(clod __complete 'new-')" = "$(printf 'new-image\nnew-shared')"
   test "$(clod __complete --sk)" = --skip-build
   clod __complete images '' | has -x plain
+  clod __complete build plain '' | has -x plain
   clod __complete -i '' | has -x go
   clod __complete -i '' | has -x clod
   test "$(clod __complete -i go+su)" = go+sudo
