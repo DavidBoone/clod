@@ -46,19 +46,23 @@ five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empt
 week_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
 lines_add=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
 lines_rm=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
+cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
 
 state_dir="${TMPDIR:-/tmp}/claude-statusline"
 mkdir -p "$state_dir"
 state_file="$state_dir/$session_id"
 turn_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/cache-turns.log"
 
-# ANSI helpers (statusline renders escape codes). Basic/bright 16 colors only:
-# truecolor gets approximated by the statusline renderer.
+# ANSI helpers (statusline renders escape codes). Basic/bright 16 colors, with
+# one 256-color gray background in qbar: truecolor gets approximated by the
+# statusline renderer. Line 1 gives each group one hue (cyan Claude, magenta
+# clod, green git); line 2 has blue labels and white values. Green, yellow and
+# red otherwise mean good, warning and bad.
 RST=$'\033[0m'
 DIM=$'\033[2m'
 MAGENTA=$'\033[35m'
 BR_MAGENTA=$'\033[95m'
-CYAN=$'\033[96m'
+DARK_CYAN=$'\033[36m'
 BOLD_CYAN=$'\033[1;96m'
 YELLOW=$'\033[93m'
 GREEN=$'\033[92m'
@@ -66,6 +70,7 @@ BLUE=$'\033[94m'
 WHITE=$'\033[97m'
 RED=$'\033[91m'
 BOLD_RED=$'\033[1;91m'
+UL_MAGENTA=$'\033[4;35m'
 
 # State: output-tokens fingerprint, accumulated cache-creation, last-activity
 # timestamp (cache-TTL idle timer), last miss size + when it was detected +
@@ -156,20 +161,48 @@ bar() {
     printf '%s%s' "$s" "$RST"
 }
 
+# Two lines: `head` is model, clod launch context, ports and git; `parts` is
+# the token counts and meters.
+head=()
 parts=()
 
-# clod launch context: home @ image.
+model_part="${BOLD_CYAN}✦ ${model}${RST}"
+[ -n "$effort" ] && model_part+=" ${DARK_CYAN}⚡${effort}${RST}"
+head+=("$model_part")
+
+# clod launch context: ⌂ home, ⬢ image.
 if [ -n "${CLOD_HOME:-}" ]; then
     clod_part="${MAGENTA}⌂ ${BR_MAGENTA}${CLOD_HOME}${RST}"
-    [ -n "${CLOD_IMAGE:-}" ] && clod_part+="${DIM}@${RST}${CYAN}${CLOD_IMAGE}${RST}"
-    parts+=("$clod_part")
+    [ -n "${CLOD_IMAGE:-}" ] && clod_part+=" ${MAGENTA}⬢ ${CLOD_IMAGE}${RST}"
+    head+=("$clod_part")
 fi
 
-model_part="${BOLD_CYAN}✦ ${model}${RST}"
-[ -n "$effort" ] && model_part+=" ${YELLOW}⚡${effort}${RST}"
-parts+=("$model_part")
+# Published container ports (CLOD_PORTS) as underlined :PORT, each an OSC 8
+# link to http://localhost:PORT. Claude Code passes the links on only when it
+# recognises the terminal (TERM_PROGRAM and the like, or FORCE_HYPERLINK=1);
+# otherwise they show as plain text. CLOD_PORTS holds container ports, so a
+# link is right only when the host port is the same. UDP ports aren't shown.
+if [ -n "${CLOD_PORTS:-}" ]; then
+    ports_part="${MAGENTA}⇄${RST}"
+    for port in ${CLOD_PORTS//,/ }; do
+        [[ $port == */udp ]] && continue
+        port=${port%/tcp}
+        ports_part+=" ${UL_MAGENTA}"$'\033]8;;'"http://localhost:${port}"$'\a'":${port}"$'\033]8;;\a'"${RST}"
+    done
+    head+=("$ports_part")
+fi
 
-parts+=("${GREEN}↑${WHITE}$(fmt_k "$adjusted_in") ${BLUE}↓${WHITE}$(fmt_k "$total_out")${RST}")
+# Git branch (short hash when detached) and ±N changed files, untracked included.
+if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --short -q HEAD 2>/dev/null \
+        || git -C "$cwd" --no-optional-locks rev-parse --short HEAD 2>/dev/null); then
+    # Two extra spaces set the git part apart from the model/ports/clod group.
+    git_part="  ${GREEN}ᚴ ${branch}${RST}"
+    dirty=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null | wc -l) || dirty=0
+    [ "$dirty" -gt 0 ] && git_part+=" ${YELLOW}±${dirty}${RST}"
+    head+=("$git_part")
+fi
+
+parts+=("${BLUE}↑${WHITE}$(fmt_k "$adjusted_in") ${BLUE}↓${WHITE}$(fmt_k "$total_out")${RST}")
 
 if [ "$lines_add" != "0" ] || [ "$lines_rm" != "0" ]; then
     parts+=("${GREEN}+${lines_add}${RST}${DIM}/${RST}${RED}-${lines_rm}${RST}")
@@ -180,7 +213,7 @@ if [ -n "$used_pct" ]; then
     ctx_color=$WHITE
     [ "$ctx_int" -ge 60 ] && ctx_color=$YELLOW
     [ "$ctx_int" -ge 80 ] && ctx_color=$RED
-    parts+=("${CYAN}◔ $(bar "$ctx_int") ${ctx_color}${ctx_int}%${RST}")
+    parts+=("${BLUE}◔ $(bar "$ctx_int") ${ctx_color}${ctx_int}%${RST}")
 fi
 
 if [ "$last_activity" -gt 0 ]; then
@@ -194,24 +227,52 @@ if [ "$last_activity" -gt 0 ]; then
     fi
 fi
 
+# Quota meter, ten cells wide: used % $1, elapsed % $2. The dim ▱ track covers
+# the elapsed share of the window and blank cells stand for the time still to
+# come, with a gray background marking out all ten cells (256-color gray; 232
+# is black, 255 white; 236 suits a black terminal background); the green fill
+# is usage, and fill past the track (ahead of pace) is red. Both round to the
+# nearest cell, and usage at or behind pace never passes the track. Any
+# nonzero usage fills at least one cell.
+qbar() {
+    local u=$1 e=$2 W=10 s="" i
+    local BG=$'\033[48;5;236m' FUT=" "
+    # Alternative: no background, dim ▁ line for the future.
+    # local BG="" FUT="${DIM}▁"
+    local nu=$(( (u * W + 50) / 100 )) ne=$(( (e * W + 50) / 100 ))
+    [ "$u" -le "$e" ] && [ "$nu" -gt "$ne" ] && nu=$ne
+    [ "$u" -gt 0 ] && [ "$nu" -eq 0 ] && nu=1
+    [ "$nu" -gt "$W" ] && nu=$W
+    [ "$ne" -gt "$W" ] && ne=$W
+    for ((i = 0; i < W; i++)); do
+        if [ "$i" -lt "$nu" ] && [ "$i" -lt "$ne" ]; then s+="${RST}${BG}${GREEN}▰"
+        elif [ "$i" -lt "$nu" ]; then s+="${RST}${BG}${RED}▰"
+        elif [ "$i" -lt "$ne" ]; then s+="${RST}${BG}${DIM}▱"
+        else s+="${RST}${BG}${FUT}"
+        fi
+    done
+    printf '%s%s' "$s" "$RST"
+}
+
 # Rate-limit meter: label $1 (pre-colored), used % $2, reset epoch $3, window seconds $4.
-# The dim /N% after the value is how much of the window has elapsed.
+# The dim /N% after the value is how much of the window has elapsed; without a
+# reset time the track spans the full width.
 limit_part() {
     local label=$1 pct elapsed=""
     pct=$(printf '%.0f' "$2")
     if [ -n "$3" ]; then
-        elapsed=$(awk -v n="$now" -v r="$3" -v w="$4" 'BEGIN { printf "%.0f", (n - (r - w)) * 100 / w }')
+        elapsed=$(awk -v n="$now" -v r="$3" -v w="$4" 'BEGIN { e = (n - (r - w)) * 100 / w; if (e < 0) e = 0; if (e > 100) e = 100; printf "%.0f", e }')
     fi
-    printf '%s %s %s%s%%%s' "$label" "$(bar "$pct")" "$WHITE" "$pct" "${elapsed:+${DIM}/${elapsed}%}${RST}"
+    printf '%s %s %s%s%%%s' "$label" "$(qbar "$pct" "${elapsed:-100}")" "$WHITE" "$pct" "${elapsed:+${DIM}/${elapsed}%}${RST}"
 }
 
 if [ -n "$five_pct" ]; then
     five_reset=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
-    parts+=("$(limit_part "${YELLOW}5h" "$five_pct" "$five_reset" 18000)")
+    parts+=("$(limit_part "${BLUE}5h" "$five_pct" "$five_reset" 18000)")
 fi
 if [ -n "$week_pct" ]; then
     week_reset=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
-    parts+=("$(limit_part "${MAGENTA}7d" "$week_pct" "$week_reset" 604800)")
+    parts+=("$(limit_part "${BLUE}7d" "$week_pct" "$week_reset" 604800)")
 fi
 
 # Miss warning goes last so it stands out at the end of the line.
@@ -225,8 +286,12 @@ if [ "$last_miss" -gt 0 ] && [ "$prompt_id" = "$miss_prompt" ] && [ $((now - mis
     fi
 fi
 
-result=""
-for part in "${parts[@]}"; do
-    result="${result:+$result  }$part"
-done
-echo "$result"
+join() {
+    local result="" part
+    for part in "$@"; do
+        result="${result:+$result  }$part"
+    done
+    echo "$result"
+}
+join "${head[@]}"
+join "${parts[@]}"

@@ -212,15 +212,23 @@ test_codex() {
 
 test_statusline() {
   echo '{"model":{"display_name":"Opus"},"effort":{"level":"high"},"session_id":"ci","prompt_id":"p1",
+         "workspace":{"current_dir":"/workspace"},
          "context_window":{"total_input_tokens":48200,"total_output_tokens":12100,"used_percentage":42,
            "current_usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},
          "cost":{"total_lines_added":120,"total_lines_removed":35},
          "rate_limits":{"five_hour":{"used_percentage":12}}}' > input.json
-  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
-    sed 's/\x1b\[[0-9;]*m//g' | tee out
-  grep -q 'default@clod' out
-  grep -q 'Opus' out
-  grep -q '42%' out
+  git init -q -b main .
+  # the model, clod's home, image and ports, and git on one line; the meters on the next
+  clod -P 5173 -P 6000/udp bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+    sed 's/\x1b\[[0-9;]*m//g; s/\x1b\]8;;[^\x07]*\x07//g' | tee out
+  test "$(wc -l < out)" = 2
+  head -1 out | has '✦ Opus .*⌂ default ⬢ clod  ⇄ :5173  .*ᚴ main ±[0-9]'
+  if grep -q 6000 out; then false; fi
+  tail -1 out | has '42%'
+  # inside .git, where git status fails, it still shows both lines
+  sed -i 's|"/workspace"|"/workspace/.git"|' input.json
+  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' > out
+  test "$(wc -l < out)" = 2
 }
 
 test_port() {
@@ -526,6 +534,7 @@ test_command_line() {
   grep -q '^home: *other' out
   grep -q '^image: *python ' out
   grep -q '^ports: *127.0.0.1:3000 → 8080$' out
+  clod -P 6000/udp env | has '^ports: *127.0.0.1:6000 → 6000/udp$'
   clod bash -c true
   clod image | has '^\* clod  *built'
   clod home | has '^\* default'
@@ -570,7 +579,7 @@ test_combine() {
   printf 'FROM clod\n' > ~/.clod/images/fixed/Dockerfile
   clod -i first+second env | has '^image: *first+second '
   clod -i first+second bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
-  clod -i first+second bash -c 'test "$CLOD_IMAGE" = first+second' 2>&1 | has '^clod · .* · first+second · '
+  clod -i first+second bash -c 'test "$CLOD_IMAGE" = first+second' 2>&1 | has '^clod ⌂ .* ⬢ first+second · '
   clod image | has '^  first+second  *built'
   clod -i clod-first.second --skip-build bash -c true
   echo 'RUN true' >> ~/.clod/images/first/Dockerfile

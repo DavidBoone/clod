@@ -46,7 +46,7 @@
 # homes. Both ask first in a terminal, and need --force without one.
 #
 # Inside the container, CLOD_HOME, CLOD_WORKSPACE and CLOD_IMAGE hold the home
-# and workspace labels and image tag this run resolved to, and CLOD_PORTS the
+# and workspace labels and the image's name as -i takes it, and CLOD_PORTS the
 # published container ports. With --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
 # With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
 #
@@ -804,7 +804,7 @@ setup_container() {
     case $p in
       *.*:*|\[*) port_args+=(-p "$p") ;;
       *:*) port_args+=(-p "127.0.0.1:$p") ;;
-      *) port_args+=(-p "127.0.0.1:$p:$p") ;;
+      *) port_args+=(-p "127.0.0.1:${p%/*}:$p") ;;
     esac
     container_ports+=("${p##*:}")
   done
@@ -1145,6 +1145,7 @@ cmd_default() {
           echo "clod: no variant or local image named '$value' (clod image lists them)" >&2
           exit 1
         fi
+        [[ -n $REPLY ]] && image_name "$REPLY" && value=$REPLY
         ;;
       command)
         is_one_of "$value" "$run_commands" ||
@@ -1968,7 +1969,7 @@ cmd_run() {
       [[ -n ${!v:-} ]] && run_args+=(-e "$v")
     done
   fi
-  echo "clod · $home_label · $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
+  echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }
