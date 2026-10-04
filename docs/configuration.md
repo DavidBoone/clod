@@ -17,6 +17,21 @@ A borrowed login's credentials file is mounted live, so token refreshes from
 either home reach both. A copy would go stale at the next refresh, since
 refresh tokens rotate.
 
+### Volume homes
+
+`clod -H vol:NAME` uses the Docker volume `clod-home-NAME` as the home instead
+of a directory on your machine. The volume lives on Docker's own disk (on
+macOS, inside the Colima or Docker Desktop VM), so it avoids the shared-folder
+file system: installs and caches in the home are faster, and `chown` and
+`chmod` work as on any Linux disk. Docker creates the volume on first use,
+starting it with the image's `/home/claude`.
+
+Its files aren't visible from the host; `clod -H vol:NAME bash` gets you a
+shell in it. `clod homes` lists volume homes but shows `?` for their logins,
+and a volume home can't borrow a login with `--creds` or lend its own.
+`docker volume rm clod-home-NAME` deletes one, as do `colima delete` and
+`docker system prune --volumes`.
+
 ## Settings
 
 Each option has a matching setting, which can come from your shell
@@ -29,9 +44,9 @@ setting given empty still wins and means its default, so `clod -P ''` or
 
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
-| `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory. |
+| `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory; `vol:NAME` is the Docker volume `clod-home-NAME` (see [Volume homes](#volume-homes)). |
 | `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod images` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
-| `CLOD_CREDS` | `--creds` | unset  | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`). Unset, the home keeps its own. |
+| `CLOD_CREDS` | `--creds` | unset  | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`; not a volume home, nor into one). Unset, the home keeps its own. |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 
@@ -60,7 +75,7 @@ path. Your shell's settings and a project's envrc win over these defaults;
 `clod env` shows what a run will actually use.
 
 Inside the container the same variables hold what the launch resolved to:
-`CLOD_HOME` is the home name (or `~/`-relative path), `CLOD_IMAGE` the image
+`CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`), `CLOD_IMAGE` the image
 tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`), and `CLOD_CREDS`, set only when a login is
 borrowed, the home it came from.
 

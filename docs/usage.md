@@ -136,7 +136,7 @@ Everything clod keeps is under `~/.clod`:
 ~/.clod/
   src/                clod's own checkout
   config              your defaults for the launcher settings
-  homes/<name>/       container homes
+  homes/<name>/       container homes (volume homes are Docker volumes, clod-home-<name>)
   images/<name>/      your image variants
   shared/             your shared config, mounted read-only as /etc/claude-code
 ```
