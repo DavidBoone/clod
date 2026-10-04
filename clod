@@ -108,7 +108,8 @@ alias_commands='build rebuild'
 noun_verbs() {
   case $1 in
     image) REPLY='show new build rebuild rm prune' ;;
-    home|workspace) REPLY='rm' ;;
+    home) REPLY='cp mv rm' ;;
+    workspace) REPLY='rm' ;;
     shared) REPLY='new diff' ;;
   esac
 }
@@ -172,6 +173,11 @@ Commands:
                          run would rebuild anyway
 
   home                   list the homes and their logins
+  home cp SRC DEST       copy home SRC to a new home DEST: a name, a path or
+                         vol:NAME, so a directory home can become a volume one
+                         or the other way round
+  home mv SRC DEST       move home SRC to a new home DEST, as cp then deleting
+                         SRC; a directory home moved to a directory is renamed
   home rm vol:NAME...    delete volume homes, logins included; asks first
                          (--force doesn't). Delete a directory home's folder
                          yourself
@@ -641,14 +647,15 @@ parse_args() {
     shared) usage_error "shared takes a command: new or diff" ;;
     'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
+    'home cp'|'home mv') (( $# == 2 )) || usage_error "home $verb takes a SRC and a DEST home" ;;
     'home rm') (( $# )) || usage_error "home rm takes one or more vol:NAME" ;;
     'workspace rm') (( $# )) || usage_error "workspace rm takes one or more NAME or vol:NAME" ;;
   esac
   case $command${verb:+ $verb} in
-    'home rm'|'workspace rm')
+    'home '*|'workspace rm')
       for arg; do
         [[ $arg == -* ]] && usage_error "clod's options go before the command"
-        [[ $command == home && $arg != vol:* ]] &&
+        [[ $verb == rm && $command == home && $arg != vol:* ]] &&
           usage_error "home rm removes only volume homes, named vol:NAME; to remove the home $arg, delete its folder"
       done
       ;;
@@ -1029,6 +1036,14 @@ cmd_complete() {
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
       home:rm) offer $(volume_names clod-home- | sed 's/^/vol:/') ;;
+      # The source is a home, and the destination a new one, so nothing
+      # completes there but a path.
+      home:cp|home:mv)
+        [[ $cur == */* ]] && return 1
+        if (( ${#cmd_args[@]} == 0 )); then
+          offer $homes $(volume_names clod-home- | sed 's/^/vol:/')
+        fi
+        ;;
       # A workspace is named NAME, or vol:NAME once its v is typed.
       workspace:rm)
         offer $(volume_names clod-workspace-)
@@ -1419,6 +1434,116 @@ cmd_home_rm() {
     names+=("${name#vol:}")
   done
   remove_volumes clod-home- home "${names[@]}"
+}
+
+# True when a container, running or stopped, mounts home $1: a directory or
+# vol:NAME. A bind mount's source is matched at its end, in case the Docker
+# reports it under a prefix of its own.
+home_in_use() {
+  local ids src
+  [[ $1 == vol:* ]] && { volume_in_use "clod-home-${1#vol:}"; return; }
+  ids=$(docker ps -aq 2>/dev/null)
+  [[ -n $ids ]] || return 1
+  # shellcheck disable=SC2086 # container ids are words
+  while IFS= read -r src; do
+    [[ -n $src && ( $src == "$1" || $src == */"${1#/}" ) ]] && return 0
+  done < <(docker inspect -f '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' $ids 2>/dev/null)
+  return 1
+}
+
+# Sets REPLY to home $1, resolved, and checks it for clod home cp and mv, as
+# the source when $2 is src and otherwise the destination: a source must
+# exist and a destination must not, neither can be in use, and a directory
+# can't be one that holds secrets.
+check_home_arg() {
+  local h label
+  resolve_home "home $verb" "$1"
+  h=$REPLY
+  label=$(tildify "${h#"$clod_dir/homes/"}")
+  if [[ $h == vol:* ]]; then
+    if docker volume inspect "clod-home-${h#vol:}" >/dev/null 2>&1; then
+      [[ $2 == src ]] || { echo "clod: there's already a home $label" >&2; exit 1; }
+    else
+      [[ $2 != src ]] || { echo "clod: no home $label (clod home lists them)" >&2; exit 1; }
+    fi
+  else
+    if holds_secrets "$h"; then
+      echo "clod: $label holds your credentials or every home's login, so it can't be a home to $verb" >&2
+      exit 1
+    fi
+    if [[ -e $h || -L $h ]]; then
+      [[ $2 == src ]] || { echo "clod: $label already exists" >&2; exit 1; }
+      [[ -d $h ]] || { echo "clod: $label isn't a directory" >&2; exit 1; }
+    else
+      [[ $2 != src ]] || { echo "clod: no home $label (clod home lists them)" >&2; exit 1; }
+    fi
+  fi
+  if home_in_use "$h"; then
+    echo "clod: a container uses $label, so it can't be copied or moved now; docker ps -a lists the containers" >&2
+    exit 1
+  fi
+  REPLY=$h
+}
+
+# Copies home $1 to the new home $2, each a directory or vol:NAME, in a
+# container of the clod image. The copy runs as claude, so its files are
+# claude's: a new volume is mounted at /workspace, which the image makes
+# claude's, so Docker gives the volume that owner, and a new directory is made
+# here, as you. A failed copy is removed.
+copy_home() {
+  local src=$1 dest=$2 from to
+  docker image inspect clod >/dev/null 2>&1 || walk_image clod build
+  [[ $src == vol:* ]] && src=clod-home-${src#vol:}
+  if [[ $dest == vol:* ]]; then
+    dest=clod-home-${dest#vol:}
+  else
+    mkdir -p "$dest"
+  fi
+  mount_arg "$src" /from ,readonly; from=$REPLY
+  mount_arg "$dest" /workspace; to=$REPLY
+  echo "clod: copying..." >&2
+  if ! docker run --rm --pull=never --user claude --entrypoint cp \
+      --mount "$from" --mount "$to" clod -a /from/. /workspace/; then
+    if [[ $dest == /* ]]; then rm -rf "$dest"; else docker volume rm "$dest" >/dev/null 2>&1; fi
+    echo "clod: the copy failed (Docker's message is above), so there's no new home" >&2
+    exit 1
+  fi
+}
+
+# Copies home $1 to a new home $2: a name, a path or vol:NAME.
+cmd_home_cp() {
+  local src dest
+  realdir "$HOME"; host_home=$REPLY
+  realdir "$clod_dir"; clod_real=$REPLY
+  check_home_arg "$1" src; src=$REPLY
+  check_home_arg "$2" dest; dest=$REPLY
+  if [[ $src != vol:* && $dest == "$src"/* ]]; then
+    echo "clod: can't $verb $1 into itself" >&2
+    exit 1
+  fi
+  if [[ $verb == mv && $src != vol:* && $dest != vol:* ]]; then
+    mkdir -p "${dest%/*}"
+    mv "$src" "$dest" || exit 1
+  else
+    copy_home "$src" "$dest"
+    if [[ $verb == mv ]]; then
+      if [[ $src == vol:* ]]; then
+        docker volume rm "clod-home-${src#vol:}" >/dev/null
+      else
+        rm -rf "$src"
+      fi || {
+        echo "clod: copied $1 to $2, but couldn't delete $1 (the message is above)" >&2
+        exit 1
+      }
+    fi
+  fi
+  if [[ $verb == mv ]]; then echo "moved $1 to $2"; else echo "copied $1 to $2"; fi
+}
+
+# Moves home $1 to a new home $2, as cp, then deleting $1; a directory moved
+# to a directory is renamed.
+cmd_home_mv() {
+  cmd_home_cp "$@"
 }
 
 # Lists the volume workspaces, marking those a container uses.

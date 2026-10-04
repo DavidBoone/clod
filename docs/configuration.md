@@ -37,6 +37,24 @@ without one, it needs `--force`. It deletes only volume homes, and Docker
 won't remove one a container uses. `colima delete` and
 `docker system prune --volumes` delete volume homes too.
 
+### Copying and moving homes
+
+`clod home cp` copies a home, login included, to a new one, and `clod home mv`
+moves it. Either side can be a name, a path or `vol:NAME`, so a directory home
+can become a volume home or the other way round:
+
+```bash
+clod home cp work vol:work      # copy ~/.clod/homes/work into the volume clod-home-work
+clod home mv vol:work work2     # move the volume into ~/.clod/homes/work2
+clod home mv work old-work      # rename a directory home
+```
+
+The copy runs in a container of the `clod` image, as `claude`, so its files
+are `claude`'s (yours, for a directory). `mv` deletes the source only once the
+copy is complete; a directory moved to a directory is renamed. Both refuse a
+destination that exists, and a source or destination a container uses, even a
+stopped one (`docker ps -a` lists them).
+
 ## Settings
 
 Each option has a matching setting, which can come from your shell
