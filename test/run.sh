@@ -21,7 +21,7 @@
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
-base_tests='env run-command empty-workspace scratch workspace refuses-home claude codex statusline
+base_tests='env run-command mount-paths scratch workspace refuses-home claude codex statusline
   port docker-socket envrc volume-home volume-workspace default shared command-line
   multi-stage combine rebuild image-rm image-prune completion'
 classic_tests='classic'
@@ -98,12 +98,16 @@ test_run_command() {
   test "$(stat -c %u from-container)" = "$(id -u)"
 }
 
-test_empty_workspace() {
-  touch file
-  clod bash -c true 2>&1 | tee out
-  if grep -q 'workspace is empty' out; then false; fi
-  docker run --rm -e CLOD_WORKSPACE_FILES=1 -v "$(mktemp -d):/workspace" clod bash -c true 2>&1 |
-    has 'workspace is empty'
+test_mount_paths() {
+  mkdir 'a,"b'
+  echo hello > 'a,"b/from-host'
+  clod -H './h,"1' -w 'a,"b' bash -c '
+    set -e
+    test "$(cat /workspace/from-host)" = hello
+    touch ~/from-container
+    if touch /etc/claude-code/x 2>/dev/null; then false; fi
+  '
+  test -f 'h,"1/from-container'
 }
 
 test_scratch() {

@@ -18,9 +18,9 @@ brew services start colima      # optional: start it at login
 Docker Desktop works too.
 
 Colima shares your home folder with the containers by default, so keep
-projects under it, or add other folders with `colima start --mount /path:w`. A
-project outside the shared folders appears as an empty `/workspace`, and clod
-warns at launch when that happens.
+projects under it, or add other folders with `colima start --mount /path:w`. clod
+won't start with a workspace or home outside the shared folders: Docker reports
+`bind source path does not exist` for it, since its VM can't see the folder.
 
 Colima's shared folders, which hold the home and workspace, don't allow every
 ownership and permission change: `chown`, and sometimes `chmod`, fail with
