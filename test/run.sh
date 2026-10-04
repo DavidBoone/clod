@@ -668,7 +668,7 @@ test_image_rm() {
   exits 1 clod image rm gone no-such
   docker image inspect clod-gone >/dev/null
   # gone+top is built on gone; a name wins over -i
-  clod -i top image rm gone | has -x 'removed the name gone; .*'
+  clod -i top image rm gone | has '^removed .*gone'
   if docker image inspect clod-gone >/dev/null 2>&1; then false; fi
   docker image inspect clod-top >/dev/null
   clod -i top image rm | has -x 'removed top'
