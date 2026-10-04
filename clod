@@ -590,7 +590,7 @@ holds_secrets() {
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
-  local opt_ports=() dashdash=''
+  local opt_ports=() dashdash='' arg
   scratch='' workspace_opt='' force='' skip_build='' docker_socket='' command='' verb=''
   while (( $# )); do
     case $1 in
@@ -645,6 +645,15 @@ parse_args() {
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
     'home rm') (( $# )) || usage_error "home rm takes one or more vol:NAME" ;;
     'workspace rm') (( $# )) || usage_error "workspace rm takes one or more NAME or vol:NAME" ;;
+  esac
+  case $command${verb:+ $verb} in
+    'home rm'|'workspace rm')
+      for arg; do
+        [[ $arg == -* ]] && usage_error "clod's options go before the command"
+        [[ $command == home && $arg != vol:* ]] &&
+          usage_error "home rm removes only volume homes, named vol:NAME; to remove the home $arg, delete its folder"
+      done
+      ;;
   esac
   [[ -n $scratch && -n $workspace_opt ]] && usage_error "--scratch and --workspace don't combine"
   args=("$@")
@@ -1024,10 +1033,9 @@ cmd_complete() {
       home:rm) offer $(volume_names clod-home- | sed 's/^/vol:/') ;;
       # A workspace is named NAME, or vol:NAME once that is typed.
       workspace:rm)
-        if [[ $cur == vol:* ]]; then
+        offer $(volume_names clod-workspace-)
+        if [[ $cur == vol:* || vol: == "$cur"* ]]; then
           offer $(volume_names clod-workspace- | sed 's/^/vol:/')
-        else
-          offer $(volume_names clod-workspace-)
         fi
         ;;
     esac
@@ -1383,14 +1391,14 @@ remove_volumes() {
     vols+=("$v")
   done
   if [[ -z $force ]]; then
-    echo "clod: deleting, with every file in them:" >&2
-    for v in "${vols[@]}"; do
-      echo "  vol:${v#"$prefix"} (Docker volume $v)" >&2
-    done
     if [[ ! -t 0 ]]; then
       echo "clod: there's no terminal to ask in; clod --force $kind rm deletes without asking" >&2
       exit 1
     fi
+    echo "clod: deleting, with every file in them:" >&2
+    for v in "${vols[@]}"; do
+      echo "  vol:${v#"$prefix"} (Docker volume $v)" >&2
+    done
     read -r -p "Delete? [y/N] " answer
     case $answer in
       y|Y|yes|YES) ;;
@@ -1410,10 +1418,6 @@ remove_volumes() {
 cmd_home_rm() {
   local name names=()
   for name; do
-    if [[ $name != vol:* ]]; then
-      echo "clod: home rm removes only volume homes, named vol:NAME; to remove the home $name, delete its folder" >&2
-      exit 1
-    fi
     names+=("${name#vol:}")
   done
   remove_volumes clod-home- home "${names[@]}"
@@ -1437,8 +1441,8 @@ cmd_workspace() {
     printf '%s %-20s %s\n' "$mark" "vol:$n" "$state"
   done
   echo
-  echo "clod -w vol:NAME uses one, and a new name creates it (the Docker volume"
-  echo "clod-workspace-NAME); clod workspace rm NAME deletes one"
+  echo "* used here; clod -w vol:NAME uses one, and a new name creates it (the"
+  echo "  Docker volume clod-workspace-NAME); clod workspace rm NAME deletes one"
   [[ -n $any_used ]] && echo "in use: a container, maybe a stopped one, uses it (docker ps -a), so it can't be removed"
   return 0
 }
@@ -1504,8 +1508,10 @@ cmd_shared_diff() {
     echo "clod: there's no $(tildify "$target"), so clod uses the starter; clod shared new creates it" >&2
     exit 1
   fi
-  diff -ru "$starter" "$target" && echo "clod: $(tildify "$target") is the same as the starter"
-  return 0
+  local status=0
+  diff -ru "$starter" "$target" || status=$?
+  (( status == 0 )) && echo "clod: $(tildify "$target") is the same as the starter"
+  return "$status"
 }
 
 cmd_image_new() {
@@ -1742,8 +1748,10 @@ setup_image
 setup_container
 case $command${verb:+ $verb} in
   env) check_workspace; cmd_env; exit 0 ;;
-  image|'image show'|'image new'|home|'shared new'|'shared diff')
+  image|'image show'|'image new'|home|'shared new')
     "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
+  # diff's status: 1 when they differ.
+  'shared diff') cmd_shared_diff; exit ;;
   'image build'|'image rebuild') need_docker; cmd_image_build "$@"; exit 0 ;;
   'image '*|'home '*|workspace*) need_docker; "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
 esac

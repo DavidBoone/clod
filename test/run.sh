@@ -4,7 +4,7 @@
 # tests per job.
 #
 # It needs Linux, and a Docker it can have to itself: it builds, replaces and
-# prunes the clod image on the Docker it uses, and starts containers with that
+# prunes the clod images on the Docker it uses, and starts containers with that
 # Docker's socket mounted. Run it on a CI runner or a throwaway VM; --yes
 # confirms that outside CI. Each run gets a fresh HOME, so ~/.clod is left
 # alone, and the Docker CLI keeps its config (and so its context).
@@ -271,9 +271,21 @@ test_volume_home() {
   exits 1 clod -H vol:./x env
   # home rm takes only volume homes, asks first, and needs --force without a
   # terminal
-  exits 1 clod home rm default 2>&1 | has 'only volume homes'
-  exits 1 clod home rm vol:vtest vol:no-such
-  exits 1 clod home rm vol:vtest < /dev/null 2>&1 | has 'no terminal'
+  exits 2 clod home rm default 2>&1 | has 'only volume homes'
+  exits 2 clod --force home rm vol:vtest default
+  exits 2 clod home rm -f vol:vtest 2>&1 | has "options go before the command"
+  # a name it doesn't know removes none of them
+  exits 1 clod --force home rm vol:vtest vol:no-such
+  docker volume inspect clod-home-vtest >/dev/null
+  exits 1 clod home rm vol:vtest < /dev/null 2>&1 | tee out
+  has 'no terminal' < out
+  if grep -q deleting out; then false; fi
+  docker volume inspect clod-home-vtest >/dev/null
+  # Docker won't remove a volume a container uses
+  docker rm -f clod-test-home >/dev/null 2>&1 || true
+  docker create --name clod-test-home -v clod-home-vtest:/h clod >/dev/null
+  exits 1 clod --force home rm vol:vtest 2>&1 | has 'a container uses vol:vtest'
+  docker rm clod-test-home >/dev/null
   docker volume inspect clod-home-vtest >/dev/null
   clod --force home rm vol:vtest | has -x 'removed vol:vtest (clod-home-vtest)'
   if docker volume inspect clod-home-vtest >/dev/null 2>&1; then false; fi
@@ -281,21 +293,37 @@ test_volume_home() {
 }
 
 test_volume_workspace() {
-  docker volume rm -f clod-workspace-one clod-workspace-two >/dev/null
+  docker volume rm -f clod-workspace-one clod-workspace-two clod-workspace-three >/dev/null
   clod workspace | has 'no volume workspaces'
   clod -w vol:one bash -c true
   clod -w vol:two bash -c true
   clod workspace | has '^  vol:one  *-$'
-  clod -w vol:two workspace | has '^\* vol:two '
+  clod -w vol:two workspace | tee out
+  has '^\* vol:two ' < out
+  has '^\* used here' < out
   exits 2 clod workspace rm
   exits 2 clod workspace ls
+  exits 2 clod workspace rm -f one 2>&1 | has "options go before the command"
   # a name it doesn't know removes none of them
   exits 1 clod --force workspace rm one no-such
   docker volume inspect clod-workspace-one >/dev/null
   exits 1 clod workspace rm one < /dev/null 2>&1 | tee out
-  has 'vol:one (Docker volume clod-workspace-one)' < out
   has 'no terminal' < out
+  if grep -q deleting out; then false; fi
   docker volume inspect clod-workspace-one >/dev/null
+  # in a terminal it lists the volumes and asks: n or no answer keeps them, y
+  # removes them
+  docker volume create clod-workspace-three >/dev/null
+  printf 'n\n' | exits 1 script -qec 'clod workspace rm three' /dev/null > out
+  has 'vol:three (Docker volume clod-workspace-three)' < out
+  has 'Delete? \[y/N\]' < out
+  has 'nothing deleted' < out
+  docker volume inspect clod-workspace-three >/dev/null
+  printf '\n' | exits 1 script -qec 'clod workspace rm three' /dev/null | has 'nothing deleted'
+  docker volume inspect clod-workspace-three >/dev/null
+  printf 'y\n' | script -qec 'clod workspace rm three' /dev/null |
+    has 'removed vol:three (clod-workspace-three)'
+  if docker volume inspect clod-workspace-three >/dev/null 2>&1; then false; fi
   # Docker won't remove a volume a container uses
   docker rm -f clod-test-volume >/dev/null 2>&1 || true
   docker create --name clod-test-volume -v clod-workspace-two:/w clod >/dev/null
@@ -331,8 +359,13 @@ test_shared() {
   rm ~/.clod/shared/statusline.sh
   echo '# mine' >> ~/.clod/shared/managed-settings.json
   clod shared new | has 'missing  *statusline.sh'
-  clod shared diff | has '^Only in .*/shared: statusline.sh$'
-  clod shared diff | has -x '+# mine'
+  exits 1 clod shared diff | has '^Only in .*/shared: statusline.sh$'
+  exits 1 clod shared diff | has -x '+# mine'
+  # diff's trouble, status 2, is clod's
+  mkdir bin
+  printf '#!/bin/sh\nexit 2\n' > bin/diff
+  chmod +x bin/diff
+  PATH=$PWD/bin:$PATH exits 2 clod shared diff
   cp "$repo/container.md" ~/.clod/shared/CLAUDE.md
   clod shared new | has 'describes the container'
   clod --force shared new
@@ -452,10 +485,10 @@ test_combine() {
   grep -q 'building clod-ontop' out
 }
 
-# image rebuild replaces every image in the chain and prunes the old ones. It runs a
-# copy of clod whose base Dockerfile only writes a file, since rebuilding the
-# real one without the cache takes half a minute; that replaces the clod image,
-# which the next test to use it rebuilds from the layer cache.
+# image rebuild replaces every image in the chain and prunes the old ones. It
+# runs a copy of clod whose base Dockerfile only writes a file, since rebuilding
+# the real one without the cache takes half a minute; that replaces the clod
+# image, which the next test to use it rebuilds from the layer cache.
 test_rebuild() {
   local t i before=() after=()
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
@@ -495,8 +528,8 @@ test_image_rm() {
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' gone > ~/.clod/images/gone/Dockerfile
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' top > ~/.clod/images/top/Dockerfile
   printf 'FROM clod\n' > ~/.clod/images/a-very-long-variant-name/Dockerfile
-  clod -i gone+top build
-  clod -i top build
+  clod -i gone+top image build
+  clod -i top image build
   clod __complete image rm '' | has -x gone.top
   if clod __complete image rm gone '' | grep -qx gone; then false; fi
   clod image | has '^  a-very-long-variant-name  -'
@@ -522,8 +555,8 @@ test_image_prune() {
   mkdir -p ~/.clod/images/keep ~/.clod/images/old
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' keep > ~/.clod/images/keep/Dockerfile
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' old > ~/.clod/images/old/Dockerfile
-  clod -i keep build
-  clod -i old+keep build
+  clod -i keep image build
+  clod -i old+keep image build
   clod image prune
   test "$(clod image prune)" = 'clod: no stale images'
   echo 'LABEL changed=1' >> ~/.clod/images/old/Dockerfile
@@ -602,17 +635,20 @@ test_completion() {
   test -z "$(PATH=$PWD/bin:$PATH clod __complete home rm vol:vhome '')"
   PATH=$PWD/bin:$PATH clod __complete workspace rm '' | has -x play
   PATH=$PWD/bin:$PATH clod __complete workspace rm vol : '' | has -x play
+  test "$(PATH=$PWD/bin:$PATH clod __complete workspace rm vo)" = vol:play
   test -z "$(PATH=$PWD/bin:$PATH clod __complete workspace rm vol:play '')"
   for sh in bash zsh; do
     [[ $sh == bash ]] || command -v "$sh" >/dev/null || continue
     PATH=$PWD/bin:$PATH "$repo/test/tab-complete.py" "$sh" 'clod -i go+su' 'clod --image=go+su' \
       'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
       'clod -w pro' 'clod --workspace=pro' 'clod claude pro' 'clod image sh' 'clod shared d' \
-      'clod home rm vol:vh' 'clod workspace rm pl' 'clod workspace rm vol:pl' > out
+      'clod home rm vol:vh' 'clod workspace rm pl' 'clod workspace rm vol:pl' \
+      'clod workspace rm vo' > out
     sed 's|proj/$|proj|' out | diff - <(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
       'clod --home=work' 'clod -H vol:vhome' 'clod --home=vol:vhome' 'clod --workspace=vol:play' \
       'clod -w proj' 'clod --workspace=proj' 'clod claude proj' 'clod image show' 'clod shared diff' \
-      'clod home rm vol:vhome' 'clod workspace rm play' 'clod workspace rm vol:play')
+      'clod home rm vol:vhome' 'clod workspace rm play' 'clod workspace rm vol:play' \
+      'clod workspace rm vol:play')
   done
 }
 
@@ -676,7 +712,7 @@ for t in "${selected[@]}"; do
 done
 if [[ -n $needs_docker ]]; then
   if [[ -z $CI && -z $yes ]]; then
-    echo "test/run.sh: the tests build, replace and prune clod image on the Docker they use, and" >&2
+    echo "test/run.sh: the tests build, replace and prune clod images on the Docker they use, and" >&2
     echo "mount its socket into containers. Run them on a CI runner or a throwaway VM, with --yes." >&2
     exit 1
   fi

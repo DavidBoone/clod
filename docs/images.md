@@ -117,10 +117,11 @@ again. `clod image prune` removes every image clod built that is stale, along
 with the untagged images builds left behind; an image whose variant you've
 deleted isn't stale, so it stays. Docker won't remove an image a container
 uses, including a stopped one, so `clod image` marks those `in use`, `prune`
-keeps them, and `rm` refuses them; `docker ps -a` lists the containers. `clod image` lists every image clod built,
-including those whose variant you've deleted, marked `(no Dockerfile)`. Removing an image that
-others are built on frees its space only once they're gone too; they rebuild
-on their next run.
+keeps them, and `rm` refuses them; `docker ps -a` lists the containers.
+`clod image` lists every image clod built, including those whose variant
+you've deleted, marked `(no Dockerfile)`. Removing an image that others are
+built on frees its space only once they're gone too; they rebuild on their
+next run.
 
 Docker's build cache isn't removed with the images. `docker system df` shows
 how much space it takes, and `docker builder prune` clears it, for everything

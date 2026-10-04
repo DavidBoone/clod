@@ -12,8 +12,8 @@ clod -H work                    # ~/.clod/homes/work, created on first use
 clod home                       # list the homes and which have logins
 ```
 
-A directory home is a folder under `~/.clod/homes`; deleting the folder
-deletes the home and its login.
+A directory home is a folder under `~/.clod/homes`, or the path `-H` names;
+deleting the folder deletes the home and its login.
 
 ### Volume homes
 

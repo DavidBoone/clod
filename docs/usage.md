@@ -21,7 +21,8 @@ clod --help          # all commands and options
 ```
 
 Commands that manage something are a noun and a verb: `clod image build`,
-`clod home rm`. The noun on its own lists them.
+`clod home rm`. The noun on its own lists them, except `shared`, which needs
+`new` or `diff`.
 
 A bare `clod` runs Claude Code, or whatever you've set as the default command.
 To pass it arguments without naming it, put them after `--`: `clod -- --resume`
