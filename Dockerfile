@@ -70,6 +70,10 @@ ENV PATH="$PATH:/home/claude/.local/bin"
 ENV NPM_CONFIG_PREFIX=/home/claude/.local
 ENV CLAUDE_CONFIG_DIR=/home/claude/.claude
 ENV CODEX_HOME=/home/claude/.codex
+# Docker leaves USER and TMPDIR unset, which scripts don't expect: $TMPDIR/x,
+# written on macOS where it's always set, would be /x. vim and less are the
+# editor and pager.
+ENV USER=claude TMPDIR=/tmp EDITOR=vim PAGER=less
 
 WORKDIR /workspace
 # tini is PID 1, so orphaned processes (browsers a test run leaves behind) are
