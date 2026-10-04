@@ -566,6 +566,12 @@ if [[ $(readlink "$HOME/.local/bin/clod") != "$repo/clod" || $(command -v clod) 
   exit 1
 fi
 
+# Reports that test $1 failed at line $2, from the test's own shell only.
+fail_report() {
+  [[ $BASHPID == "$test_shell" ]] || return 0
+  echo "$1 failed at line $2:$(sed -n "$2p" "$repo/test/run.sh")" >&2
+}
+
 # GitHub Actions folds each test's output into a group.
 github=${GITHUB_ACTIONS:-}
 failed=()
@@ -574,7 +580,12 @@ for t in "${selected[@]}"; do
   dir=$(mktemp -d "$work/$t.XXXX")
   (
     set -eEo pipefail
-    trap 'echo "$t failed at line $LINENO:$(sed -n "${LINENO}p" "$repo/test/run.sh")" >&2' ERR
+    # -E carries the trap into command substitutions and pipelines too, where a
+    # command may fail without failing the test, so only the test's own shell
+    # reports. The name is expanded now, since a test may have its own $t. The
+    # trap stays on one line: LINENO counts on through a multi-line one.
+    test_shell=$BASHPID
+    trap 'fail_report "'"$t"'" "$LINENO"' ERR
     cd "$dir"
     case $t in
       variant-*) test_variant "${t#variant-}" ;;
