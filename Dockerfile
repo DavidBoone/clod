@@ -1,7 +1,7 @@
 FROM debian:trixie
 
 # Generic base for running Claude Code and Codex, with everyday CLI tools.
-# Languages, compilers and browsers go in variants built FROM clod (see README). Layers are ordered rarely-changed
+# Languages, compilers and browsers go in variants built FROM clod (see docs/images.md). Layers are ordered rarely-changed
 # first. Apt lists are kept so variants can `apt-get install` without
 # re-running update.
 

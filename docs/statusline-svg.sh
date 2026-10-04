@@ -1,5 +1,5 @@
 #!/bin/bash
-# Renders the README's statusline picture: docs/statusline-svg.sh > docs/statusline.svg
+# Renders the statusline picture in the docs: docs/statusline-svg.sh > docs/statusline.svg
 # Runs shared/statusline.sh on sample input, with its state seeded so the idle
 # timer and rate-limit windows show realistic values, then converts the output.
 set -euo pipefail

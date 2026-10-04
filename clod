@@ -516,7 +516,7 @@ walk_image() {
 # Exits with advice when Docker is missing or its daemon isn't running.
 need_docker() {
   if ! command -v docker >/dev/null; then
-    echo "clod: docker isn't installed (see the README's quick start)" >&2
+    echo "clod: docker isn't installed (see docs/docker.md in clod's checkout)" >&2
     exit 1
   fi
   if ! docker version -f '{{.Server.Version}}' >/dev/null 2>&1; then

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Renders terminal text with 16-colour ANSI escapes (from stdin) as an SVG
-terminal panel (to stdout), for pictures in the README.
+terminal panel (to stdout), for pictures in the docs.
 
 Each line is drawn with textLength, so viewers fit it to the panel's width
 whatever monospace font they have; glyph widths vary between fonts."""
