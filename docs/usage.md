@@ -114,7 +114,9 @@ clod -P ''                   # none, even if the .envrc or config sets some
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
 what changed, one line per change. The next `clod` rebuilds the image if it
 changed; `clod build` builds it straight away instead, without starting a
-container.
+container. An update that changes the base image leaves every variant you've
+built stale; `clod prune` removes the stale images to free their space, and
+each builds again on its next run.
 
 An image is otherwise kept as built. To refresh its system packages, Node and
 whatever its variant downloads, rebuild it from scratch. When an image's files
@@ -124,8 +126,10 @@ as it is:
 ```bash
 clod update           # update clod
 clod build            # build the image now, if it changed
+clod build go rust    # build those images now, if they changed
 clod rebuild          # rebuild the image from scratch
 clod --skip-build     # run the image as built
+clod prune            # remove the stale images
 ```
 
 ## What lives where

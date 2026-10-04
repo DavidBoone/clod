@@ -21,11 +21,12 @@ clod default image go  # run it from now on
 clod images            # list the base, the bundled variants and yours, and which are stale
 clod images go+sudo    # how an image is built: the images it's FROM, and their Dockerfiles
 clod remove-image go   # remove the built image; the next clod -i go builds it again
+clod prune             # remove the stale images, which their next run rebuilds anyway
 ```
 
 The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
 the base image changes. To pick up a newer Go or Rust, rebuild it with
-`clod -i go rebuild`. Rebuilding the base makes every variant rebuild on its
+`clod rebuild go`. Rebuilding the base makes every variant rebuild on its
 next use.
 
 Variants combine with `+`: `clod -i browser+dotnet` builds `clod-browser`, then
@@ -110,9 +111,14 @@ already built locally.
 ## Removing images
 
 `clod remove-image NAME...` removes images clod built, named as for `-i`
-(`go`, `go+sudo`, `clod`). A variant's files stay, so its next run builds it
-again. `clod images` lists every image clod built, including those whose
-variant you've deleted, marked `(no Dockerfile)`. Removing an image that
+(`go`, `go+sudo`, `clod`); with no names, it removes the image `-i` or
+`CLOD_IMAGE` selects. A variant's files stay, so its next run builds it
+again. `clod prune` removes every image clod built that is stale, along with
+the untagged images builds left behind; an image whose variant you've deleted
+isn't stale, so it stays. Docker won't remove an image a container uses,
+including a stopped one, so `clod images` marks those `in use`, `prune` keeps
+them, and `remove-image` refuses them; `docker ps -a` lists the containers. `clod images` lists every image clod built,
+including those whose variant you've deleted, marked `(no Dockerfile)`. Removing an image that
 others are built on frees its space only once they're gone too; they rebuild
 on their next run.
 
