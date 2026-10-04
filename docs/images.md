@@ -16,17 +16,17 @@ compiler or browser on top. clod comes with these, in [`images/`](../images):
 | `sudo`    | passwordless `sudo`, for installing packages mid-session (gone when the container exits) |
 
 ```bash
-clod -i go             # run the go variant
-clod default image go  # run it from now on
-clod images            # list the base, the bundled variants and yours, and which are stale
-clod images go+sudo    # how an image is built: the images it's FROM, and their Dockerfiles
-clod remove-image go   # remove the built image; the next clod -i go builds it again
-clod prune             # remove the stale images, which their next run rebuilds anyway
+clod -i go               # run the go variant
+clod default image go    # run it from now on
+clod image               # list the base, the bundled variants and yours, and which are stale
+clod image show go+sudo  # how an image is built: the images it's FROM, and their Dockerfiles
+clod image rm go         # remove the built image; the next clod -i go builds it again
+clod image prune         # remove the stale images, which their next run rebuilds anyway
 ```
 
 The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
 the base image changes. To pick up a newer Go or Rust, rebuild it with
-`clod rebuild go`. Rebuilding the base makes every variant rebuild on its
+`clod image rebuild go`. Rebuilding the base makes every variant rebuild on its
 next use.
 
 Variants combine with `+`: `clod -i browser+dotnet` builds `clod-browser`, then
@@ -49,13 +49,13 @@ FROM $BASE
 
 Your own variants go in `~/.clod/images/<name>/`, a directory holding a
 `Dockerfile` built `FROM clod`, or `FROM` another variant. Built `FROM $BASE`,
-as above, it combines with the others. `clod new-image` creates one:
+as above, it combines with the others. `clod image new` creates one:
 
 ```bash
-clod new-image mine        # a starter Dockerfile, FROM $BASE
-clod new-image mine go     # a copy of the go variant
-clod new-image mine go+sudo  # a starter Dockerfile, FROM clod-go.sudo
-clod new-image go          # your own copy of the bundled go, which then takes its place
+clod image new mine          # a starter Dockerfile, FROM $BASE
+clod image new mine go       # a copy of the go variant
+clod image new mine go+sudo  # a starter Dockerfile, FROM clod-go.sudo
+clod image new go            # your own copy of the bundled go, which then takes its place
 ```
 
 For example:
@@ -110,17 +110,18 @@ already built locally.
 
 ## Removing images
 
-`clod remove-image NAME...` removes images clod built, named as for `-i`
+`clod image rm NAME...` removes images clod built, named as for `-i`
 (`go`, `go+sudo`, `clod`); with no names, it removes the image `-i` or
 `CLOD_IMAGE` selects. A variant's files stay, so its next run builds it
-again. `clod prune` removes every image clod built that is stale, along with
-the untagged images builds left behind; an image whose variant you've deleted
-isn't stale, so it stays. Docker won't remove an image a container uses,
-including a stopped one, so `clod images` marks those `in use`, `prune` keeps
-them, and `remove-image` refuses them; `docker ps -a` lists the containers. `clod images` lists every image clod built,
-including those whose variant you've deleted, marked `(no Dockerfile)`. Removing an image that
-others are built on frees its space only once they're gone too; they rebuild
-on their next run.
+again. `clod image prune` removes every image clod built that is stale, along
+with the untagged images builds left behind; an image whose variant you've
+deleted isn't stale, so it stays. Docker won't remove an image a container
+uses, including a stopped one, so `clod image` marks those `in use`, `prune`
+keeps them, and `rm` refuses them; `docker ps -a` lists the containers.
+`clod image` lists every image clod built, including those whose variant
+you've deleted, marked `(no Dockerfile)`. Removing an image that others are
+built on frees its space only once they're gone too; they rebuild on their
+next run.
 
 Docker's build cache isn't removed with the images. `docker system df` shows
 how much space it takes, and `docker builder prune` clears it, for everything

@@ -14,9 +14,15 @@ clod -w vol:play     # a workspace kept in a Docker volume
 clod -s              # an empty, throwaway /workspace (see A scratch workspace)
 clod env             # show the home, workspace, image, ports, .envrc and variables that would be used
 clod default         # show your defaults
+clod image           # list the images (see Image variants)
+clod home            # list the homes (see Homes)
+clod workspace       # list the volume workspaces
 clod --help          # all commands and options
 ```
 
+Commands that manage something are a noun and a verb: `clod image build`,
+`clod home rm`. The noun on its own lists them, except `shared`, which needs
+`new` or `diff`.
 
 A bare `clod` runs Claude Code, or whatever you've set as the default command.
 To pass it arguments without naming it, put them after `--`: `clod -- --resume`
@@ -45,8 +51,17 @@ It must exist.
 lives on Docker's own disk, not in a folder on your machine, and is kept
 between runs, for a repository cloned just for the agent, say. Docker creates it
 on first use, owned by the container's user. No `.envrc` is read, and clod runs
-from anywhere. To get files out, push them somewhere or copy them into the home;
-`docker volume rm clod-workspace-NAME` deletes it.
+from anywhere. To get files out, push them somewhere or copy them into the home.
+
+```bash
+clod workspace                  # list the volume workspaces, and which are in use
+clod workspace rm play          # delete clod-workspace-play, after asking
+clod --force workspace rm play  # delete it without asking
+```
+
+`clod workspace rm` takes `NAME` or `vol:NAME`. In a terminal it lists what
+it will delete and asks first; without one, it needs `--force`. Docker won't
+remove a volume a container uses.
 
 `-w` is an option only, with no setting in the environment, an `.envrc` or your
 defaults.
@@ -133,10 +148,10 @@ clod -P ''                   # none, even if the .envrc or config sets some
 
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
 what changed, one line per change. The next `clod` rebuilds the image if it
-changed; `clod build` builds it straight away instead, without starting a
-container. An update that changes the base image leaves every variant you've
-built stale; `clod prune` removes the stale images to free their space, and
-each builds again on its next run.
+changed; `clod image build` builds it straight away instead, without starting
+a container. An update that changes the base image leaves every variant you've
+built stale; `clod image prune` removes the stale images to free their space,
+and each builds again on its next run.
 
 An image is otherwise kept as built. To refresh its system packages, Node and
 whatever its variant downloads, rebuild it from scratch. When an image's files
@@ -144,12 +159,12 @@ have changed but you'd rather not wait for the build, `--skip-build` runs it
 as it is:
 
 ```bash
-clod update           # update clod
-clod build            # build the image now, if it changed
-clod build go rust    # build those images now, if they changed
-clod rebuild          # rebuild the image from scratch
-clod --skip-build     # run the image as built
-clod prune            # remove the stale images
+clod update                 # update clod
+clod image build            # build the image now, if it changed
+clod image build go rust    # build those images now, if they changed
+clod image rebuild          # rebuild the image from scratch
+clod --skip-build           # run the image as built
+clod image prune            # remove the stale images
 ```
 
 ## What lives where
