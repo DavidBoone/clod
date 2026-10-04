@@ -620,13 +620,16 @@ setup_workspace() {
     workspace=$w workspace_label=$w workspace_src=clod-workspace-${w#vol:}
     return 0
   fi
-  # Docker would create a missing directory, as root on Linux.
-  if [[ ! -d $w ]]; then
-    echo "clod: no directory $w to mount as /workspace" >&2
-    exit 1
-  fi
   abspath "$w"
   workspace=$REPLY workspace_label=$(tildify "$REPLY") workspace_src=$REPLY
+}
+
+# Exits unless the workspace directory exists: Docker would create a missing
+# one, as root on Linux.
+check_workspace() {
+  [[ -z $workspace || $workspace == vol:* || -d $workspace ]] && return 0
+  echo "clod: no directory $workspace_label to mount as /workspace" >&2
+  exit 1
 }
 
 # Sets envrc to the envrc in use (none with --scratch or a volume workspace)
@@ -1520,11 +1523,13 @@ setup_home
 setup_image
 setup_container
 case $command in
-  env|images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
+  env) check_workspace; cmd_env; exit 0 ;;
+  images|homes|new-image|new-shared) "cmd_${command//-/_}" "$@"; exit 0 ;;
   build|rebuild) need_docker; cmd_build "$@"; exit 0 ;;
   remove-image) need_docker; cmd_remove_image "$@"; exit 0 ;;
   prune) need_docker; cmd_prune; exit 0 ;;
 esac
+check_workspace
 refuse_secrets
 need_docker
 cmd_run "$@"

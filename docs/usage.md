@@ -12,7 +12,7 @@ clod -H work         # the "work" home (see Homes)
 clod -w ~/src/app    # that directory as /workspace (see Another workspace)
 clod -w vol:play     # a workspace kept in a Docker volume
 clod -s              # an empty, throwaway /workspace (see A scratch workspace)
-clod env             # show the home, image, login, ports, .envrc and variables that would be used
+clod env             # show the home, workspace, image, ports, .envrc and variables that would be used
 clod default         # show your defaults
 clod --help          # all commands and options
 ```
@@ -49,7 +49,7 @@ from anywhere. To get files out, push them somewhere or copy them into the home;
 `docker volume rm clod-workspace-NAME` deletes it.
 
 `-w` is an option only, with no setting in the environment, an `.envrc` or your
-defaults, since the workspace is the project.
+defaults.
 
 ## A scratch workspace
 
@@ -63,8 +63,8 @@ bind-mount a scratch workspace, which has no path on the Docker host.
 
 Claude Code keys its history and memory by the workspace path, which is
 `/workspace` in every clod run, so a scratch session shares them with the
-home's other sessions: `clod -s claude --resume` lists them all. The same goes
-for any workspace. `-s` doesn't combine with `-w`.
+home's other sessions: `clod -s claude --resume` lists them all. `-s` doesn't
+combine with `-w`.
 
 ## Install and tab completion
 

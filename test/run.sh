@@ -133,7 +133,9 @@ test_workspace() {
   mkdir proj
   echo from-proj > proj/file
   echo 'export FOO=proj' > proj/.envrc
+  echo 'export FOO=here' > .envrc
   direnv allow proj
+  direnv allow
   clod -w proj env | has "^workspace: *$here/proj\$"
   clod -w proj env | has '^envrc: .*/proj/.envrc$'
   clod -w proj bash -c '
@@ -143,10 +145,14 @@ test_workspace() {
     test "$CLOD_WORKSPACE" = "'"$here/proj"'"
   '
   exits 1 clod -w nope bash -c true
+  exits 1 clod -w nope env
+  clod -w nope homes >/dev/null
   exits 2 clod -s -w proj bash -c true
-  exits 1 clod -w ~ bash -c true
+  exits 1 clod -w ~ bash -c true 2>&1 | has 'refusing to mount'
+  mkdir -p ~/.clod/homes/x
+  exits 1 clod -w ~/.clod/homes/x bash -c true 2>&1 | has 'refusing to mount'
   cd ~
-  clod -w "$here/proj" bash -c 'test "$(cat /workspace/file)" = from-proj'
+  clod -w "$here/proj" bash -c 'test "$(cat /workspace/file)" = from-proj && test "$FOO" = proj'
   # a volume workspace is claude's, kept between runs, and reads no .envrc
   cd "$here/proj"
   docker volume rm -f clod-workspace-wtest >/dev/null
@@ -220,6 +226,8 @@ test_docker_socket() {
     test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
   ' 2>&1 | tee out
   if grep -q 'no docker CLI' out; then false; fi
+  mkdir sub
+  clod -i docker --docker -w sub bash -c 'test "$CLOD_HOST_WORKSPACE" = "'"$PWD/sub"'"'
   # a volume workspace has no host path; the agent's containers mount it by name
   docker volume rm -f clod-workspace-dtest >/dev/null
   clod -i docker --docker -w vol:dtest bash -c '
