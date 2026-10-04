@@ -31,8 +31,8 @@ cd ~/code/some-project
 clod
 ```
 
-The first run builds the image, which takes a few minutes, and installs Claude
-Code into the container's home. Claude Code then asks you to `/login`: open the
+The first run asks to create your home, `~/.clod/homes/default`, builds the
+image, which takes a few minutes, and installs Claude Code into the home. Claude Code then asks you to `/login`: open the
 printed URL in your browser and paste the code back. Both happen once; every
 `clod` after that starts in seconds.
 

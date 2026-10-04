@@ -22,7 +22,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude codex statusline
-  port docker-socket envrc volume-home home-copy volume-workspace default shared command-line
+  port docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line
   multi-stage combine rebuild image-rm image-prune completion'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -119,6 +119,7 @@ EOF
 test_mount_paths() {
   mkdir 'a,"b'
   echo hello > 'a,"b/from-host'
+  clod home new './h,"1' >/dev/null
   clod -H './h,"1' -w 'a,"b' bash -c '
     set -e
     test "$(cat /workspace/from-host)" = hello
@@ -274,11 +275,13 @@ test_envrc() {
   clod env | has '^ports: .*5000'
   if CLOD_PORTS='' clod env | has '^ports:'; then false; fi
   if clod -P '' env | has '^ports:'; then false; fi
+  clod home new from-envrc >/dev/null
   clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc'
 }
 
 test_volume_home() {
   docker volume rm -f clod-home-vtest >/dev/null
+  clod home new vol:vtest >/dev/null
   clod -H vol:vtest bash -c '
     set -e
     test "$CLOD_HOME" = vol:vtest
@@ -383,6 +386,33 @@ test_home_copy() {
   docker volume inspect clod-home-cp1 >/dev/null
   if docker volume inspect clod-home-x >/dev/null 2>&1; then false; fi
   clod --force home rm vol:cp1 vol:cp2 >/dev/null
+}
+
+# A run asks before creating a home that doesn't exist, and without a terminal
+# fails; clod home new creates one.
+test_home_new() {
+  docker volume rm -f clod-home-ntest >/dev/null
+  exits 1 clod -H fresh bash -c true < /dev/null 2>&1 |
+    has -x "clod: there's no home fresh; clod home new fresh creates it"
+  test ! -e ~/.clod/homes/fresh
+  exits 1 clod -H vol:ntest bash -c true < /dev/null 2>&1 | has 'no home vol:ntest'
+  if docker volume inspect clod-home-ntest >/dev/null 2>&1; then false; fi
+  # in a terminal it asks
+  printf 'n\n' | script -qec 'clod -H fresh bash -c true' /dev/null > out || true
+  has 'no home fresh; create it' < out
+  test ! -e ~/.clod/homes/fresh
+  printf 'y\n' | script -qec 'clod -H fresh bash -c true' /dev/null > out
+  test -d ~/.clod/homes/fresh
+  clod -H fresh bash -c true
+  test "$(clod home new made)" = 'created home made'
+  clod -H made bash -c 'test "$(stat -c %U ~)" = claude'
+  exits 1 clod home new made 2>&1 | has 'made already exists'
+  test "$(clod home new vol:ntest)" = 'created home vol:ntest'
+  clod -H vol:ntest bash -c 'test "$(stat -c %U ~)" = claude'
+  exits 1 clod home new vol:ntest 2>&1 | has 'already a home vol:ntest'
+  exits 2 clod home new
+  exits 2 clod home new a b
+  clod --force home rm vol:ntest >/dev/null
 }
 
 test_volume_workspace() {
@@ -683,7 +713,9 @@ test_completion() {
   if clod __complete '' | grep -qxE 'build|rebuild'; then false; fi
   test "$(clod __complete image '')" = "$(printf 'show\nnew\nbuild\nrebuild\nrm\nprune')"
   test "$(clod __complete image re)" = rebuild
-  test "$(clod __complete home '')" = "$(printf 'cp\nmv\nrm')"
+  test "$(clod __complete home '')" = "$(printf 'new\ncp\nmv\nrm')"
+  test -z "$(clod __complete home new '')"
+  if clod __complete home new ./x; then false; fi
   test "$(clod __complete workspace '')" = rm
   test "$(clod __complete shared '')" = "$(printf 'new\ndiff')"
   test -z "$(clod __complete shared new '')"
@@ -833,6 +865,8 @@ export HOME=$work/home
 mkdir -p "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$PATH"
 while IFS= read -r v; do unset "$v"; done < <(compgen -v CLOD_)
+# The default home, which a run without a terminal won't create.
+mkdir -p "$HOME/.clod/homes/default"
 "$repo/clod" install >/dev/null
 if [[ $(readlink "$HOME/.local/bin/clod") != "$repo/clod" || $(command -v clod) != "$HOME/.local/bin/clod" ]]; then
   echo "test/run.sh: clod install didn't link $HOME/.local/bin/clod to $repo/clod" >&2

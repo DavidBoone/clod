@@ -8,11 +8,15 @@ one home per client or context to keep those apart: `/login` once in each, and
 again when the login expires (about monthly).
 
 ```bash
-clod -H work                    # ~/.clod/homes/work, created on first use
+clod -H work                    # use ~/.clod/homes/work
 clod home                       # list the homes and which have logins
+clod home new work              # create a home without running anything
 ```
 
 A directory home is a folder under `~/.clod/homes`, or the path `-H` names.
+A run whose home doesn't exist asks, in a terminal, before creating it, so a
+mistyped name doesn't start an empty home; without a terminal it fails, and
+`clod home new` creates the home first.
 
 ### Volume homes
 
@@ -20,8 +24,8 @@ A directory home is a folder under `~/.clod/homes`, or the path `-H` names.
 of a directory on your machine. The volume lives on Docker's own disk (on
 macOS, inside the Colima or Docker Desktop VM), so it avoids the shared-folder
 file system: installs and caches in the home are faster, and `chown` and
-`chmod` work as on any Linux disk. Docker creates the volume on first use,
-starting it with the image's `/home/claude`.
+`chmod` work as on any Linux disk. A new volume home starts as a copy of the
+image's `/home/claude`.
 
 Its files aren't visible from the host; `clod -H vol:NAME bash` gets you a
 shell in it. `clod home` lists volume homes but shows `?` for their logins.

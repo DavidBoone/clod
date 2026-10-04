@@ -108,7 +108,7 @@ alias_commands='build rebuild'
 noun_verbs() {
   case $1 in
     image) REPLY='show new build rebuild rm prune' ;;
-    home) REPLY='cp mv rm' ;;
+    home) REPLY='new cp mv rm' ;;
     workspace) REPLY='rm' ;;
     shared) REPLY='new diff' ;;
   esac
@@ -173,6 +173,9 @@ Commands:
                          run would rebuild anyway
 
   home                   list the homes and their logins
+  home new HOME          create a home: a name, a path or vol:NAME. A run
+                         asks before creating a home that doesn't exist, and
+                         without a terminal fails
   home cp SRC DEST       copy home SRC to a new home DEST: a name, a path or
                          vol:NAME, so a directory home can become a volume one
                          or the other way round
@@ -648,6 +651,7 @@ parse_args() {
     shared) usage_error "shared takes a command: new or diff" ;;
     'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
+    'home new') (( $# == 1 )) || usage_error "home new takes one home: a name, a path or vol:NAME" ;;
     'home cp'|'home mv') (( $# == 2 )) || usage_error "home $verb takes a SRC and a DEST home" ;;
     'home rm') (( $# )) || usage_error "home rm takes one or more NAME or vol:NAME" ;;
     'workspace rm') (( $# )) || usage_error "workspace rm takes one or more NAME or vol:NAME" ;;
@@ -1037,6 +1041,8 @@ cmd_complete() {
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
       home:rm) offer $homes $(volume_names clod-home- | sed 's/^/vol:/') ;;
+      # A new home: nothing completes but a path.
+      home:new) [[ $cur == */* ]] && return 1 ;;
       # The source is a home, and the destination a new one, so nothing
       # completes there but a path.
       home:cp|home:mv)
@@ -1375,7 +1381,7 @@ cmd_home() {
   done < <(docker volume ls -q --filter name=clod-home- 2>/dev/null)
   [[ -n $listed ]] || home_row "$home" "$home_label"
   echo
-  echo "* used here; clod -H NAME uses another, and a new name creates it"
+  echo "* used here; clod -H NAME uses another, and clod home new NAME creates one"
   echo "  (vol:NAME, a Docker volume; ? means its logins can't be checked from here)"
 }
 
@@ -1460,6 +1466,7 @@ home_in_use() {
 check_home_arg() {
   local h label did
   case $verb in
+    new) did=created ;;
     cp) did=copied ;;
     mv) did=moved ;;
     *) did=removed ;;
@@ -1490,6 +1497,21 @@ check_home_arg() {
     exit 1
   fi
   REPLY=$h
+}
+
+# Creates the home $1: a name, a path or vol:NAME.
+cmd_home_new() {
+  local h
+  realdir "$HOME"; host_home=$REPLY
+  realdir "$clod_dir"; clod_real=$REPLY
+  check_home_arg "$1" dest
+  h=$REPLY
+  if [[ $h == vol:* ]]; then
+    docker volume create "clod-home-${h#vol:}" >/dev/null || exit 1
+  else
+    mkdir -p "$h" || exit 1
+  fi
+  echo "created home $1"
 }
 
 # Deletes the homes $@, named NAME (in ~/.clod/homes) or vol:NAME. Deletes
@@ -1818,12 +1840,33 @@ mount_arg() {
   REPLY="type=$type,\"src=${1//\"/\"\"}\",dst=$2$3"
 }
 
+# Exits unless the home exists or, asked in a terminal, you say to create it, so
+# a mistyped name doesn't start an empty home. Docker creates a volume home on
+# the run, copying the image's /home/claude into it.
+need_home() {
+  local answer
+  if [[ $home == vol:* ]]; then
+    docker volume inspect "$home_src" >/dev/null 2>&1 && return 0
+  else
+    [[ -d $home ]] && return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "clod: there's no home $home_label; clod home new $home_label creates it" >&2
+    exit 1
+  fi
+  read -r -p "clod: there's no home $home_label; create it? [y/N] " answer
+  case $answer in
+    y|Y|yes|YES) ;;
+    *) echo "clod: no home created" >&2; exit 1 ;;
+  esac
+  [[ $home == vol:* ]] || mkdir -p "$home"
+}
+
 # Runs command $command with arguments $@ in the container, building its image
 # first if needed.
 cmd_run() {
   local run_args variants endpoint sock mount probe sock_stat
-  # Docker creates a missing volume, copying the image's /home/claude into it.
-  [[ $home == vol:* ]] || mkdir -p "$home"
+  need_home
 
   if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
     echo "clod: running $tag as built" >&2
