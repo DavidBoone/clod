@@ -20,6 +20,7 @@ clod -i go             # run the go variant
 clod default image go  # run it from now on
 clod images            # list the base, the bundled variants and yours, and which are stale
 clod images go+sudo    # how an image is built: the images it's FROM, and their Dockerfiles
+clod remove-image go   # remove the built image; the next clod -i go builds it again
 ```
 
 The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
@@ -105,3 +106,16 @@ USER claude
 
 Images are never pulled at launch, so `-i` must name a variant or an image
 already built locally.
+
+## Removing images
+
+`clod remove-image NAME...` removes images clod built, named as for `-i`
+(`go`, `go+sudo`, `clod`). A variant's files stay, so its next run builds it
+again. `clod images` lists every image clod built, including those whose
+variant you've deleted, marked `(no Dockerfile)`. Removing an image that
+others are built on frees its space only once they're gone too; they rebuild
+on their next run.
+
+Docker's build cache isn't removed with the images. `docker system df` shows
+how much space it takes, and `docker builder prune` clears it, for everything
+built on that Docker, not only clod's images.
