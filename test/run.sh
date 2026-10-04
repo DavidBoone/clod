@@ -493,8 +493,8 @@ test_prune() {
   test "$(clod prune)" = 'removed clod-keep'
 }
 
-# Tab completion: clod __complete's candidates, and the shim it prints, in bash
-# and (if installed) zsh. Needs no Docker.
+# Tab completion: clod __complete's candidates, and the shim it prints, typed
+# into bash and (if installed) zsh. Needs no Docker.
 test_completion() {
   mkdir -p ~/.clod/homes/work ~/.clod/images/plain
   printf 'FROM clod\n' > ~/.clod/images/plain/Dockerfile
@@ -524,17 +524,22 @@ test_completion() {
   test "$(clod __complete --wor)" = --workspace
   test -z "$(clod __complete -P '')"
   clod __complete -P ''
-  printf '%s\n' 'eval "$(clod completion)"' 'COMP_WORDS=(clod -i go+su); COMP_CWORD=2; _clod' \
-    'echo "${COMPREPLY[*]}"' > shim-test
-  test "$(bash shim-test)" = go+sudo
-  if command -v zsh >/dev/null; then
-    # outside a completion widget, compadd and _files stand in as printers
-    printf '%s\n' 'eval "$(clod completion)"' \
-      'compadd() { print -r -- ${(P)2}; }; _files() { print files; }' \
-      'words=(clod -i go+su); CURRENT=3; _clod' \
-      "words=(clod claude ''); CURRENT=3; _clod" > shim-test
-    test "$(zsh -f shim-test 2>/dev/null)" = "$(printf 'go+sudo\nfiles')"
-  fi
+  # The shim in real shells, which split words differently: bash at = and :,
+  # zsh not at all. A stand-in docker lists the volumes. Directories complete
+  # with a / in bash only.
+  mkdir proj bin
+  printf '%s\n' '#!/bin/bash' \
+    '[[ "$1 $2" == "volume ls" ]] && printf "%s\n" clod-home-vhome clod-workspace-play' > bin/docker
+  chmod +x bin/docker
+  for sh in bash zsh; do
+    [[ $sh == bash ]] || command -v "$sh" >/dev/null || continue
+    PATH=$PWD/bin:$PATH "$repo/test/tab-complete.py" "$sh" 'clod -i go+su' 'clod --image=go+su' \
+      'clod --home=wo' 'clod -H vol:vh' 'clod --home=vol:vh' 'clod --workspace=vol:pl' \
+      'clod -w pro' 'clod --workspace=pro' 'clod claude pro' > out
+    test "$(sed 's|proj/$|proj|' out)" = "$(printf '%s\n' 'clod -i go+sudo' 'clod --image=go+sudo' \
+      'clod --home=work' 'clod -H vol:vhome' 'clod --home=vol:vhome' 'clod --workspace=vol:play' \
+      'clod -w proj' 'clod --workspace=proj' 'clod claude proj')"
+  done
 }
 
 # Homebrew's docker on macOS has no buildx, so clod's builds there use the

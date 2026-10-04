@@ -803,7 +803,9 @@ if [ -n "${ZSH_VERSION-}" ]; then
   (( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }
   _clod() {
     local -a reply
-    reply=(${(f)"$(clod __complete "${(@)words[2,CURRENT]}")"}) || { _files; return; }
+    # A file name after = (--workspace=DIR) is completed from the =.
+    reply=(${(f)"$(clod __complete "${(@)words[2,CURRENT]}")"}) ||
+      { [[ $PREFIX == -*=* ]] && compset -P '*='; _files; return; }
     compadd -a reply
   }
   compdef _clod clod
@@ -823,12 +825,26 @@ fi
 SHIM
 }
 
-# Prints the words in $@ that start with the word being completed, $cur.
+# Prints the words in $@ that start with the word being completed, $cur, as
+# the shell completes them: after $pre (an option's --NAME=), less $strip (what
+# bash, which splits words at = and :, has before its own current word).
 offer() {
-  local word
+  local word out
   for word in "$@"; do
-    [[ $word == "$cur"* ]] && printf '%s\n' "$word"
+    [[ $word == "$cur"* ]] || continue
+    out=$pre$word
+    printf '%s\n' "${out#"$strip"}"
   done
+  return 0
+}
+
+# Prints the names of the Docker volumes named $1NAME, as NAME, if Docker is
+# up; the name filter matches anywhere in a name.
+volume_names() {
+  local v
+  while IFS= read -r v; do
+    [[ $v == "$1"* ]] && printf '%s\n' "${v#"$1"}"
+  done < <(docker volume ls -q --filter "name=$1" 2>/dev/null)
   return 0
 }
 
@@ -856,10 +872,26 @@ offer_images() {
 # the last word, given the words before it, one per line, or exits 1 where the
 # word is a file name: a command's arguments, a home's path or install's
 # directory. It reads only directories, never the envrc, and asks Docker only
-# for remove-image's images, so it's quick.
+# for volume homes and workspaces and remove-image's images, so it's quick.
 cmd_complete() {
-  local cur=${!#} words=("$@") cmd='' cmd_args=() prev='' word i s keys='' homes='' variants
+  local raw=("$@") words=() cur last pre='' strip='' glue='' cmd='' cmd_args=() prev=''
+  local word i s keys='' homes='' variants
+  # bash splits a word at = and : (--home=vol:NAME, -P 3000:5173) into pieces,
+  # with each = and : a piece of its own; this joins them back up.
+  for word in ${raw[@]+"${raw[@]}"}; do
+    if [[ -n $glue || $word == [=:] ]] && (( ${#words[@]} )); then
+      words[${#words[@]}-1]+=$word
+    else
+      words+=("$word")
+    fi
+    if [[ $word == [=:] ]]; then glue=1; else glue=''; fi
+  done
+  (( ${#words[@]} )) || words=('')
+  cur=${words[${#words[@]}-1]}
   unset 'words[${#words[@]}-1]'
+  last=${raw[${#raw[@]}-1]}
+  [[ $last == [=:] ]] && last=''
+  strip=${cur%"$last"}
   for (( i = 0; i < ${#words[@]}; i++ )); do
     word=${words[i]}
     if [[ -n $cmd ]]; then
@@ -868,22 +900,26 @@ cmd_complete() {
     fi
     case $word in
       --) return 1 ;;
-      -i|--image|-H|--home|-w|--workspace|-P|--port)
-        (( i++ ))
-        # bash splits a word at colons (vol:NAME, 3000:5173) into word, :, word.
-        while [[ ${words[i+1]} == : ]]; do (( i += 2 )); done
-        ;;
+      -i|--image|-H|--home|-w|--workspace|-P|--port) (( i++ )) ;;
       -*) ;;
       *) cmd=$word ;;
     esac
   done
   (( ${#words[@]} )) && prev=${words[${#words[@]}-1]}
+  # An option's value in the same word: --home=NAME.
+  if [[ -z $cmd && $cur == --*=* ]]; then
+    prev=${cur%%=*} pre=${cur%%=*}= cur=${cur#*=}
+  fi
   variants=$(variant_names)
-  # A home is a name or, with a slash, a path, which the shell completes.
+  # A home is a name, vol:NAME or, with a slash, a path, which the shell
+  # completes.
   if [[ $cur != */* ]]; then
     for word in "$clod_dir"/homes/*/; do
       [[ -d $word ]] && word=${word%/} && homes+=" ${word##*/}"
     done
+    if [[ $prev == -H || $prev == --home || ${cmd_args[0]} == home ]]; then
+      while IFS= read -r word; do homes+=" vol:$word"; done < <(volume_names clod-home-)
+    fi
   fi
   for s in $settings; do keys+=" ${s%%:*}"; done
   # shellcheck disable=SC2086 # the lists are words without spaces or globs
@@ -891,7 +927,12 @@ cmd_complete() {
     case $prev in
       -i|--image) offer_images ;;
       -H|--home) [[ $cur == */* ]] && return 1; offer $homes ;;
-      -w|--workspace) return 1 ;;
+      # A workspace is a path, which the shell completes, or vol:NAME.
+      -w|--workspace)
+        [[ $cur == vol:* ]] || return 1
+        # shellcheck disable=SC2046 # volume names are words
+        offer $(volume_names clod-workspace- | sed 's/^/vol:/')
+        ;;
       -P|--port) ;;
       *) if [[ $cur == -* ]]; then offer $options; else offer $commands; fi ;;
     esac
