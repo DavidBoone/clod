@@ -25,7 +25,8 @@
 #
 # The envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
-# defaults for both.
+# defaults for both. A setting set empty, by an option or the shell, still
+# overrides them.
 #
 # The clod image is built from this script's directory, and a variant from its
 # directory, whenever their files (or, for a variant, an image it is FROM, in
@@ -298,11 +299,12 @@ find_setting() {
 }
 
 # Sets the launcher setting that NAME=value line $1 names, unless it is set
-# already; fails if $1 isn't a launcher setting.
+# already, even to nothing (CLOD_PORTS= publishes no ports, overriding the envrc
+# and config); fails if $1 isn't a launcher setting.
 default_setting() {
   [[ $1 == CLOD_*=* ]] || return 1
   find_setting "${1%%=*}" || return 1
-  [[ -n ${!setting_var} ]] || printf -v "$setting_var" '%s' "${1#*=}"
+  [[ -n ${!setting_var+set} ]] || printf -v "$setting_var" '%s' "${1#*=}"
 }
 
 # Resolves a CLOD_HOME-style value ($2, named $1 in errors) into $REPLY.
@@ -547,25 +549,25 @@ holds_secrets() {
 # Reads the command line into scratch, force, skip_build, docker_socket,
 # command (empty for the default command) and args, the command's arguments.
 # Options set the launcher settings, winning over the environment, the envrc and
-# ~/.clod/config.
+# ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
-  local opt_image='' opt_home='' opt_creds='' opt_ports=() dashdash=''
+  local opt_ports=() dashdash=''
   scratch='' force='' skip_build='' docker_socket='' command=''
   while (( $# )); do
     case $1 in
       -i|--image|-H|--home|--creds|-P|--port)
         [[ $# -ge 2 ]] || usage_error "$1 needs a value"
         case $1 in
-          -i|--image) opt_image=$2 ;;
-          -H|--home) opt_home=$2 ;;
-          --creds) opt_creds=$2 ;;
+          -i|--image) CLOD_IMAGE=$2 ;;
+          -H|--home) CLOD_HOME=$2 ;;
+          --creds) CLOD_CREDS=$2 ;;
           -P|--port) opt_ports+=("$2") ;;
         esac
         shift 2
         ;;
-      --image=*) opt_image=${1#*=}; shift ;;
-      --home=*) opt_home=${1#*=}; shift ;;
-      --creds=*) opt_creds=${1#*=}; shift ;;
+      --image=*) CLOD_IMAGE=${1#*=}; shift ;;
+      --home=*) CLOD_HOME=${1#*=}; shift ;;
+      --creds=*) CLOD_CREDS=${1#*=}; shift ;;
       --port=*) opt_ports+=("${1#*=}"); shift ;;
       -s|--scratch) scratch=1; shift ;;
       -f|--force) force=1; shift ;;
@@ -596,9 +598,6 @@ parse_args() {
   [[ -n $scratch && -n $docker_socket ]] &&
     usage_error "--scratch and --docker don't combine: a scratch workspace has no host path for sibling containers"
   args=("$@")
-  [[ -n $opt_image ]] && CLOD_IMAGE=$opt_image
-  [[ -n $opt_home ]] && CLOD_HOME=$opt_home
-  [[ -n $opt_creds ]] && CLOD_CREDS=$opt_creds
   (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
   return 0
 }

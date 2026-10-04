@@ -106,6 +106,7 @@ your machine's localhost, and the server must listen on all interfaces
 clod -P 5173                 # localhost:5173 -> port 5173 in the container
 clod -P 3000:5173            # localhost:3000 -> port 5173 in the container
 clod -P 5173 -P 8080         # several
+clod -P ''                   # none, even if the envrc or config sets some
 ```
 
 ## Updating and rebuilding

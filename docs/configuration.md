@@ -23,7 +23,9 @@ Each option has a matching setting, which can come from your shell
 environment, per project from an envrc (see [Per-project
 environment](#per-project-environment)), or as your defaults from
 `~/.clod/config` (see [Your defaults](#your-defaults)). An option wins over
-the shell, the shell over the envrc, and the envrc over the config file:
+the shell, the shell over the envrc, and the envrc over the config file. A
+setting given empty still wins and means its default, so `clod -P ''` or
+`CLOD_PORTS='' clod` publishes no ports even when the envrc lists some:
 
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
