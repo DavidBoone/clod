@@ -827,8 +827,8 @@ offer_images() {
 # `clod __complete WORDS...`, which the shim calls: prints the candidates for
 # the last word, given the words before it, one per line, or exits 1 where the
 # word is a file name: a command's arguments, a home's path or install's
-# directory. It reads only directories, never the envrc or Docker, so it's
-# quick.
+# directory. It reads only directories, never the envrc, and asks Docker only
+# for remove-image's images, so it's quick.
 cmd_complete() {
   local cur=${!#} words=("$@") cmd='' cmd_args=() prev='' word i s keys='' homes='' variants
   unset 'words[${#words[@]}-1]'
@@ -881,7 +881,12 @@ cmd_complete() {
   elif [[ $cmd == images && ${#cmd_args[@]} == 0 ]]; then
     offer_images
   elif [[ $cmd == remove-image ]]; then
-    offer_images
+    # The images clod built, named as clod images lists them, less those named
+    # already.
+    while IFS= read -r word; do
+      is_one_of "$word" "${cmd_args[*]}" || offer "$word"
+    done < <(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
+      sed -n 's/^clod-//p; /^clod$/p' | sort -u)
   elif [[ $cmd == new-image && ${#cmd_args[@]} == 1 ]]; then
     offer_images variants
   fi

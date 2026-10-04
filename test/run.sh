@@ -367,6 +367,8 @@ test_remove_image() {
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' top > ~/.clod/images/top/Dockerfile
   printf 'FROM clod\n' > ~/.clod/images/a-very-long-variant-name/Dockerfile
   clod -i gone+top build
+  clod __complete remove-image '' | has -x gone.top
+  if clod __complete remove-image gone '' | grep -qx gone; then false; fi
   clod images | has '^  a-very-long-variant-name  -'
   exits 2 clod remove-image
   exits 1 clod remove-image no-such
@@ -401,7 +403,6 @@ test_completion() {
   clod __complete -H vol : work '' | has -x claude
   clod __complete -P 3000 : 5173 '' | has -x claude
   test "$(clod __complete default co)" = command
-  clod __complete remove-image go '' | has -x plain
   clod __complete default command '' | has -x codex
   if clod __complete new-image mine '' | grep -qx clod; then false; fi
   # exit status 1: the word is a file name, which the shell completes
