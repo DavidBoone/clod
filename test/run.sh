@@ -348,9 +348,9 @@ test_combine() {
 }
 
 # rebuild replaces every image in the chain and prunes the old ones. It runs a
-# copy of clod whose base Dockerfile only writes a file, since rebuilding the real
-# one without the cache takes half a minute; that replaces the clod image, which
-# the next test to use it rebuilds from the layer cache.
+# copy of clod whose base Dockerfile only writes a file, since rebuilding the
+# real one without the cache takes half a minute; that replaces the clod image,
+# which the next test to use it rebuilds from the layer cache.
 test_rebuild() {
   local t i before=() after=()
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
