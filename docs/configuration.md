@@ -9,8 +9,11 @@ again when the login expires (about monthly).
 
 ```bash
 clod -H work                    # ~/.clod/homes/work, created on first use
-clod homes                      # list the homes and which have logins
+clod home                       # list the homes and which have logins
 ```
+
+A directory home is a folder under `~/.clod/homes`; deleting the folder
+deletes the home and its login.
 
 ### Volume homes
 
@@ -22,9 +25,17 @@ file system: installs and caches in the home are faster, and `chown` and
 starting it with the image's `/home/claude`.
 
 Its files aren't visible from the host; `clod -H vol:NAME bash` gets you a
-shell in it. `clod homes` lists volume homes but shows `?` for their logins.
-`docker volume rm clod-home-NAME` deletes one, as do `colima delete` and
-`docker system prune --volumes`.
+shell in it. `clod home` lists volume homes but shows `?` for their logins.
+
+```bash
+clod home rm vol:work           # delete clod-home-work, login included, after asking
+clod --force home rm vol:work   # delete it without asking
+```
+
+In a terminal, `clod home rm` lists what it will delete and asks first;
+without one, it needs `--force`. It deletes only volume homes, and Docker
+won't remove one a container uses. `colima delete` and
+`docker system prune --volumes` delete volume homes too.
 
 ## Settings
 
@@ -39,7 +50,7 @@ A setting given empty still wins and means its default, so `clod -P ''` or
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
 | `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory; `vol:NAME` is the Docker volume `clod-home-NAME` (see [Volume homes](#volume-homes)). |
-| `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod images` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
+| `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod image` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 

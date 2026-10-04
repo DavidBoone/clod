@@ -13,15 +13,16 @@ this repo's [`shared/`](../shared) there, which updates with `git pull`:
 To customise them, make your own copy and edit that:
 
 ```bash
-clod new-shared       # copies the starter to ~/.clod/shared
+clod shared new       # copies the starter to ~/.clod/shared
+clod shared diff      # shows how yours differs from the starter
 ```
 
 From then on clod mounts `~/.clod/shared` in place of the starter, so keep
 everything you want from it there. Updates to the repo's `shared/` reach you
-only when you merge them in. Run `clod new-shared` again to compare: it lists
-the starter's files that yours is missing or differs on, with the `diff`
-command to see them, and `clod --force new-shared` replaces yours with the
-starter, keeping yours as a backup. Put your own instructions for Claude in a
+only when you merge them in. Run `clod shared new` again to compare: it lists
+the starter's files that yours is missing or differs on. `clod shared diff`
+shows the differences line by line, and `clod --force shared new` replaces
+yours with the starter, keeping yours as a backup. Put your own instructions for Claude in a
 `CLAUDE.md` there, and any other
 [managed settings](https://code.claude.com/docs/en/settings) in
 `managed-settings.json` or `managed-settings.d/*.json`. Managed settings take

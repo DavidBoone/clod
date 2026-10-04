@@ -192,10 +192,11 @@ Without the script:
   your home directory and the directories above it.
 - **Builds.** `clod` rebuilds the base and variants when their files, or the
   image they are `FROM`, change, builds a variant's base first, and prunes the
-  images builds replace. The bundled variants, `rebuild`, `images` and
-  `new-image` go too.
+  images builds replace. The bundled variants and the `clod image` commands
+  go too.
 - **Settings.** Homes by name or as Docker volumes (`-H`), the project's
   `.envrc` passed in as variables, ports published on localhost from a short
   form (`-P`), and defaults kept with `clod default`.
-- **Maintenance.** `clod update`, `clod install`, and the check that Docker is
-  installed and running before anything else.
+- **Maintenance.** `clod update`, `clod install`, listing and removing volume
+  homes and workspaces (`clod home`, `clod workspace`), `clod shared`, and the
+  check that Docker is installed and running before anything else.
