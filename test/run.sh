@@ -185,6 +185,10 @@ test_envrc() {
   grep -q '^FOO=bar$' out
   grep -q 'skipping multi-line variable MULTI' out
   grep -q '^home: *from-envrc' out
+  echo CLOD_PORTS=5000 >> .clod.envrc
+  clod env | has '^ports: .*5000'
+  if CLOD_PORTS='' clod env | has '^ports:'; then false; fi
+  if clod -P '' env | has '^ports:'; then false; fi
   clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc'
 }
 
