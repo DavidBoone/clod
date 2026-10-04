@@ -343,13 +343,23 @@ test_completion() {
   test "$(clod __complete default co)" = command
   clod __complete default command '' | has -x codex
   if clod __complete new-image mine '' | grep -qx clod; then false; fi
-  test -z "$(clod __complete claude --re)"
-  test -z "$(clod __complete -- '')"
+  # exit status 1: the word is a file name, which the shell completes
+  if clod __complete claude --re; then false; fi
+  if clod __complete -- ''; then false; fi
+  if clod __complete -H ./w; then false; fi
+  if clod __complete install ''; then false; fi
+  test -z "$(clod __complete -P '')"
+  clod __complete -P ''
   printf '%s\n' 'eval "$(clod completion)"' 'COMP_WORDS=(clod -i go+su); COMP_CWORD=2; _clod' \
     'echo "${COMPREPLY[*]}"' > shim-test
   test "$(bash shim-test)" = go+sudo
   if command -v zsh >/dev/null; then
-    test "$(zsh -f shim-test 2>/dev/null)" = go+sudo
+    # outside a completion widget, compadd and _files stand in as printers
+    printf '%s\n' 'eval "$(clod completion)"' \
+      'compadd() { print -r -- ${(P)2}; }; _files() { print files; }' \
+      'words=(clod -i go+su); CURRENT=3; _clod' \
+      "words=(clod claude ''); CURRENT=3; _clod" > shim-test
+    test "$(zsh -f shim-test 2>/dev/null)" = "$(printf 'go+sudo\nfiles')"
   fi
 }
 
