@@ -21,7 +21,7 @@
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
-base_tests='env run-command empty-workspace scratch refuses-home claude codex statusline
+base_tests='env run-command empty-workspace scratch workspace refuses-home claude codex statusline
   port docker-socket envrc volume-home default new-shared command-line multi-stage
   combine rebuild remove-image prune completion'
 classic_tests='classic'
@@ -128,6 +128,42 @@ test_scratch() {
   clod -s bash -c true
 }
 
+test_workspace() {
+  local here=$PWD
+  mkdir proj
+  echo from-proj > proj/file
+  echo 'export FOO=proj' > proj/.envrc
+  direnv allow proj
+  clod -w proj env | has "^workspace: *$here/proj\$"
+  clod -w proj env | has '^envrc: .*/proj/.envrc$'
+  clod -w proj bash -c '
+    set -e
+    test "$(cat /workspace/file)" = from-proj
+    test "$FOO" = proj
+    test "$CLOD_WORKSPACE" = "'"$here/proj"'"
+  '
+  exits 1 clod -w nope bash -c true
+  exits 2 clod -s -w proj bash -c true
+  exits 1 clod -w ~ bash -c true
+  cd ~
+  clod -w "$here/proj" bash -c 'test "$(cat /workspace/file)" = from-proj'
+  # a volume workspace is claude's, kept between runs, and reads no .envrc
+  cd "$here/proj"
+  docker volume rm -f clod-workspace-wtest >/dev/null
+  clod -w vol:wtest bash -c '
+    set -e
+    test "$CLOD_WORKSPACE" = vol:wtest
+    test "$(stat -c %U /workspace)" = claude
+    test -z "${FOO:-}"
+    echo kept > /workspace/kept
+  '
+  clod -w vol:wtest bash -c 'test "$(cat /workspace/kept)" = kept'
+  clod -w vol:wtest env | has '^workspace: *vol:wtest (Docker volume clod-workspace-wtest)'
+  if clod -w vol:wtest env | has '^envrc:'; then false; fi
+  exits 1 clod -w vol:./x env
+  docker volume rm clod-workspace-wtest >/dev/null
+}
+
 test_refuses_home() {
   cd ~
   exits 1 clod bash -c true
@@ -184,6 +220,15 @@ test_docker_socket() {
     test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
   ' 2>&1 | tee out
   if grep -q 'no docker CLI' out; then false; fi
+  # a volume workspace has no host path; the agent's containers mount it by name
+  docker volume rm -f clod-workspace-dtest >/dev/null
+  clod -i docker --docker -w vol:dtest bash -c '
+    set -e
+    test -z "${CLOD_HOST_WORKSPACE:-}"
+    echo sibling > /workspace/from-agent
+    test "$(docker run --rm --entrypoint cat -v clod-workspace-dtest:/w clod /w/from-agent)" = sibling
+  '
+  docker volume rm clod-workspace-dtest >/dev/null
 }
 
 test_envrc() {
@@ -467,6 +512,8 @@ test_completion() {
   if clod __complete -- ''; then false; fi
   if clod __complete -H ./w; then false; fi
   if clod __complete install ''; then false; fi
+  if clod __complete -w ''; then false; fi
+  test "$(clod __complete --wor)" = --workspace
   test -z "$(clod __complete -P '')"
   clod __complete -P ''
   printf '%s\n' 'eval "$(clod completion)"' 'COMP_WORDS=(clod -i go+su); COMP_CWORD=2; _clod' \

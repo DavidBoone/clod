@@ -68,12 +68,14 @@ settings and a project's `.envrc` win over these defaults; `clod env` shows
 what a run will actually use.
 
 Inside the container the same variables hold what the launch resolved to:
-`CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`), and
-`CLOD_IMAGE` the image tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`).
+`CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`),
+`CLOD_WORKSPACE` the workspace's path on the host (`~/`-relative) or
+`vol:NAME`, and `CLOD_IMAGE` the image tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`).
 
 ## Per-project environment
 
-`clod` looks up from the current directory for the nearest `.envrc`, loads it
+`clod` looks up from the workspace directory (the current directory, or the
+one `-w` names) for the nearest `.envrc`, loads it
 on the host through your direnv, and passes the variables it exports into the
 container via `--env-file`. Only exported variables count: `FOO=bar` without
 `export` isn't passed in. The file must be approved with `direnv allow`; without
@@ -81,7 +83,7 @@ direnv installed it is ignored. Like direnv, `clod` stops at the first match, so
 parent directories' files only count if the file pulls them in (`source_up`).
 Run `clod env` to see which file is used and exactly what would be passed.
 `clod --scratch` reads none (see [A scratch
-workspace](usage.md#a-scratch-workspace)).
+workspace](usage.md#a-scratch-workspace)), nor does a volume workspace (`-w vol:NAME`).
 
 Values are evaluated on the host but used in the container, so write them for
 the container (`host.docker.internal`, not `localhost` or a host socket path).
