@@ -1,13 +1,17 @@
 # Shared config and the statusline
 
-![The clod statusline: home and image, model and effort, tokens, lines changed, context use, idle time, and 5-hour and 7-day rate limits](statusline.svg)
+![The clod statusline: on the first line the model and effort, the home and image, the published ports and the git branch; on the second tokens, lines changed, context use, idle time, and 5-hour and 7-day rate limits](statusline.svg)
 
 Claude Code reads managed settings and a managed `CLAUDE.md` from
 `/etc/claude-code`, for every home. Until `~/.clod/shared` exists, clod mounts
 this repo's [`shared/`](../shared) there, which updates with `git pull`:
 
-- `statusline.sh` is the statusline: the home, image, model, tokens, context
-  use, cache idle time and rate limits.
+- `statusline.sh` is the statusline, on two lines: the model, the home
+  (`⌂`) and image (`⬢`), the published ports (`⇄`, links to `localhost`
+  where the terminal supports them) and the git branch with its count of
+  changed files; then tokens, context use, cache idle time and rate limits.
+  A rate limit's bar shows usage against how much of its window has passed,
+  red where usage is ahead.
 - `managed-settings.json` turns that statusline on.
 
 To customise them, make your own copy and edit that:

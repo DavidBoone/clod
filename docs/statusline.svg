@@ -1,5 +1,75 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="968" height="72" viewBox="0 0 968 72">
-<rect width="968" height="72" rx="8" fill="#1e1e1e"/>
-<text x="18" y="29" textLength="932" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve"><tspan fill="#bc3fbc">⌂ </tspan><tspan fill="#d670d6">work</tspan><tspan fill="#cccccc" opacity="0.5">@</tspan><tspan fill="#29b8db">go</tspan><tspan fill="#cccccc">  </tspan><tspan fill="#29b8db" font-weight="bold">✦ Opus 5.5</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#f5f543">⚡medium</tspan><tspan fill="#cccccc">  </tspan><tspan fill="#23d18b">↑</tspan><tspan fill="#e5e5e5">710.7k </tspan><tspan fill="#3b8eea">↓</tspan><tspan fill="#e5e5e5">759</tspan><tspan fill="#cccccc">  </tspan><tspan fill="#23d18b">+957</tspan><tspan fill="#cccccc" opacity="0.5">/</tspan><tspan fill="#f14c4c">-151</tspan><tspan fill="#cccccc">  </tspan><tspan fill="#29b8db">◔ </tspan><tspan fill="#23d18b">▰</tspan><tspan fill="#23d18b">▰</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#e5e5e5">38%</tspan><tspan fill="#cccccc">  </tspan><tspan fill="#3b8eea">⏱ </tspan><tspan fill="#e5e5e5">0:25</tspan><tspan fill="#cccccc">  </tspan><tspan fill="#f5f543">5h </tspan><tspan fill="#23d18b">▰</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#e5e5e5">19%</tspan><tspan fill="#e5e5e5" opacity="0.5">/87%</tspan><tspan fill="#cccccc">  </tspan><tspan fill="#bc3fbc">7d </tspan><tspan fill="#23d18b">▰</tspan><tspan fill="#23d18b">▰</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc" opacity="0.5">▱</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#e5e5e5">32%</tspan><tspan fill="#e5e5e5" opacity="0.5">/54%</tspan></text>
-<text x="18" y="51" textLength="479" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve"><tspan fill="#d670d6">⏵⏵ bypass permissions on</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#cccccc" opacity="0.5">·</tspan><tspan fill="#cccccc"> PR </tspan><tspan fill="#f5f543" text-decoration="underline">#9</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#cccccc" opacity="0.5">·</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#29b8db">1 shell</tspan><tspan fill="#cccccc"> </tspan><tspan fill="#cccccc" opacity="0.5">· ← for agents</tspan></text>
+<svg xmlns="http://www.w3.org/2000/svg" width="792" height="94" viewBox="0 0 792 94">
+<rect width="792" height="94" rx="8" fill="#1e1e1e"/>
+<text x="18.0" y="29" textLength="84.0" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#29b8db" font-weight="bold">✦ Opus 5.5</text>
+<text x="110.4" y="29" textLength="58.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#11a8cd">⚡medium</text>
+<text x="186.0" y="29" textLength="16.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#bc3fbc">⌂ </text>
+<text x="202.8" y="29" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#d670d6">work</text>
+<text x="244.8" y="29" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#bc3fbc">⬢ go</text>
+<text x="295.2" y="29" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#bc3fbc">⇄</text>
+<text x="312.0" y="29" textLength="42.0" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#bc3fbc" text-decoration="underline">:5173</text>
+<text x="387.6" y="29" textLength="50.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">ᚴ main</text>
+<text x="446.4" y="29" textLength="16.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#f5f543">±3</text>
+<text x="18.0" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#3b8eea">↑</text>
+<text x="26.4" y="51" textLength="58.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5">710.7k </text>
+<text x="85.2" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#3b8eea">↓</text>
+<text x="93.6" y="51" textLength="25.2" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5">759</text>
+<text x="135.6" y="51" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">+957</text>
+<text x="169.2" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">/</text>
+<text x="177.6" y="51" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#f14c4c">-151</text>
+<text x="228.0" y="51" textLength="16.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#3b8eea">◔ </text>
+<text x="244.8" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<text x="253.2" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<text x="261.6" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<text x="270.0" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<text x="278.4" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<text x="295.2" y="51" textLength="25.2" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5">38%</text>
+<text x="337.2" y="51" textLength="16.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#3b8eea">⏱ </text>
+<text x="354.0" y="51" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5">0:25</text>
+<text x="404.4" y="51" textLength="25.2" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#3b8eea">5h </text>
+<rect x="429.6" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="429.6" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<rect x="438.0" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="438.0" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<rect x="446.4" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="446.4" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="454.8" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="454.8" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="463.2" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="463.2" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="471.6" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="471.6" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="480.0" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="480.0" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="488.4" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="488.4" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="496.8" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="496.8" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="505.2" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="522.0" y="51" textLength="25.2" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5">19%</text>
+<text x="547.2" y="51" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5" opacity="0.5">/87%</text>
+<text x="597.6" y="51" textLength="25.2" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#3b8eea">7d </text>
+<rect x="622.8" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="622.8" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<rect x="631.2" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="631.2" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<rect x="639.6" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="639.6" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<rect x="648.0" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="648.0" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#23d18b">▰</text>
+<rect x="656.4" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="656.4" y="51" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">▱</text>
+<rect x="664.8" y="38" width="8.4" height="18" fill="#303030"/>
+<rect x="673.2" y="38" width="8.4" height="18" fill="#303030"/>
+<rect x="681.6" y="38" width="8.4" height="18" fill="#303030"/>
+<rect x="690.0" y="38" width="8.4" height="18" fill="#303030"/>
+<rect x="698.4" y="38" width="8.4" height="18" fill="#303030"/>
+<text x="715.2" y="51" textLength="25.2" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5">32%</text>
+<text x="740.4" y="51" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#e5e5e5" opacity="0.5">/54%</text>
+<text x="18.0" y="73" textLength="201.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#d670d6">⏵⏵ bypass permissions on</text>
+<text x="228.0" y="73" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">·</text>
+<text x="236.4" y="73" textLength="33.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc"> PR </text>
+<text x="270.0" y="73" textLength="16.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#f5f543" text-decoration="underline">#9</text>
+<text x="295.2" y="73" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">·</text>
+<text x="312.0" y="73" textLength="58.8" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#29b8db">1 shell</text>
+<text x="379.2" y="73" textLength="117.6" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" xml:space="preserve" fill="#cccccc" opacity="0.5">· ← for agents</text>
 </svg>
