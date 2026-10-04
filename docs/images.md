@@ -91,5 +91,17 @@ the variant:
 COPY CLAUDE.md /etc/clod/.claude/rules/mine.md
 ```
 
+Node is in the base for the agents' own tooling: Codex installs with npm, and
+many MCP servers run with `npx`. Claude Code doesn't need it. The base gets Node
+26 from NodeSource's repository, and a project that needs another major gets it
+from a variant that edits that repository and reinstalls:
+
+```dockerfile
+USER root
+RUN sed -i 's/node_[0-9]*\.x/node_22.x/' /etc/apt/sources.list.d/nodesource.sources \
+    && apt-get update && apt-get install -y --allow-downgrades nodejs
+USER claude
+```
+
 Images are never pulled at launch, so `-i` must name a variant or an image
 already built locally.

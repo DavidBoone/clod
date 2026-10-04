@@ -22,6 +22,12 @@ projects under it, or add other folders with `colima start --mount /path:w`. A
 project outside the shared folders appears as an empty `/workspace`, and clod
 warns at launch when that happens.
 
+Colima's shared folders, which hold the home and workspace, don't allow every
+ownership and permission change: `chown`, and sometimes `chmod`, fail with
+`Permission denied`. Databases trip over this, so keep a database's data
+directory in the container's own filesystem rather than in the home or
+workspace.
+
 ## Linux
 
 Install Docker Engine with Docker's convenience script, then add yourself to
