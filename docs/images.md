@@ -24,15 +24,15 @@ clod image rm go         # remove the built image; the next clod -i go builds it
 clod image prune         # remove the stale images, which their next run rebuilds anyway
 ```
 
-The first run builds `clod-go`; later runs reuse it until its `Dockerfile` or
-the base image changes. To pick up a newer Go or Rust, rebuild it with
+The first run builds the image (`clod-go`, to Docker); later runs reuse it
+until its `Dockerfile` or the base image changes. To pick up a newer Go or Rust, rebuild it with
 `clod image rebuild go`. Rebuilding the base makes every variant rebuild on its
 next use.
 
-Variants combine with `+`: `clod -i browser+dotnet` builds `clod-browser`, then
-the `dotnet` variant on top of it as `clod-browser.dotnet`. They build in the
-order given, which matters only when two variants change the same files. A
-combination rebuilds, and is set as a default, like any variant:
+Variants combine with `+`: `clod -i browser+dotnet` builds `browser`, then the
+`dotnet` variant on top of it. They build in the order given, which matters
+only when two variants change the same files. A combination rebuilds, and is
+set as a default, like any variant:
 
 ```bash
 clod -i browser+dotnet          # .NET with a browser, for testing a web app
@@ -54,7 +54,7 @@ as above, it combines with the others. `clod image new` creates one:
 ```bash
 clod image new mine          # a starter Dockerfile, FROM $BASE
 clod image new mine go       # a copy of the go variant
-clod image new mine go+sudo  # a starter Dockerfile, FROM clod-go.sudo
+clod image new mine go+sudo  # a starter Dockerfile, built on go+sudo
 clod image new go            # your own copy of the bundled go, which then takes its place
 ```
 
@@ -71,12 +71,13 @@ USER claude
 `build-essential` is there for npm or pip packages that compile native code on
 install; most ship prebuilt binaries and don't need it.
 
-A variant can be `FROM` a combination by its tag, as in `FROM clod-browser.dotnet`:
-clod builds the combination first, and rebuilds yours when any variant in it
-changes. That keeps your own additions on top of bundled variants without
-copying their install steps.
+A variant can be `FROM` a combination by its Docker name, which joins the
+variants with dots: `browser+dotnet` is `FROM clod-browser.dotnet`. clod builds
+the combination first, and rebuilds yours when any variant in it changes. That
+keeps your own additions on top of bundled variants without copying their
+install steps.
 
-`clod -i mine` builds `clod-go` if needed, then `clod-mine`, and
+`clod -i mine` builds `go` if needed, then `mine`, and
 rebuilds each whenever a file in its directory or an image it is `FROM`
 (in any stage) changes. A variant in `~/.clod/images` takes precedence over a bundled one of
 the same name, so copying one there is how to customise it. Apt lists are kept

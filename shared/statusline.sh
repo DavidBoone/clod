@@ -158,7 +158,7 @@ bar() {
 
 parts=()
 
-# clod launch context: home @ image tag.
+# clod launch context: home @ image.
 if [ -n "${CLOD_HOME:-}" ]; then
     clod_part="${MAGENTA}⌂ ${BR_MAGENTA}${CLOD_HOME}${RST}"
     [ -n "${CLOD_IMAGE:-}" ] && clod_part+="${DIM}@${RST}${CYAN}${CLOD_IMAGE}${RST}"

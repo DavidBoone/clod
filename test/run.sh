@@ -466,7 +466,7 @@ test_default() {
   clod -i clod -- -c 'echo from-default-command' | has from-default-command
   clod default command --reset
   clod default command | has '^command  *claude .*built in'
-  clod env | has '^image: *clod-python'
+  clod env | has '^image: *python '
   clod default image clod
   clod env | has '^image: *clod$'
 }
@@ -507,6 +507,9 @@ test_command_line() {
   exits 2 clod env extra
   exits 2 clod image new a b c
   exits 2 clod image new
+  for name in Mine -mine mine_ my.image; do
+    exits 2 clod image new "$name" 2>&1 | has 'invalid image name'
+  done
   exits 2 clod image show
   exits 2 clod image nope
   exits 2 clod home ls
@@ -516,12 +519,12 @@ test_command_line() {
   # build and rebuild still work, with a note naming image build
   exits 1 clod build mine 2>&1 | has 'clod build is deprecated; use clod image build$'
   exits 1 clod rebuild mine 2>&1 | has 'use clod image rebuild$'
-  clod -i clod-python env | has '^image: *clod-python (.*images/python)'
+  clod -i clod-python env | has '^image: *python (.*images/python)'
   clod --help | has '^Usage: clod'
   clod --version | has '^clod '
   clod -H other -i python -P 3000:8080 env | tee out
   grep -q '^home: *other' out
-  grep -q '^image: *clod-python' out
+  grep -q '^image: *python ' out
   grep -q '^ports: *127.0.0.1:3000 → 8080$' out
   clod bash -c true
   clod image | has '^\* clod  *built'
@@ -544,10 +547,10 @@ test_multi_stage() {
   clod image | has '^  one  *stale'
   clod image | has '^  stages  *stale'
   clod -i stages bash -c true 2>&1 | tee out
-  grep -q 'building clod-one' out
-  grep -q 'building clod-stages' out
+  grep -q 'building one\.\.\.' out
+  grep -q 'building stages\.\.\.' out
   clod image | has '^  stages  *built'
-  clod image show stages | has '^stages  *built  *debian:trixie, clod-one  '
+  clod image show stages | has '^stages  *built  *debian:trixie, one  '
   clod image show stages | has '^one  *built  *clod  '
 }
 
@@ -565,13 +568,14 @@ test_combine() {
   # braces, and no default: it only ever goes on top of another
   printf 'ARG BASE\nFROM ${BASE}\nRUN echo third >> /tmp/order\n' > ~/.clod/images/third/Dockerfile
   printf 'FROM clod\n' > ~/.clod/images/fixed/Dockerfile
-  clod -i first+second env | has '^image: *clod-first.second '
+  clod -i first+second env | has '^image: *first+second '
   clod -i first+second bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
-  clod image | has '^  first.second  *built'
+  clod -i first+second bash -c 'test "$CLOD_IMAGE" = first+second' 2>&1 | has '^clod · .* · first+second · '
+  clod image | has '^  first+second  *built'
   clod -i clod-first.second --skip-build bash -c true
   echo 'RUN true' >> ~/.clod/images/first/Dockerfile
-  clod image | has '^  first.second  *stale'
-  clod -i first+second bash -c true 2>&1 | has 'building clod-first.second'
+  clod image | has '^  first+second  *stale'
+  clod -i first+second bash -c true 2>&1 | has 'building first+second\.\.\.'
   exits 1 clod -i first+fixed env 2>out
   grep -q "fixed can't go on top" out
   exits 1 clod -i first+nope env
@@ -580,32 +584,35 @@ test_combine() {
     grep -q 'invalid image name' out
   done
   exits 1 clod default image first+nope
-  clod -i fixed+first env | has '^image: *clod-fixed.first '
-  clod -i first.second env | has '^image: *clod-first.second '
-  # three: third is built on the combination clod-first.second
+  clod -i fixed+first env | has '^image: *fixed+first '
+  # the Docker image's name works too
+  clod -i first.second env | has '^image: *first+second '
+  clod -i clod-first.second env | has '^image: *first+second '
+  # three: third is built on the combination first+second
   clod -i first+second+third bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond\nthird")"'
-  clod image | has '^  first.second.third  *built'
+  clod image | has '^  first+second+third  *built'
   clod image show first+second+third > out
-  test "$(awk 'NR > 1 { print $1 }' out)" = "$(printf 'first.second.third\nfirst.second\nfirst\nclod')"
-  has '^first.second  *built  *clod-first  ' < out
-  has '^first.second.third  .*/images/third/Dockerfile$' < out
+  test "$(awk 'NR > 1 { print $1 }' out)" = "$(printf 'first+second+third\nfirst+second\nfirst\nclod')"
+  has '^first+second  *built  *first  ' < out
+  has '^first+second+third  .*/images/third/Dockerfile$' < out
   exits 1 clod image show nope
   exits 2 clod image show first second
   clod default image first+second
-  clod env | has '^image: *clod-first.second '
-  clod image | has '^\* first.second  *built'
+  clod env | has '^image: *first+second '
+  clod image | has '^\* first+second  *built'
   clod default image --reset
   # a variant on a combination rebuilds when a variant in it changes
   rm -rf ~/.clod/images/ontop
   clod image new ontop first+second
-  grep -q '^FROM clod-first.second$' ~/.clod/images/ontop/Dockerfile
+  grep -q '^FROM clod-first\.second$' ~/.clod/images/ontop/Dockerfile
+  grep -q 'FROM names first+second as Docker does: clod-first\.second\.$' ~/.clod/images/ontop/Dockerfile
   clod -i ontop bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
   clod image | has '^  ontop  *built'
   echo 'RUN true' >> ~/.clod/images/second/Dockerfile
   clod image | has '^  ontop  *stale'
   clod -i ontop bash -c true 2>&1 | tee out
-  grep -q 'building clod-first.second' out
-  grep -q 'building clod-ontop' out
+  grep -q 'building first+second\.\.\.' out
+  grep -q 'building ontop\.\.\.' out
 }
 
 # image rebuild replaces every image in the chain and prunes the old ones. It
@@ -619,7 +626,7 @@ test_rebuild() {
   cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" standin/
   printf 'FROM debian:trixie\nRUN date > /built\n' > standin/Dockerfile
   standin/clod -i first+second image build
-  test "$(standin/clod -i first+second image build 2>&1)" = 'clod: first.second is up to date'
+  test "$(standin/clod -i first+second image build 2>&1)" = 'clod: first+second is up to date'
   for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
   standin/clod -i first+second image rebuild
   for t in clod clod-first clod-first.second; do after+=("$(docker image inspect -f '{{.Id}}' "$t")"); done
@@ -630,18 +637,18 @@ test_rebuild() {
   # image build rebuilds only what changed, and prunes what it replaced
   echo 'RUN true' >> ~/.clod/images/second/Dockerfile
   standin/clod -i first+second image build 2>&1 | tee out
-  if grep -q 'building clod-first\.\.\.' out; then false; fi
-  grep -q 'building clod-first.second' out
+  if grep -q 'building first\.\.\.' out; then false; fi
+  grep -q 'building first+second\.\.\.' out
   test "$(docker image inspect -f '{{.Id}}' clod-first)" = "${after[1]}"
   if docker image inspect "${after[2]}" >/dev/null 2>&1; then false; fi
   # image build takes names, which win over -i, and builds a shared base once
   exits 1 clod image build no-such
   echo 'RUN true' >> ~/.clod/images/first/Dockerfile
   clod -i no-such image build first first+second 2>&1 | tee out
-  test "$(grep -c 'building clod-first\.\.\.' out)" = 1
-  grep -q 'building clod-first.second' out
+  test "$(grep -c 'building first\.\.\.' out)" = 1
+  grep -q 'building first+second\.\.\.' out
   test "$(clod -i no-such image build first first+second)" = \
-    "$(printf 'clod: first is up to date\nclod: first.second is up to date')"
+    "$(printf 'clod: first is up to date\nclod: first+second is up to date')"
   # the build alias, with its note on stderr only
   test "$(clod build first 2>/dev/null)" = 'clod: first is up to date'
 }
@@ -653,22 +660,22 @@ test_image_rm() {
   printf 'FROM clod\n' > ~/.clod/images/a-very-long-variant-name/Dockerfile
   clod -i gone+top image build
   clod -i top image build
-  clod __complete image rm '' | has -x gone.top
+  clod __complete image rm '' | has -x gone+top
   if clod __complete image rm gone '' | grep -qx gone; then false; fi
   clod image | has '^  a-very-long-variant-name  -'
   exits 1 clod -i no-such image rm
   exits 1 clod image rm no-such
   exits 1 clod image rm gone no-such
   docker image inspect clod-gone >/dev/null
-  # gone.top is built on gone; a name wins over -i
-  clod -i top image rm gone | has 'clod-gone'
+  # gone+top is built on gone; a name wins over -i
+  clod -i top image rm gone | has '^removed .*gone'
   if docker image inspect clod-gone >/dev/null 2>&1; then false; fi
   docker image inspect clod-top >/dev/null
-  clod -i top image rm | has -x 'removed clod-top'
+  clod -i top image rm | has -x 'removed top'
   clod image | has '^  gone  *-'
   rm -r ~/.clod/images/gone
-  clod image | has '^  gone\.top  *built  *gone + top (no Dockerfile)'
-  clod image rm gone+top | has -x 'removed clod-gone.top'
+  clod image | has '^  gone+top  *built  *gone + top (no Dockerfile)'
+  clod image rm gone+top | has -x 'removed gone+top'
   if clod image | grep -q gone; then false; fi
 }
 
@@ -683,23 +690,23 @@ test_image_prune() {
   clod image prune
   test "$(clod image prune)" = 'clod: no stale images'
   echo 'LABEL changed=1' >> ~/.clod/images/old/Dockerfile
-  clod image | has '^  old\.keep  *stale'
-  test "$(clod image prune)" = "$(printf 'removed clod-old.keep\nremoved clod-old')"
+  clod image | has '^  old+keep  *stale'
+  test "$(clod image prune)" = "$(printf 'removed old+keep\nremoved old')"
   docker image inspect clod-keep >/dev/null
   clod image | has '^  keep  *built'
   clod image | has '^  old  *-'
-  if clod image | grep -q 'old\.keep'; then false; fi
+  if clod image | grep -q 'old+keep'; then false; fi
   # an image a container uses, even a stopped one, stays, and shows as in use
   docker rm -f clod-test-in-use >/dev/null 2>&1 || true
   docker create --name clod-test-in-use clod-keep >/dev/null
   echo 'LABEL changed=1' >> ~/.clod/images/keep/Dockerfile
   clod image | has '^  keep  *stale, in use  '
   clod image | has '^in use '
-  test "$(clod image prune)" = 'kept clod-keep: a container uses it (docker ps -a lists them)'
+  test "$(clod image prune)" = 'kept keep: a container uses it (docker ps -a lists them)'
   exits 1 clod image rm keep
   docker image inspect clod-keep >/dev/null
   docker rm clod-test-in-use >/dev/null
-  test "$(clod image prune)" = 'removed clod-keep'
+  test "$(clod image prune)" = 'removed keep'
 }
 
 # Tab completion: clod __complete's candidates, and the shim it prints, typed
