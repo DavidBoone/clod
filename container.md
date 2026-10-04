@@ -6,7 +6,7 @@ Running in a disposable Docker container (`docker run --rm`) started by the user
 - `/workspace` ← the host directory `clod` was run from: the user's real project, not a scratch dir. Unless `$CLOD_SCRATCH` is set: then it's an empty volume (`clod --scratch`), discarded with the container, so anything worth keeping goes in the home or to a remote
 - `/etc/claude-code` ← `~/.clod/shared`, or clod's own `shared/` until that exists (read-only here): managed settings, the statusline, and the user's own instructions in its `CLAUDE.md`, if any
 - `/etc/clod/.claude/rules/` holds this file and any instructions the image's variants add
-- `$CLOD_HOME`, `$CLOD_IMAGE` and (only when a login is borrowed) `$CLOD_CREDS` name this run's home, image and login source
+- `$CLOD_HOME` and `$CLOD_IMAGE` name this run's home and image
 - `$CLOD_PORTS`, when set, lists the container ports published to the user's machine, comma-separated (`5000,8080`); a server must listen on `0.0.0.0` to be reachable through them
 - The host is `host.docker.internal`. The Docker socket is mounted only with `clod --docker` (then `$CLOD_HOST_WORKSPACE` is the project's host path)
 
@@ -20,7 +20,7 @@ You can't run `clod` or see the host's `~/.clod`; the user changes these on the 
 
 - Packages or system setup: a variant, `~/.clod/images/<name>/Dockerfile` (`ARG BASE=clod` / `FROM $BASE`, `USER root` … `USER claude`), run with `clod -i <name>`; `clod new-image <name>` starts one. Variants combine (`-i go+<name>`), and clod rebuilds them when their files change. For root while running, the bundled `sudo` variant
 - Environment variables for the container: `.clod.envrc` in the project (`export FOO=bar`)
-- Defaults for every run: `clod default image|command|home|creds|ports VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.clod.envrc`
+- Defaults for every run: `clod default image|command|home|ports VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.clod.envrc`
 - Instructions or managed settings for every home: `~/.clod/shared/` (`clod new-shared` creates it)
 - Ports: `clod -P 3000` or `CLOD_PORTS`; Docker access: `clod -i docker --docker`, which gives the agent root on the Docker host
 

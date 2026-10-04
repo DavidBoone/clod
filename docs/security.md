@@ -8,10 +8,10 @@ without asking:
 - **The project directory**, read-write: the agent can change or delete any
   file in it, including any secrets the project keeps, such as a `.env` file.
 - **Its home**, `~/.clod/homes/<name>` on your machine (or a Docker volume),
-  not your own home directory. A new home starts empty: no SSH keys, git or GitHub credentials,
-  or cloud logins. It holds only what you give it: the logins you make inside
-  the container (`/login`, `! gh auth login`), files you copy in, and a login
-  borrowed from another home with `--creds`. So the agent can push to git only
+  not your own home directory. A new home starts empty: no SSH keys, git or
+  GitHub credentials, or cloud logins. It holds only what you give it: the
+  logins you make inside the container (`/login`, `! gh auth login`) and files
+  you copy in. So the agent can push to git only
   if you've given that home credentials that allow it. Give each home only
   what its work needs.
 - **The variables you pass in** from `.clod.envrc` or `.envrc`, tokens

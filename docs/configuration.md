@@ -9,13 +9,8 @@ again when the login expires (about monthly).
 
 ```bash
 clod -H work                    # ~/.clod/homes/work, created on first use
-clod -H work-scratch --creds work  # a scratch home borrowing work's login
 clod homes                      # list the homes and which have logins
 ```
-
-A borrowed login's credentials file is mounted live, so token refreshes from
-either home reach both. A copy would go stale at the next refresh, since
-refresh tokens rotate.
 
 ### Volume homes
 
@@ -27,8 +22,7 @@ file system: installs and caches in the home are faster, and `chown` and
 starting it with the image's `/home/claude`.
 
 Its files aren't visible from the host; `clod -H vol:NAME bash` gets you a
-shell in it. `clod homes` lists volume homes but shows `?` for their logins,
-and a volume home can't borrow a login with `--creds` or lend its own.
+shell in it. `clod homes` lists volume homes but shows `?` for their logins.
 `docker volume rm clod-home-NAME` deletes one, as do `colima delete` and
 `docker system prune --volumes`.
 
@@ -46,7 +40,6 @@ setting given empty still wins and means its default, so `clod -P ''` or
 |--------------|--------|-----------|---------|
 | `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory; `vol:NAME` is the Docker volume `clod-home-NAME` (see [Volume homes](#volume-homes)). |
 | `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod images` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
-| `CLOD_CREDS` | `--creds` | unset  | Borrow another home's Claude login (a home name or path, as for `CLOD_HOME`; not a volume home, nor into one). Unset, the home keeps its own. |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 
@@ -69,15 +62,13 @@ clod default image              # show one
 clod default image --reset      # back to the built-in default
 ```
 
-The keys are `image`, `command`, `home`, `creds` and `ports`. Values are
-checked when you set them, and a home or login path is stored as an absolute
-path. Your shell's settings and a project's envrc win over these defaults;
+The keys are `image`, `command`, `home` and `ports`. Values are checked when
+you set them, and a home path is stored as an absolute path. Your shell's settings and a project's envrc win over these defaults;
 `clod env` shows what a run will actually use.
 
 Inside the container the same variables hold what the launch resolved to:
-`CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`), `CLOD_IMAGE` the image
-tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`), and `CLOD_CREDS`, set only when a login is
-borrowed, the home it came from.
+`CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`), and
+`CLOD_IMAGE` the image tag (`clod`, `clod-<variant>`, `clod-<a>.<b>`).
 
 ## Per-project environment
 
@@ -108,7 +99,7 @@ PGHOST=host.docker.internal    # but reach the host's Postgres from the containe
 Values are evaluated on the host but used in the container, so write them for
 the container (`host.docker.internal`, not `localhost` or a host socket path).
 `PATH` is never passed in. Launcher settings (`CLOD_HOME`, `CLOD_IMAGE`,
-`CLOD_CREDS`, `CLOD_PORTS`, `CLOD_COMMAND`) set by the envrc aren't passed in
+`CLOD_PORTS`, `CLOD_COMMAND`) set by the envrc aren't passed in
 either; they act as defaults
 for the launcher, and the same variable set in your shell wins. So a
 `.clod.envrc` can pick the home and image for a project whose `.envrc` you
