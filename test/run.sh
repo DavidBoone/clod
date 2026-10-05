@@ -257,8 +257,8 @@ test_statusline() {
     "seven_day":{"used_percentage":60,"resets_at":%d}}}' $((now + 9000)) $((now + 302400)) > input.json
   clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' | tail -1 |
     sed 's/\x1b\[92m▰/G/g; s/\x1b\[93m▰/Y/g; s/\x1b\[91m▰/R/g; s/\x1b\[[0-9;]*m//g' | tee out
-  has '5h GGGGY  *48%/50%' out
-  has '7d GGGGGR  *60%/50%' out
+  has '5h GGGGY▁▁▁▁▁ 48%/50%' out
+  has '7d GGGGGR▁▁▁▁ 60%/50%' out
 }
 
 test_port() {
