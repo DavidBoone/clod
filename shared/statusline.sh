@@ -53,11 +53,11 @@ mkdir -p "$state_dir"
 state_file="$state_dir/$session_id"
 turn_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/cache-turns.log"
 
-# ANSI helpers (statusline renders escape codes). Basic/bright 16 colors, with
-# one 256-color gray background in qbar: truecolor gets approximated by the
-# statusline renderer. Line 1 gives each group one hue (cyan Claude, magenta
-# clod, green git); line 2 has blue labels and white values. Green, yellow and
-# red otherwise mean good, warning and bad.
+# ANSI helpers (statusline renders escape codes). Basic/bright 16 colors and no
+# backgrounds, so the terminal's own background and theme show through:
+# truecolor gets approximated by the statusline renderer. Line 1 gives each
+# group one hue (cyan Claude, magenta clod, green git); line 2 has blue labels
+# and white values. Green, yellow and red otherwise mean good, warning and bad.
 RST=$'\033[0m'
 DIM=$'\033[2m'
 MAGENTA=$'\033[35m'
@@ -228,19 +228,19 @@ if [ "$last_activity" -gt 0 ]; then
 fi
 
 # Quota meter, ten cells wide: used % $1, elapsed % $2. The dim ▱ track covers
-# the elapsed share of the window and blank cells stand for the time still to
-# come, with a gray background marking out all ten cells (256-color gray; 232
-# is black, 255 white; 236 suits a black terminal background); the green fill
-# is usage, and fill past the track is red. Usage rounds up to whole cells,
-# elapsed to the nearest. The last usage cell shows the pace from the
-# percentages themselves: red when usage is ahead of elapsed, yellow within 5
-# points behind it, green otherwise. Rounding moves usage at most one cell past
+# the elapsed share of the window and a dim ▁ line the time still to come, on
+# the terminal's own background; the green fill is usage, and fill past the
+# track is red. Usage rounds up to whole cells, elapsed to the nearest. The
+# last usage cell shows the pace from the percentages themselves: red when
+# usage is ahead of elapsed, yellow within 5 points behind it, green otherwise. Rounding moves usage at most one cell past
 # the track, and that cell is the last, so red shows only when usage is ahead.
 qbar() {
     local u=$1 e=$2 W=10 s="" i pace
-    local BG=$'\033[48;5;236m' FUT=" "
-    # Alternative: no background, dim ▁ line for the future.
-    # local BG="" FUT="${DIM}▁"
+    local BG="" FUT="${DIM}▁"
+    # Alternative: a gray background marking out all ten cells, with blank
+    # cells for the future (256-color gray; 232 is black, 255 white; 236 suits
+    # a black terminal background, and clashes with others).
+    # local BG=$'\033[48;5;236m' FUT=" "
     local nu=$(( (u * W + 99) / 100 )) ne=$(( (e * W + 50) / 100 ))
     [ "$nu" -gt "$W" ] && nu=$W
     [ "$ne" -gt "$W" ] && ne=$W
