@@ -4,9 +4,17 @@
 # words to clod __complete, and completes file names only when that exits 1.
 
 _clod() {
-  local IFS=$'\n'
-  # shellcheck disable=SC2207 # split at newlines; bash 3.2 has no mapfile
-  COMPREPLY=($(clod __complete "${COMP_WORDS[@]:1:$COMP_CWORD}")) || compopt -o default 2>/dev/null
+  local out line
+  COMPREPLY=()
+  out=$(clod __complete "${COMP_WORDS[@]:1:$COMP_CWORD}") || {
+    compopt -o default 2>/dev/null
+    return 0
+  }
+  # Each candidate is a word with any description after a tab, which bash
+  # doesn't show.
+  while IFS= read -r line; do
+    [[ -n $line ]] && COMPREPLY+=("${line%%$'\t'*}")
+  done <<<"$out"
 }
 # bash 3.2 has no compopt, so there it falls back to file names whenever
 # nothing else matches.
