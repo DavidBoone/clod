@@ -22,7 +22,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude codex statusline
-  port docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line
+  port docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine rebuild image-rm image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -540,7 +540,8 @@ test_command_line() {
   exits 1 clod build mine 2>&1 | has 'clod build is deprecated; use clod image build$'
   exits 1 clod rebuild mine 2>&1 | has 'use clod image rebuild$'
   clod -i clod-python env | has '^image: *python (.*images/python)'
-  clod --help | has '^Usage: clod'
+  # a run command's -h goes to the program it runs
+  test "$(clod bash -c 'echo "$0"' -h)" = -h
   clod --version | has '^clod '
   clod -H other -i python -P 3000:8080 env | tee out
   grep -q '^home: *other' out
@@ -556,6 +557,56 @@ test_command_line() {
   clod image new starter
   clod image | has 'starter .*~/.clod/images/starter'
   clod --skip-build bash -c true 2>&1 | has 'running clod as built'
+}
+
+# clod help, the commands' pages, and the pages the usage errors point to.
+# Needs no Docker.
+test_help() {
+  clod help > out
+  has -x 'usage: clod \[OPTIONS\] \[COMMAND \[ARGS...\]\]' < out
+  has -x 'Images' < out
+  has -xE '  image rm \[NAME\.\.\.\] +remove images clod built' < out
+  has -xE '  -i, --image NAME +the image or variant to run, or a\+b \(CLOD_IMAGE\)' < out
+  has -x "'clod COMMAND -h' shows more about COMMAND." < out
+  if grep -q '^  shared  *the shared config' out; then false; fi
+  clod -h | diff - out
+  clod --help | diff - out
+  # a command's page: -h or --help after it, before it, or clod help COMMAND
+  clod home rm -h > out
+  has -x 'usage: clod \[OPTIONS\] home rm NAME\.\.\.' < out
+  has -xE '  -f, --force +delete without asking; needed without a terminal' < out
+  clod home rm vol:x --help | diff - out
+  clod -h home rm | diff - out
+  clod help home rm | diff - out
+  # not after --
+  exits 2 clod home rm -- -h 2>&1 | has "options go before the command"
+  # a noun's page lists its verbs, default's its keys, help's its own
+  clod image -h | has -xE '  image prune +remove the stale images clod built'
+  clod shared -h | has -x 'usage: clod \[OPTIONS\] shared COMMAND'
+  clod help default | has -xE '  ports \(CLOD_PORTS\) +ports to publish on localhost, comma-separated'
+  clod help default | has -x '       clod \[OPTIONS\] default KEY --reset'
+  clod help -h | has -x 'usage: clod \[OPTIONS\] help \[COMMAND\]'
+  clod help claude | has 'ARGS go to Claude Code unchanged'
+  clod build -h 2>/dev/null | has -x 'usage: clod \[OPTIONS\] image build \[NAME\.\.\.\]'
+  # every command and verb has a page that says what it does, within 80
+  # columns
+  for c in $(completes ''); do
+    for v in '' $(completes help "$c" ''); do
+      # shellcheck disable=SC2086 # no verb is no word
+      clod help "$c" $v > out
+      test -n "$(awk 'NF == 0 { blank = 1; next } blank { print; exit }' out)"
+      if awk 'length > 80' out | grep -q .; then false; fi
+    done
+  done
+  # usage errors point to the page to read
+  exits 2 clod home rm 2>&1 | has "(see 'clod home rm -h')$"
+  exits 2 clod image nope 2>&1 | has "(see 'clod image -h')$"
+  exits 2 clod default nokey 2>&1 | has "(see 'clod default -h')$"
+  exits 2 clod nope 2>&1 | has "(see 'clod help')$"
+  exits 2 clod -x 2>&1 | has "(see 'clod help')$"
+  exits 2 clod -s -w x claude 2>&1 | has "(see 'clod help claude')$"
+  exits 2 clod help nope 2>&1 | has "unknown command 'nope' (see 'clod help')$"
+  exits 2 clod help image nope 2>&1 | has "unknown image command 'nope'"
 }
 
 test_multi_stage() {
@@ -730,64 +781,82 @@ test_image_prune() {
   test "$(clod image prune)" = 'removed keep'
 }
 
-# Tab completion: clod __complete's candidates, and the shim it prints, typed
-# into bash and (if installed) zsh. Needs no Docker.
+# Prints clod __complete's candidates for words $@, without their descriptions.
+completes() {
+  clod __complete "$@" | cut -f1
+}
+
+# Tab completion: clod __complete's candidates and their descriptions, and the
+# shim it prints, typed into bash and (if installed) zsh. Needs no Docker.
 test_completion() {
   mkdir -p ~/.clod/homes/work ~/.clod/images/plain
   printf 'FROM clod\n' > ~/.clod/images/plain/Dockerfile
-  test "$(clod __complete --sk)" = --skip-build
+  test "$(completes --sk)" = --skip-build
   # the nouns and their verbs; build and rebuild only after image
-  test "$(clod __complete i)" = "$(printf 'image\ninstall')"
-  test "$(clod __complete u)" = "$(printf 'update\nuninstall')"
-  test -z "$(clod __complete uninstall '')"
-  if clod __complete '' | grep -qxE 'build|rebuild'; then false; fi
-  test "$(clod __complete image '')" = "$(printf 'show\nnew\nbuild\nrebuild\nrm\nprune')"
-  test "$(clod __complete image re)" = rebuild
-  test "$(clod __complete home '')" = "$(printf 'new\ncp\nmv\nrm')"
-  test -z "$(clod __complete home new '')"
-  if clod __complete home new ./x; then false; fi
-  test "$(clod __complete workspace '')" = rm
-  test "$(clod __complete shared '')" = "$(printf 'new\ndiff')"
-  test -z "$(clod __complete shared new '')"
-  test -z "$(clod __complete image prune '')"
-  clod __complete image show '' | has -x plain
-  test -z "$(clod __complete image show plain '')"
-  clod __complete image build '' | has -x plain
-  clod __complete image rebuild go '' | has -x plain
-  if clod __complete image build plain '' | grep -qx plain; then false; fi
-  clod __complete -i '' | has -x go
-  clod __complete -i '' | has -x clod
-  test "$(clod __complete -i go+su)" = go+sudo
+  test "$(completes i)" = "$(printf 'image\ninstall')"
+  test "$(completes u)" = "$(printf 'uninstall\nupdate')"
+  # in command_table's order, with its descriptions
+  test "$(completes '' | head -5)" = "$(printf 'claude\ncodex\nbash\nzsh\nimage')"
+  clod __complete '' | has -xF -e "$(printf 'claude\tClaude Code')"
+  clod __complete image '' | has -xF -e "$(printf 'rm\tremove images clod built')"
+  clod __complete --sk | has -xF -e "$(printf -- '--skip-build\trun the image as built, even if its files changed')"
+  clod __complete default '' | has -xF -e "$(printf 'ports\tports to publish on localhost, comma-separated')"
+  clod __complete default command '' | has -xF -e "$(printf -- '--reset\tremove this default')"
+  # no descriptions for names
+  if clod __complete -i '' | grep -q $'\t'; then false; fi
+  # help takes a command, and a noun's verb
+  test "$(completes help im)" = image
+  test "$(completes help image pr)" = prune
+  test -z "$(completes help env '')"
+  test -z "$(completes uninstall '')"
+  if completes '' | grep -qxE 'build|rebuild'; then false; fi
+  test "$(completes image '')" = "$(printf 'show\nnew\nbuild\nrebuild\nrm\nprune')"
+  test "$(completes image re)" = rebuild
+  test "$(completes home '')" = "$(printf 'new\ncp\nmv\nrm')"
+  test -z "$(completes home new '')"
+  if completes home new ./x; then false; fi
+  test "$(completes workspace '')" = rm
+  test "$(completes shared '')" = "$(printf 'new\ndiff')"
+  test -z "$(completes shared new '')"
+  test -z "$(completes image prune '')"
+  completes image show '' | has -x plain
+  test -z "$(completes image show plain '')"
+  completes image build '' | has -x plain
+  completes image rebuild go '' | has -x plain
+  if completes image build plain '' | grep -qx plain; then false; fi
+  completes -i '' | has -x go
+  completes -i '' | has -x clod
+  test "$(completes -i go+su)" = go+sudo
   # after +: not a variant already there, nor one built FROM clod
-  if clod __complete -i go+ | grep -qxE 'go\+(go|plain)'; then false; fi
-  clod __complete -H w | has -x work
-  test -z "$(clod __complete -H ./w)"
+  if completes -i go+ | grep -qxE 'go\+(go|plain)'; then false; fi
+  completes -H w | has -x work
+  test -z "$(completes -H ./w)"
   # bash splits words at colons
-  clod __complete -H vol : work '' | has -x claude
-  clod __complete -P 3000 : 5173 '' | has -x claude
-  test "$(clod __complete default co)" = command
-  clod __complete default command '' | has -x codex
-  clod __complete image new mine '' | has -x go
-  if clod __complete image new mine '' | grep -qx clod; then false; fi
-  test -z "$(clod __complete image new mine go '')"
+  completes -H vol : work '' | has -x claude
+  completes -P 3000 : 5173 '' | has -x claude
+  test "$(completes default co)" = command
+  completes default command '' | has -x codex
+  completes image new mine '' | has -x go
+  if completes image new mine '' | grep -qx clod; then false; fi
+  test -z "$(completes image new mine go '')"
   # exit status 1: the word is a file name, which the shell completes
-  if clod __complete claude --re; then false; fi
-  if clod __complete -- ''; then false; fi
-  if clod __complete -H ./w; then false; fi
+  if completes claude --re; then false; fi
+  if completes -- ''; then false; fi
+  if completes -H ./w; then false; fi
   # a word starting with . or ~ is a path, never a name; a name that matches
   # nothing completes to nothing, not to files
-  if clod __complete -H .; then false; fi
-  if clod __complete -H '~'; then false; fi
-  if clod __complete --home='~'; then false; fi
-  if clod __complete default home .; then false; fi
-  if clod __complete home cp '~'; then false; fi
-  if clod __complete home new .; then false; fi
-  test -z "$(clod __complete -H xyz)"
-  if clod __complete install ''; then false; fi
-  if clod __complete -w ''; then false; fi
-  test "$(clod __complete --wor)" = --workspace
-  test -z "$(clod __complete -P '')"
-  clod __complete -P ''
+  if completes -H .; then false; fi
+  if completes -H '~'; then false; fi
+  if completes --home='~'; then false; fi
+  if completes default home .; then false; fi
+  if completes home cp '~'; then false; fi
+  if completes home new .; then false; fi
+  test -z "$(completes -H xyz)"
+  if completes install ''; then false; fi
+  if completes -w ''; then false; fi
+  test "$(completes --wor)" = --workspace
+  test -z "$(completes -P '')"
+  completes -P ''
   # The shim, and the files install links, in real shells, which split words
   # differently: bash at = and :, zsh not at all. A stand-in docker lists the
   # volumes. Directories complete with a / in bash only.
@@ -795,22 +864,22 @@ test_completion() {
   printf '%s\n' '#!/bin/bash' \
     '[[ "$1 $2" == "volume ls" ]] && printf "%s\n" clod-home-vhome clod-workspace-play' > bin/docker
   chmod +x bin/docker
-  PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x vol:vhome
-  PATH=$PWD/bin:$PATH clod __complete home rm '' | has -x work
+  PATH=$PWD/bin:$PATH completes home rm '' | has -x vol:vhome
+  PATH=$PWD/bin:$PATH completes home rm '' | has -x work
   # a home named already isn't offered again
-  PATH=$PWD/bin:$PATH clod __complete home rm vol:vhome '' > out
+  PATH=$PWD/bin:$PATH completes home rm vol:vhome '' > out
   has -x work < out
   if grep -qx vol:vhome out; then false; fi
   # home cp and mv: a home, then a new one, which only a path completes
-  PATH=$PWD/bin:$PATH clod __complete home cp '' | has -x work
-  PATH=$PWD/bin:$PATH clod __complete home mv '' | has -x vol:vhome
-  test -z "$(PATH=$PWD/bin:$PATH clod __complete home cp work '')"
-  if clod __complete home cp ./w; then false; fi
-  if clod __complete home mv work ./w; then false; fi
-  PATH=$PWD/bin:$PATH clod __complete workspace rm '' | has -x play
-  PATH=$PWD/bin:$PATH clod __complete workspace rm vol : '' | has -x play
-  test "$(PATH=$PWD/bin:$PATH clod __complete workspace rm vo)" = vol:play
-  test -z "$(PATH=$PWD/bin:$PATH clod __complete workspace rm vol:play '')"
+  PATH=$PWD/bin:$PATH completes home cp '' | has -x work
+  PATH=$PWD/bin:$PATH completes home mv '' | has -x vol:vhome
+  test -z "$(PATH=$PWD/bin:$PATH completes home cp work '')"
+  if completes home cp ./w; then false; fi
+  if completes home mv work ./w; then false; fi
+  PATH=$PWD/bin:$PATH completes workspace rm '' | has -x play
+  PATH=$PWD/bin:$PATH completes workspace rm vol : '' | has -x play
+  test "$(PATH=$PWD/bin:$PATH completes workspace rm vo)" = vol:play
+  test -z "$(PATH=$PWD/bin:$PATH completes workspace rm vol:play '')"
   for sh in bash zsh bash:files zsh:files; do
     [[ $sh == bash* ]] || command -v zsh >/dev/null || continue
     files=()
@@ -825,6 +894,15 @@ test_completion() {
       'clod -w proj' 'clod --workspace=proj' 'clod claude proj' 'clod image show' 'clod shared diff' \
       'clod home rm vol:vhome' 'clod workspace rm play' 'clod workspace rm vol:play' \
       'clod workspace rm vol:play' 'clod home cp work' 'clod home mv vol:vhome' 'clod home rm work' 'clod -H .hdir')
+  done
+  # zsh lists the descriptions beside the words, in command_table's order;
+  # names have none
+  command -v zsh >/dev/null || return 0
+  for files in '' "$repo/completions"; do
+    "$repo/test/tab-complete.py" ${files:+--files "$files"} --list zsh 'clod image ' 'clod -i ' > out
+    has -E '^rm +-- remove images clod built' < out
+    test "$(grep -oE '^(show|prune) ' out | tr -d ' ' | tr '\n' ' ')" = 'show prune '
+    if grep -E '(go|python) +--' out; then false; fi
   done
 }
 

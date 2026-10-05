@@ -2,7 +2,7 @@
 """Completes command lines in a real interactive shell, through a pty, with
 clod's completion loaded, and prints each line as the shell completed it.
 
-    test/tab-complete.py [--files DIR] bash|zsh LINE...
+    test/tab-complete.py [--files DIR] [--list] bash|zsh LINE...
 
 The completion is loaded as clod completion prints it, or with --files from
 the files in DIR, as clod install links them: zsh finds _clod on its $fpath
@@ -14,17 +14,24 @@ completion included, so the echoed line is the completed one. Keys typed before
 the prompt would reach the terminal's own line editing instead of the shell's,
 so nothing is typed until the prompt shows. The environment (HOME, PATH) is
 passed through.
+
+With --list it prints what the shell shows after the line and Tab, escape
+sequences removed, instead: the candidates it lists, with zsh's descriptions.
 """
 import os
 import pty
+import re
 import select
 import sys
 import time
 
 args = sys.argv[1:]
 files = None
+listing = False
 if args[0] == "--files":
     files, args = args[1], args[2:]
+if args[0] == "--list":
+    listing, args = True, args[1:]
 shell, lines = args[0], args[1:]
 prompt = "tab-complete> "
 argv = {"bash": ["bash", "--norc", "--noprofile", "-i"], "zsh": ["zsh", "-f", "-i"]}[shell]
@@ -67,7 +74,28 @@ if not files:
 wait_for(prompt.encode())
 os.write(fd, f"{setup}\n".encode())
 wait_for(prompt.encode())
+def read_until_quiet(quiet=0.5, limit=10):
+    """Reads until the shell has been quiet for quiet seconds; returns it."""
+    got = b""
+    end = time.time() + limit
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], quiet)
+        if not r:
+            break
+        got += os.read(fd, 65536)
+    return got
+
+
 for line in lines:
+    if listing:
+        os.write(fd, line.encode() + b"\t")
+        shown = read_until_quiet().decode(errors="replace")
+        print(re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\r", "", shown))
+        # Ctrl-U clears the line; the echoed marker shows the shell is back
+        os.write(fd, b"\x15echo LISTED\n")
+        wait_for(b"\nLISTED")
+        wait_for(prompt.encode())
+        continue
     os.write(fd, line.encode() + b"\t\x01echo RESULT: \n")
     # the terminal echoes the typed "echo RESULT: " too, but not after a newline
     wait_for(b"\nRESULT: ")

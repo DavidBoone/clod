@@ -17,12 +17,21 @@ clod default         # show your defaults
 clod image           # list the images (see Image variants)
 clod home            # list the homes (see Homes)
 clod workspace       # list the volume workspaces
-clod --help          # all commands and options
+clod help            # all commands and options
+clod help home rm    # one command's page; so is clod home rm -h
 ```
 
 Commands that manage something are a noun and a verb: `clod image build`,
 `clod home rm`. The noun on its own lists them, except `shared`, which needs
 `new` or `diff`.
+
+`clod help` lists the commands and options. A command's page, with its usage,
+what it does and the options that apply to it, is `clod help COMMAND`, or `-h`
+or `--help` anywhere after the command: `clod home rm -h`. A noun's page lists
+its verbs. The run commands (`claude`, `codex`, `bash`, `zsh`) are the
+exception: their arguments go to the program they run, so `clod claude --help`
+is Claude Code's help, and `clod help claude` is clod's page for it. A usage
+error names the page to read.
 
 A bare `clod` runs Claude Code, or whatever you've set as the default command.
 To pass it arguments without naming it, put them after `--`: `clod -- --resume`

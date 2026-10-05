@@ -1,6 +1,6 @@
 #!/bin/bash
 # clod: run Claude Code, Codex or a shell in a throwaway Docker container on the
-# current directory. `clod --help` describes the commands and options.
+# current directory. `clod help` describes the commands and options.
 #
 # clod refuses to mount your home directory, a directory above it, ~/.clod or
 # anything under ~/.clod/homes as /workspace, since the agent could then read
@@ -72,10 +72,10 @@
 # the dispatch at the bottom runs the phases a command needs, then the command.
 # Commands are a single word (env, default, the run commands) or a noun with a
 # verb (image, home, workspace, shared); a bare noun lists, except shared, which
-# needs a verb. A new command or noun goes in `commands`, a new verb in its
-# noun's list in noun_verbs, and either in the usage, a cmd_ function and the
-# dispatch; a new option in parse_args, the usage and `options`; a new launcher
-# setting in `settings`. Tab completion reads those lists.
+# needs a verb. A new command or verb goes in command_table and command_docs, a
+# cmd_ function and the dispatch; a new option in parse_args and option_table;
+# a new launcher setting in settings_table. The help, the usage errors' pointers
+# and tab completion read those tables.
 #
 # Helpers return a value in REPLY, plus named globals when there are more, so
 # callers needn't fork a subshell. Those whose result is text print it instead:
@@ -97,30 +97,211 @@ script_dir=$(cd "$(dirname "$script")" && pwd -P)
 base_dir=$script_dir
 [[ -f $base_dir/Dockerfile ]] || base_dir=
 
-# The commands, the ones among them that run in the container, and the nouns,
-# whose verbs noun_verbs lists.
+# The commands, as NAME|ARGS|SUMMARY rows under the headings clod help groups
+# them by. A noun's verbs are rows named NOUN VERB; the noun's own row is its
+# listing, or with ARGS - only a summary, for a noun that needs a verb. ARGS
+# holds the command's usage forms, separated by ";". clod help, the commands'
+# pages, parse_args and tab completion all read this table, in this order.
+read -r -d '' command_table <<'EOF' || true
+Run in the container
+claude|[ARGS...]|Claude Code
+codex|[ARGS...]|Codex
+bash|[ARGS...]|a bash shell
+zsh|[ARGS...]|a zsh shell
+Images
+image||list the images: base, variants and those clod built
+image show|NAME|show how image NAME is built
+image new|NAME [FROM]|create a variant of your own
+image build|[NAME...]|build images and their bases where they're stale
+image rebuild|[NAME...]|rebuild images and their bases from scratch
+image rm|[NAME...]|remove images clod built
+image prune||remove the stale images clod built
+Homes
+home||list the homes and their logins
+home new|HOME|create a home
+home cp|SRC DEST|copy a home to a new one
+home mv|SRC DEST|move a home to a new one
+home rm|NAME...|delete homes, logins included
+Workspaces
+workspace||list the volume workspaces
+workspace rm|NAME...|delete volume workspaces
+Shared config
+shared|-|the shared config: settings and instructions for every home
+shared new||create ~/.clod/shared from the starter
+shared diff||compare ~/.clod/shared with the starter
+Settings
+env||show the home, image, ports and variables a run uses
+default|[KEY [VALUE]];KEY --reset|show or set your defaults
+Set up and help
+install|[DIR]|link clod onto your PATH, and its tab completion
+uninstall||remove the links install made
+update||update clod (git pull in its checkout)
+completion||print tab completion for bash and zsh
+help|[COMMAND]|show help for clod or a command
+EOF
+
+# What each command does, for its page: a paragraph after each @NAME line.
+read -r -d '' command_docs <<'EOF' || true
+@claude
+Runs Claude Code in a throwaway container on the current directory, which is
+mounted as /workspace. ARGS go to Claude Code unchanged, its own options and
+--help included. It runs with --dangerously-skip-permissions unless ARGS
+include --permission-mode, --dangerously-skip-permissions or
+--allow-dangerously-skip-permissions. A bare clod runs it too, unless
+CLOD_COMMAND or clod default command says otherwise; clod -- ARGS passes ARGS
+to that default command.
+@codex
+Runs Codex in a throwaway container on the current directory, which is
+mounted as /workspace, with --dangerously-bypass-approvals-and-sandbox. ARGS
+go to Codex unchanged. Codex installs into the home on first run.
+@bash
+Runs bash in a throwaway container on the current directory, which is mounted
+as /workspace. ARGS go to bash unchanged: clod bash -c 'make test'.
+@zsh
+Runs zsh in a throwaway container on the current directory, which is mounted
+as /workspace. ARGS go to zsh unchanged.
+@image
+Lists the base image, the bundled variants, yours in ~/.clod/images and the
+images clod built, marking those that are stale or in use.
+@image show
+Shows how image NAME is built: each image in its chain, its state (built,
+stale), the images it is FROM and where its files are.
+@image new
+Creates the variant ~/.clod/images/NAME: a copy of variant FROM, a starter
+built on combination FROM (A+B), a copy of the bundled variant NAME, or a
+starter. Run it with clod -i NAME.
+@image build
+Builds the images in the chains of the named images where they're stale, or
+with no NAME the image -i or CLOD_IMAGE selects, without starting a
+container. Images it replaces are removed.
+@image rebuild
+Rebuilds the images in the chains of the named images from scratch, each
+once, pulling a fresh base, or with no NAME the image -i or CLOD_IMAGE
+selects. Images it replaces are removed.
+@image rm
+Removes images clod built, named as -i takes them, or with no NAME the image
+-i or CLOD_IMAGE selects. A variant's files stay, and its next run builds it
+again; an image others are built on loses only its name.
+@image prune
+Removes the stale images clod built, which their next run would rebuild
+anyway, keeping those a container uses.
+@home
+Lists the homes, in ~/.clod/homes and as Docker volumes, with the logins each
+holds. A home is mounted as /home/claude and keeps its own logins.
+@home new
+Creates home HOME: a name (in ~/.clod/homes), a path, or vol:NAME for the
+Docker volume clod-home-NAME. A run asks before creating a home that doesn't
+exist, and without a terminal fails.
+@home cp
+Copies home SRC to a new home DEST, logins included. Either can be a name, a
+path or vol:NAME, so a directory home can become a volume home or the other
+way round. It refuses an existing DEST and a home a container uses.
+@home mv
+Moves home SRC to a new home DEST: a copy, then deleting SRC. A directory
+home moved to a directory is renamed. It refuses an existing DEST and a home
+a container uses.
+@home rm
+Deletes homes, logins included: names in ~/.clod/homes, or vol:NAME. In a
+terminal it lists them and asks first. It refuses a home a container uses.
+Delete a home at a path yourself.
+@workspace
+Lists the workspaces kept in Docker volumes (clod -w vol:NAME), marking those
+a container uses.
+@workspace rm
+Deletes volume workspaces, named NAME or vol:NAME. In a terminal it lists
+them and asks first. It refuses a workspace a container uses.
+@shared
+~/.clod/shared is mounted read-only as /etc/claude-code in every container:
+Claude Code's managed settings, the statusline, and your instructions for
+every home in its CLAUDE.md. Until you create it, clod's starter is mounted.
+@shared new
+Creates ~/.clod/shared as a copy of the starter, to customise. If it exists,
+lists the starter's files it lacks or differs on.
+@shared diff
+Shows the differences between the starter and ~/.clod/shared.
+@env
+Shows what a run here would use: the home, workspace, image, ports, the
+.envrc and the variables it passes in.
+@default
+Shows your defaults in ~/.clod/config, or setting KEY, or sets it to VALUE;
+KEY --reset removes it. Options, then the environment, then a project's
+.envrc, win over these defaults.
+@install
+Links clod into DIR, or the first of ~/.local/bin, ~/bin, /opt/homebrew/bin
+and /usr/local/bin on your PATH that you can write to, else ~/.local/bin. It
+links clod's tab completion where zsh (with compinit) and bash (with
+bash-completion 2) load it, or prints the line to add to your shell startup
+file.
+@uninstall
+Removes the links install made, and only those: clod on your PATH and in
+install's directories, and the completion files. It lists what it leaves.
+@update
+Updates clod: git pull in its checkout, fast-forward only.
+@completion
+Prints tab completion for bash and zsh, to load from your shell startup file
+with eval "$(clod completion)". install sets it up without that line where it
+can.
+@help
+Shows the commands and options, or with COMMAND that command's page. clod
+COMMAND -h shows the same, except for the run commands, whose options go to
+the agent or shell.
+EOF
+
+# The options, as PAGES|FLAGS|VALUE|DESCRIPTION. PAGES lists the pages that
+# show the row, comma-separated: clod for clod help, run for the run commands,
+# else a command as named in command_table. An option can have a row per
+# meaning. VALUE is empty for an option that takes none.
+read -r -d '' option_table <<'EOF' || true
+clod,run,env,image build,image rebuild,image rm|-i --image|NAME|the image or variant to run, or a+b (CLOD_IMAGE)
+clod,run,env|-H --home|HOME|the home: a name, a path or vol:NAME (CLOD_HOME)
+clod,run,env|-w --workspace|PATH|the directory to mount as /workspace, instead of the current one, or vol:NAME for a Docker volume
+clod,run,env|-P --port|PORT|publish a port on localhost, as 5173 or 3000:5173 (host:container); repeatable (CLOD_PORTS)
+clod,run,env|-s --scratch||an empty /workspace, discarded on exit; no .envrc is read. Not with -w
+clod|-f --force||run from a directory clod otherwise refuses; replace (install, shared new); delete without asking (home rm, workspace rm)
+run,env|-f --force||run from a directory clod otherwise refuses
+install|-f --force||replace an existing clod or completion file
+shared new|-f --force||replace ~/.clod/shared, keeping a backup
+home rm,workspace rm|-f --force||delete without asking; needed without a terminal
+clod,run|--skip-build||run the image as built, even if its files changed
+clod,run|--docker||mount the host's Docker socket, which is root on the Docker host; the CLI comes from the image (-i docker)
+clod|-h --help||show help; after a command, that command's
+clod|--version||show clod's version
+EOF
+
+# The launcher settings, as KEY|VARIABLE|BUILT-IN (- for none)|DESCRIPTION, in
+# the order clod default lists them.
+read -r -d '' settings_table <<'EOF' || true
+image|CLOD_IMAGE|clod|the image or variant a run uses
+command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, bash or zsh
+home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
+ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
+EOF
+
+# The commands that run in the container, the commands (each noun once) and the
+# nouns, whose verbs noun_verbs lists, all from command_table.
 run_commands='claude codex bash zsh'
-nouns='image home workspace shared'
-commands="$run_commands env $nouns default update install uninstall completion"
-# Commands that stand for image's verbs, left out of the usage and completion.
+commands='' nouns=''
+while IFS= read -r row; do
+  [[ $row == *'|'* ]] || continue
+  row=${row%%|*}
+  case " $commands " in *" ${row%% *} "*) ;; *) commands+="${commands:+ }${row%% *}" ;; esac
+  [[ $row == *' '* ]] || continue
+  case " $nouns " in *" ${row%% *} "*) ;; *) nouns+="${nouns:+ }${row%% *}" ;; esac
+done <<<"$command_table"
+setting_keys=''
+while IFS='|' read -r row _; do setting_keys+="${setting_keys:+ }$row"; done <<<"$settings_table"
+unset row
+# Commands that stand for image's verbs, left out of the help and completion.
 alias_commands='build rebuild'
 
 # Sets REPLY to the verbs of noun $1.
 noun_verbs() {
-  case $1 in
-    image) REPLY='show new build rebuild rm prune' ;;
-    home) REPLY='new cp mv rm' ;;
-    workspace) REPLY='rm' ;;
-    shared) REPLY='new diff' ;;
-  esac
+  local name
+  REPLY=''
+  while IFS='|' read -r name _; do
+    [[ $name == "$1 "* ]] && REPLY+="${REPLY:+ }${name#* }"
+  done <<<"$command_table"
 }
-# The long options parse_args takes, for tab completion.
-options='--image --home --workspace --port --scratch --force --skip-build --docker --help --version'
-
-# The launcher settings, as KEY:VARIABLE:BUILT-IN (- for none), in the order
-# clod default lists them.
-settings='image:CLOD_IMAGE:clod command:CLOD_COMMAND:claude home:CLOD_HOME:default
-  ports:CLOD_PORTS:-'
 
 name_re='^[A-Za-z0-9_-]+$'
 # A variant's name, which goes in a Docker image name: lowercase, with no
@@ -144,110 +325,99 @@ clod_version() {
   git -C "$script_dir" describe --tags --always --dirty 2>/dev/null || echo unknown
 }
 
-usage() {
-  cat <<'USAGE'
-Usage: clod [options] [command] [args...]
-
-Runs an agent or a shell in a throwaway container on the current directory.
-
-Commands:
-  claude [args]          Claude Code
-  codex [args]           Codex
-  bash|zsh [args]        a shell in the container
-  env                    show the home, image, ports, .envrc and variables
-  default [KEY [VALUE]]  show or set your defaults: image, command, home,
-                         ports (VALUE --reset removes one)
-  update                 update clod itself (git pull in its checkout)
-  install [DIR]          link clod into DIR, or a directory on your PATH, and
-                         its tab completion where bash and zsh load it
-  uninstall              remove the links install made
-  completion             print tab completion for bash and zsh, to load from
-                         your shell's startup file: eval "$(clod completion)"
-
-  image                  list the base image, the variants and the images clod
-                         built, and which are stale or in use
-  image show NAME        show how image NAME is built: the images it is FROM
-  image new NAME [FROM]  create ~/.clod/images/NAME as a copy of variant FROM,
-                         a starter on combination FROM (A+B), a copy of the
-                         bundled variant NAME, or a starter
-  image build [NAME...]  build images and their bases where they're stale, or
-                         the one -i names
-  image rebuild [NAME...]
-                         rebuild images and their bases from scratch, or the
-                         one -i names
-  image rm [NAME...]     remove images clod built, or the one -i names; a
-                         variant's files stay, and its next run builds it again
-  image prune            remove the stale images clod built, which their next
-                         run would rebuild anyway
-
-  home                   list the homes and their logins
-  home new HOME          create a home: a name, a path or vol:NAME. A run
-                         asks before creating a home that doesn't exist, and
-                         without a terminal fails
-  home cp SRC DEST       copy home SRC to a new home DEST: a name, a path or
-                         vol:NAME, so a directory home can become a volume one
-                         or the other way round
-  home mv SRC DEST       move home SRC to a new home DEST, as cp then deleting
-                         SRC; a directory home moved to a directory is renamed
-  home rm NAME...        delete homes, logins included: names (in
-                         ~/.clod/homes) or vol:NAME; asks first (--force
-                         doesn't). Delete a home at a path yourself
-
-  workspace              list the volume workspaces, and which are in use
-  workspace rm NAME...   delete volume workspaces, named NAME or vol:NAME;
-                         asks first (--force doesn't)
-
-  shared new             create ~/.clod/shared as a copy of the starter shared
-                         config, to customise; if it exists, list the starter's
-                         files it lacks or differs on (--force replaces it,
-                         keeping a backup)
-  shared diff            show the differences between the starter shared config
-                         and ~/.clod/shared
-
-Options (before the command):
-  -i, --image NAME       image or variant to run            (CLOD_IMAGE)
-                           -i go+sudo    the sudo variant built on go
-  -H, --home NAME|PATH   container home                     (CLOD_HOME)
-                           -H vol:NAME   the Docker volume clod-home-NAME
-  -w, --workspace PATH|vol:NAME
-                         the directory to mount as /workspace, instead of the
-                         current one
-                           -w vol:NAME   the Docker volume clod-workspace-NAME
-  -P, --port PORT        publish a port on localhost; repeatable (CLOD_PORTS)
-                           -P 5173       localhost:5173 -> container port 5173
-                           -P 3000:5173  localhost:3000 -> container port 5173
-  -s, --scratch          an empty /workspace, discarded on exit, instead of the
-                         current directory; no .envrc is read. Not with -w
-  -f, --force            run from a directory clod otherwise refuses; replace
-                         an existing clod or completion file (install) or
-                         shared config (shared new); delete without asking
-                         (home rm, workspace rm)
-      --skip-build       run the image as built, even if its files have changed
-      --docker           mount the host's Docker socket. Only the socket: the
-                         docker CLI comes from the image (clod -i docker
-                         --docker). WARNING: the socket is root on the Docker
-                         host, which can mount and read anything on your machine
-  -h, --help             show this help
-      --version          show clod's version
-  --                     end of options: the rest goes to the default command
-
-With no command, clod runs the default command: claude, unless CLOD_COMMAND
-or `clod default command` says otherwise. A command's own args go after it,
-unchanged, options included.
-
-Examples:
-  clod                     Claude Code
-  clod -- --resume         Claude Code with its own arguments
-  clod -i go -P 5173       the go variant, with port 5173 published
-  clod -H work codex       Codex in the "work" home
-  clod -s                  Claude Code in an empty, throwaway /workspace
-  clod -w vol:play         Claude Code in the workspace kept in a Docker volume
-USAGE
+# Prints a row of help: synopsis $1 and description $2, the description wrapped
+# to 80 columns beside it, or below it when the synopsis is too long.
+help_row() {
+  local line pad blank
+  printf -v pad '%-24s' "$1"
+  printf -v blank '%24s' ''
+  if (( ${#1} > 24 )); then
+    printf '  %s\n' "$1"
+    pad=$blank
+  fi
+  while IFS= read -r line; do
+    printf '  %s %s\n' "$pad" "$line"
+    pad=$blank
+  done < <(fold -s -w 53 <<<"$2" | sed 's/ *$//')
 }
 
-# Exits with error message $1 and a pointer to --help.
+# Prints the option rows of option_table for page $1.
+help_options() {
+  local pages flags value desc
+  while IFS='|' read -r pages flags value desc; do
+    [[ ,$pages, == *,"$1",* ]] || continue
+    if [[ $flags == -?' '* ]]; then flags="${flags%% *}, ${flags#* }"; else flags="    $flags"; fi
+    help_row "$flags${value:+ $value}" "$desc"
+  done <<<"$option_table"
+}
+
+# Prints clod help: the commands under their headings, and the options.
+help_summary() {
+  local row name args summary
+  echo 'usage: clod [OPTIONS] [COMMAND [ARGS...]]'
+  echo
+  echo 'Runs Claude Code, Codex or a shell in a throwaway container on the current'
+  echo 'directory. With no COMMAND it runs the default command: claude, unless'
+  echo 'CLOD_COMMAND or clod default command says otherwise.'
+  while IFS= read -r row; do
+    if [[ $row != *'|'* ]]; then
+      printf '\n%s\n' "$row"
+      continue
+    fi
+    IFS='|' read -r name args summary <<<"$row"
+    [[ $args == - ]] || help_row "$name${args:+ ${args%%;*}}" "$summary"
+  done <<<"$command_table"
+  printf '\nOptions, before the command\n'
+  help_options clod
+  # shellcheck disable=SC2016 # printed as is
+  printf "\n'clod COMMAND -h' shows more about COMMAND.\n"
+}
+
+# Prints the page of command $1, a command or NOUN VERB: its usage forms, what
+# it does, a noun's verbs, default's keys, and the options that apply to it.
+help_page() {
+  local name args summary form label='usage:' key var desc out
+  while IFS='|' read -r name args summary; do
+    [[ $name == "$1" ]] || continue
+    [[ $args == - ]] && args=COMMAND
+    while IFS= read -r form; do
+      printf '%s clod [OPTIONS] %s%s\n' "$label" "$name" "${form:+ $form}"
+      label='      '
+    done <<<"${args//;/$'\n'}"
+  done < <(grep '|' <<<"$command_table")
+  echo
+  awk -v head="@$1" '$0 == head { on = 1; next } /^@/ { on = 0 } on' <<<"$command_docs"
+  if [[ $1 != *' '* ]] && is_one_of "$1" "$nouns"; then
+    printf '\nCommands\n'
+    while IFS='|' read -r name args summary; do
+      [[ $name == "$1 "* ]] && help_row "$name${args:+ ${args%%;*}}" "$summary"
+    done < <(grep '|' <<<"$command_table")
+  fi
+  if [[ $1 == default ]]; then
+    printf '\nKeys\n'
+    while IFS='|' read -r key var _ desc; do
+      help_row "$key ($var)" "$desc"
+    done <<<"$settings_table"
+  fi
+  if is_one_of "$1" "$run_commands"; then out=$(help_options run); else out=$(help_options "$1"); fi
+  [[ -z $out ]] || printf '\nOptions, before the command\n%s\n' "$out"
+}
+
+# Prints clod help, or with $1 the page of that command.
+show_help() {
+  if [[ -z $1 ]]; then help_summary; else help_page "$1"; fi
+}
+
+# Exits with error message $1 and where to read about it: the page of the
+# command it's about, or clod help.
 usage_error() {
-  echo "clod: $1 (see clod --help)" >&2
+  local see='clod help'
+  if is_one_of "$command" "$run_commands"; then
+    see="clod help $command"
+  elif [[ -n $command && $command != help ]]; then
+    see="clod $command${verb:+ $verb} -h"
+  fi
+  echo "clod: $1 (see '$see')" >&2
   exit 2
 }
 
@@ -336,12 +506,10 @@ envrc_vars() {
 # Sets setting_key, setting_var and setting_builtin to the launcher setting
 # whose key or variable is $1, or fails if there is none.
 find_setting() {
-  local s
-  for s in $settings; do
-    setting_key=${s%%:*} s=${s#*:}
-    setting_var=${s%%:*} setting_builtin=${s#*:}
+  local desc
+  while IFS='|' read -r setting_key setting_var setting_builtin desc; do
     [[ $1 == "$setting_key" || $1 == "$setting_var" ]] && return 0
-  done
+  done <<<"$settings_table"
   return 1
 }
 
@@ -614,12 +782,13 @@ off_limits() {
 
 # Reads the command line into scratch, workspace_opt, force, skip_build,
 # docker_socket, command (empty for the default command), verb (a noun's, or
-# empty) and args, the command's arguments.
+# empty) and args, the command's arguments; or shows the help it asks for
+# (clod help, -h, --help) and exits.
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
   local opt_ports=() dashdash='' arg
-  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' command='' verb=''
+  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' command='' verb='' help=''
   while (( $# )); do
     case $1 in
       -i|--image|-H|--home|-w|--workspace|-P|--port)
@@ -640,7 +809,7 @@ parse_args() {
       -f|--force) force=1; shift ;;
       --skip-build) skip_build=1; shift ;;
       --docker) docker_socket=1; shift ;;
-      -h|--help) usage; exit 0 ;;
+      -h|--help) help=1; shift ;;
       --version) echo "clod $(clod_version)"; exit 0 ;;
       --) shift; dashdash=1; break ;;
       # Claude Code's -p (print) and -c (continue), typed as if clod were claude.
@@ -660,9 +829,34 @@ parse_args() {
     verb=$command command=image
   elif is_one_of "$command" "$nouns" && (( $# )); then
     noun_verbs "$command"
-    is_one_of "$1" "$REPLY" || usage_error "unknown $command command '$1' (one of: ${REPLY// /, })"
-    verb=$1
-    shift
+    if is_one_of "$1" "$REPLY"; then
+      verb=$1
+      shift
+    elif [[ $1 != -h && $1 != --help ]]; then
+      usage_error "unknown $command command '$1' (one of: ${REPLY// /, })"
+    fi
+  fi
+  # -h or --help among a command's arguments, up to --, asks for its page,
+  # except for the run commands, whose arguments go to the agent or shell.
+  if [[ -z $dashdash ]] && ! is_one_of "$command" "$run_commands"; then
+    for arg; do
+      [[ $arg == -- ]] && break
+      [[ $arg == -h || $arg == --help ]] && help=1
+    done
+  fi
+  if [[ -n $help ]]; then
+    show_help "$command${verb:+ $verb}"
+    exit 0
+  fi
+  if [[ $command == help ]]; then
+    (( $# <= 2 )) || usage_error "help takes a command, and a noun's verb"
+    (( $# == 0 )) || is_one_of "$1" "$commands" || usage_error "unknown command '$1'"
+    if (( $# == 2 )); then
+      noun_verbs "$1"
+      is_one_of "$2" "$REPLY" || usage_error "unknown $1 command '$2'"
+    fi
+    show_help "$*"
+    exit 0
   fi
   case $command${verb:+ $verb} in
     env|image|'image prune'|home|workspace|'shared new'|'shared diff'|update|uninstall|completion)
@@ -983,16 +1177,55 @@ cmd_completion() {
 # Prints the words in $@ that start with the word being completed, $cur, as
 # the shell completes them: after $pre (an option's --NAME=), less $strip (what
 # bash, which splits words at = and :, has before its own current word). Skips
-# the words in $given, the names a command has already.
+# the words in $given, the names a command has already. A word can carry a
+# description after a tab, which zsh shows beside it.
 offer() {
-  local word out
-  for word in "$@"; do
+  local item word out
+  for item in "$@"; do
+    word=${item%%$'\t'*}
     [[ $word == "$cur"* ]] || continue
     is_one_of "$word" "$given" && continue
     out=$pre$word
-    printf '%s\n' "${out#"$strip"}"
+    out=${out#"$strip"}
+    [[ $item == *$'\t'* ]] && out+=$'\t'${item#*$'\t'}
+    printf '%s\n' "$out"
   done
   return 0
+}
+
+# Sets items to candidates from the tables, each a word, a tab and its
+# description: the commands ($1 commands), the verbs of noun $2 (verbs), the
+# run commands (run), the long options (options) or the setting keys
+# (settings).
+table_items() {
+  local name args summary flags value desc seen=''
+  items=()
+  case $1 in
+    commands|verbs|run)
+      while IFS='|' read -r name args summary; do
+        case $1 in
+          commands) [[ $name == *' '* ]] && continue ;;
+          verbs) [[ $name == "$2 "* ]] || continue; name=${name#* } ;;
+          run) is_one_of "$name" "$run_commands" || continue ;;
+        esac
+        items+=("$name"$'\t'"$summary")
+      done < <(grep '|' <<<"$command_table")
+      ;;
+    # An option's first row, which describes it in clod help.
+    options)
+      while IFS='|' read -r _ flags value desc; do
+        flags=${flags##* }
+        is_one_of "$flags" "$seen" && continue
+        seen+=" $flags"
+        items+=("$flags"$'\t'"$desc")
+      done <<<"$option_table"
+      ;;
+    settings)
+      while IFS='|' read -r name _ _ desc; do
+        items+=("$name"$'\t'"$desc")
+      done <<<"$settings_table"
+      ;;
+  esac
 }
 
 # Prints the names of the Docker volumes named $1NAME, as NAME, if Docker is
@@ -1026,13 +1259,19 @@ offer_images() {
 }
 
 # `clod __complete WORDS...`, which the shim calls: prints the candidates for
-# the last word, given the words before it, one per line, or exits 1 where the
-# word is a file name: a command's arguments, a home's path or install's
-# directory. It reads only directories, never the envrc, and asks Docker only
-# for volume homes and workspaces and image rm's images, so it's quick.
+# the last word, given the words before it, one per line, each with any
+# description after a tab, or exits 1 where the word is a file name: a
+# command's arguments, a home's path or install's directory. It reads only the
+# tables and directories, never the envrc, and asks Docker only for volume homes
+# and workspaces and image rm's images, so it's quick.
 cmd_complete() {
   local raw=("$@") words=() cur last pre='' strip='' glue='' cmd='' cmd_args=() prev=''
-  local word i s keys='' homes='' variants verb='' given='' path_like=''
+  local word i homes='' variants verb='' given='' path_like='' value_flags='' flags value items
+  local reset=--reset$'\t''remove this default'
+  # The options that take a value, as -i --image.
+  while IFS='|' read -r _ flags value _; do
+    [[ -n $value ]] && value_flags+=" $flags"
+  done <<<"$option_table"
   # bash splits a word at = and : (--home=vol:NAME, -P 3000:5173) into pieces,
   # with each = and : a piece of its own; this joins them back up.
   for word in ${raw[@]+"${raw[@]}"}; do
@@ -1057,8 +1296,7 @@ cmd_complete() {
     fi
     case $word in
       --) return 1 ;;
-      -i|--image|-H|--home|-w|--workspace|-P|--port) (( i++ )) ;;
-      -*) ;;
+      -*) is_one_of "$word" "$value_flags" && (( i++ )) ;;
       *) cmd=$word ;;
     esac
   done
@@ -1080,7 +1318,6 @@ cmd_complete() {
       while IFS= read -r word; do homes+=" vol:$word"; done < <(volume_names clod-home-)
     fi
   fi
-  for s in $settings; do keys+=" ${s%%:*}"; done
   # shellcheck disable=SC2086 # the lists are words without spaces or globs
   if [[ -z $cmd ]]; then
     case $prev in
@@ -1093,24 +1330,32 @@ cmd_complete() {
         offer $(volume_names clod-workspace- | sed 's/^/vol:/')
         ;;
       -P|--port) ;;
-      *) if [[ $cur == -* ]]; then offer $options; else offer $commands; fi ;;
+      *)
+        if [[ $cur == -* ]]; then table_items options; else table_items commands; fi
+        offer "${items[@]}"
+        ;;
     esac
   elif [[ " $run_commands " == *" $cmd "* ]]; then
     return 1
   elif [[ $cmd == install && ${#cmd_args[@]} == 0 ]]; then
     return 1
+  elif [[ $cmd == help ]]; then
+    case ${#cmd_args[@]} in
+      0) table_items commands; offer "${items[@]}" ;;
+      1) is_one_of "${cmd_args[0]}" "$nouns" && table_items verbs "${cmd_args[0]}" && offer "${items[@]}" ;;
+    esac
   elif [[ $cmd == default ]]; then
     case ${#cmd_args[@]}:${cmd_args[0]} in
-      0:*) offer $keys ;;
-      1:image) offer_images; offer --reset ;;
-      1:command) offer $run_commands --reset ;;
-      1:home) [[ -n $path_like ]] && return 1; offer $homes --reset ;;
-      1:ports) offer --reset ;;
+      0:*) table_items settings; offer "${items[@]}" ;;
+      1:image) offer_images; offer "$reset" ;;
+      1:command) table_items run; offer "${items[@]}" "$reset" ;;
+      1:home) [[ -n $path_like ]] && return 1; offer $homes "$reset" ;;
+      1:ports) offer "$reset" ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
     if (( ${#cmd_args[@]} == 0 )); then
-      noun_verbs "$cmd"
-      offer $REPLY
+      table_items verbs "$cmd"
+      offer "${items[@]}"
       return 0
     fi
     verb=${cmd_args[0]}
@@ -1194,8 +1439,7 @@ show_setting() {
 # Shows the launcher settings in ~/.clod/config, or setting $1, or sets it to
 # $2.
 cmd_default() {
-  local keys='' s key=$1 value=$2 var rest p
-  for s in $settings; do keys+="${keys:+ }${s%%:*}"; done
+  local keys=$setting_keys s key=$1 value=$2 var rest p
   if [[ $# -eq 0 ]]; then
     for s in $keys; do show_setting "$s"; done
     echo

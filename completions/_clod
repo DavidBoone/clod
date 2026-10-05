@@ -3,8 +3,20 @@
 # where clod install links it. It hands the words to clod __complete, and
 # completes file names only when that exits 1.
 
-local -a reply
+local -a reply described
+local line word
 # A file name after = (--workspace=DIR) is completed from the =.
 reply=(${(f)"$(clod __complete "${(@)words[2,CURRENT]}")"}) ||
   { [[ $PREFIX == -*=* ]] && compset -P '*='; _files; return; }
-compadd -a reply
+# Each candidate is a word with any description after a tab. _describe lists
+# the description beside the word, and takes a : in the word escaped; -V keeps
+# the candidates in clod's order.
+for line in $reply; do
+  word=${${line%%$'\t'*}//:/\\:}
+  if [[ $line == *$'\t'* ]]; then
+    described+=("$word:${line#*$'\t'}")
+  else
+    described+=("$word")
+  fi
+done
+_describe -V clod described
