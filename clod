@@ -39,9 +39,10 @@
 # --build-arg BASE=clod-a.
 #
 # ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
-# reads managed settings and CLAUDE.md for every home. Until you create it, the
-# starter set in this script's shared/ directory is mounted instead. What Claude
-# is told about the container comes with the image, from container.md.
+# reads managed settings and CLAUDE.md for every home, and the entrypoint passes
+# its settings.json as --settings. Until you create it, the starter set in this
+# script's shared/ directory is mounted instead. What Claude is told about the
+# container comes with the image, from container.md.
 #
 # /workspace is the current directory, or with -w another directory or, as
 # vol:NAME, the Docker volume clod-workspace-NAME. It is an option only: the
@@ -216,8 +217,9 @@ Deletes volume workspaces, named NAME or vol:NAME. In a terminal it lists
 them and asks first. It refuses a workspace a container uses.
 @shared
 ~/.clod/shared is mounted read-only as /etc/claude-code in every container:
-Claude Code's managed settings, the statusline, and your instructions for
-every home in its CLAUDE.md. Until you create it, clod's starter is mounted.
+settings for every home (the statusline), any managed settings, and your
+instructions for every home in its CLAUDE.md. Until you create it, clod's
+starter is mounted.
 @shared new
 Creates ~/.clod/shared as a copy of the starter, to customise. If it exists,
 lists the starter's files it lacks or differs on.
@@ -2008,6 +2010,10 @@ cmd_shared_new() {
     # A CLAUDE.md that describes the container repeats the image's container.md.
     if grep -qs "started by the user's \`clod\` launcher" "$target/CLAUDE.md"; then
       echo "clod: $(tildify "$target/CLAUDE.md") describes the container, which the image already does; remove that section"
+    fi
+    # The statusline moved from managed-settings.json to settings.json.
+    if grep -qs '"statusLine"' "$target/managed-settings.json"; then
+      echo "clod: $(tildify "$target/managed-settings.json") sets statusLine, which now goes in settings.json; move it there"
     fi
     # Compares the starter's files with yours; files only you have aren't listed.
     report=$(cd "$starter" && find . -type f | sort | while IFS= read -r f; do

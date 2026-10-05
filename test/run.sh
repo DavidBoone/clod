@@ -93,7 +93,7 @@ test_run_command() {
     test "$(cat /proc/1/comm)" = tini
     test "$USER" = claude && test "$TMPDIR" = /tmp && test "$EDITOR" = vim && test "$PAGER" = less
     test "$(cat /workspace/from-host)" = hello
-    test -f /etc/claude-code/managed-settings.json
+    test -f /etc/claude-code/settings.json
     test -r /etc/clod/.claude/rules/clod.md
     touch /workspace/from-container
     apt-cache policy gh | grep -A1 "^ *\*\*\*" | grep -q cli.github.com
@@ -215,9 +215,14 @@ test_claude_args() {
   printf '#!/bin/sh\nprintf "%%s\\n" "$@"\n' > ~/.clod/homes/args/.local/bin/claude
   chmod +x ~/.clod/homes/args/.local/bin/claude
   clod -H args -- -p hi | tee out
-  has -e '^--settings=/etc/claude-code/managed-settings.json$' out
+  has -e '^--settings=/etc/claude-code/settings.json$' out
   has -e '^--dangerously-skip-permissions$' out
   test "$(tail -2 out | tr '\n' ' ')" = '-p hi '
+  # only the last --settings applies, so the user's own replaces the shared one
+  clod -H args -- --settings mine.json -p hi | tee out
+  exits 1 grep -q /etc/claude-code/settings.json out
+  clod -H args -- --settings=mine.json -p hi | tee out
+  exits 1 grep -q /etc/claude-code/settings.json out
 }
 
 test_codex() {
@@ -543,7 +548,7 @@ test_shared() {
   clod shared diff | has 'same as the starter'
   clod env | has '^shared: *~/.clod/shared'
   rm ~/.clod/shared/statusline.sh
-  echo '# mine' >> ~/.clod/shared/managed-settings.json
+  echo '# mine' >> ~/.clod/shared/settings.json
   clod shared new | has 'missing  *statusline.sh'
   exits 1 clod shared diff | has '^Only in .*/shared: statusline.sh$'
   exits 1 clod shared diff | has -x '+# mine'
@@ -554,6 +559,8 @@ test_shared() {
   PATH=$PWD/bin:$PATH exits 2 clod shared diff
   cp "$repo/container.md" ~/.clod/shared/CLAUDE.md
   clod shared new | has 'describes the container'
+  echo '{"statusLine": {}}' > ~/.clod/shared/managed-settings.json
+  clod shared new | has 'sets statusLine'
   clod --force shared new
   test -f ~/.clod/shared/statusline.sh
   ls -d ~/.clod/shared.bak-*

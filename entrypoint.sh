@@ -53,12 +53,18 @@ if [ -d /etc/clod ]; then
     set -- --add-dir=/etc/clod "$@"
     export CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
 fi
-# Claude Code reads only one managed source, so an organisation's server-managed
-# settings replace /etc/claude-code's file, statusline and all. Passing the file
-# as --settings too keeps it in effect then, below the organisation's settings;
-# when the file is the managed source, the same values apply twice.
-if [ -r /etc/claude-code/managed-settings.json ]; then
-    set -- --settings=/etc/claude-code/managed-settings.json "$@"
+# The shared settings (the statusline) go in as --settings, not as managed
+# settings, which an organisation's server-managed settings would replace. Only
+# the last --settings applies, so one in the arguments replaces them.
+settings=/etc/claude-code/settings.json
+for arg; do
+    case $arg in
+        --) break ;;
+        --settings|--settings=*) settings= ;;
+    esac
+done
+if [ -n "$settings" ] && [ -r "$settings" ]; then
+    set -- --settings="$settings" "$@"
 fi
 # Installed into the mounted home so Claude Code can update itself.
 command -v claude >/dev/null || {
