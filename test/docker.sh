@@ -39,13 +39,14 @@ usage() {
 }
 
 # Starts the container, making it and its image if needed, and waits for its
-# Docker.
+# Docker. --init reaps the processes the tests leave to PID 1, which dockerd
+# doesn't.
 start() {
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     printf '%s\n' "$dockerfile" | docker build -q --pull -t "$image" - >/dev/null || return 1
   fi
   if ! docker container inspect "$name" >/dev/null 2>&1; then
-    docker run -d --privileged --name "$name" -v "$volume:/var/lib/docker" "$image" >/dev/null ||
+    docker run -d --init --privileged --name "$name" -v "$volume:/var/lib/docker" "$image" >/dev/null ||
       return 1
   fi
   docker start "$name" >/dev/null || return 1
