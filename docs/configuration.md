@@ -65,7 +65,7 @@ stopped one, and `/`, your home folder, a folder above it, `~/.clod` and
 
 ## Settings
 
-Each option has a matching setting, which can come from your shell
+Each option has a matching setting. A setting can come from your shell
 environment, per project from an `.envrc` (see [Per-project
 environment](#per-project-environment)), or as your defaults from
 `~/.clod/config` (see [Your defaults](#your-defaults)). An option wins over
@@ -79,6 +79,7 @@ A setting given empty still wins and means its default, so `clod -P ''` or
 | `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod image` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
+| `CLOD_PORTS_BUSY` | none | `skip` | What a run does with a `CLOD_PORTS` host port another running container publishes: `skip` leaves it out, `next` publishes the next free host port, `error` stops. A taken port given with `-P` always stops the run (see [Publishing ports](usage.md#publishing-ports)). |
 
 In an `.envrc`, `$PWD` is the `.envrc`'s directory, so
 `export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
@@ -95,11 +96,12 @@ clod default image go           # CLOD_IMAGE=go
 clod default command codex      # a bare clod runs Codex
 clod default home work          # CLOD_HOME=work
 clod default ports 5173         # CLOD_PORTS=5173
+clod default ports-busy next    # CLOD_PORTS_BUSY=next
 clod default image              # show one
 clod default image --reset      # back to the built-in default
 ```
 
-The keys are `image`, `command`, `home` and `ports`. Values are checked when
+The keys are `image`, `command`, `home`, `ports` and `ports-busy`. Values are checked when
 you set them, and a home path is stored as an absolute path. Your shell's
 settings and a project's `.envrc` win over these defaults; `clod env` shows
 what a run will actually use.

@@ -173,6 +173,20 @@ clod -P 5173 -P 8080         # several
 clod -P ''                   # none, even if the .envrc or config sets some
 ```
 
+Another running container may already publish a host port, such as a second
+`clod` in the same project. A port given with `-P` then stops the run before it
+starts. A port from `CLOD_PORTS` (the `.envrc`, your shell or your defaults) is
+left out instead, with a warning, and the rest are published; the container's
+`CLOD_PORTS` lists only those published. `CLOD_PORTS_BUSY` changes that:
+
+```bash
+clod default ports-busy next   # publish the next free host port (8091 for 8090) instead
+clod default ports-busy error  # stop, as for -P
+clod default ports-busy skip   # leave it out (the default)
+```
+
+Only the ports other running containers publish are checked.
+
 ## Updating and rebuilding
 
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists

@@ -22,6 +22,10 @@
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
 #               space-separated: 8080 (the same on both sides), host:container,
 #               or address:host:container to publish on another address
+#   CLOD_PORTS_BUSY  what a run does with a CLOD_PORTS host port another
+#               running container publishes: skip (default) leaves it out, next
+#               publishes the next free host port, error stops. A port given
+#               with -P that is taken always stops the run.
 #
 # The .envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
@@ -275,6 +279,7 @@ image|CLOD_IMAGE|clod|the image or variant a run uses
 command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, bash or zsh
 home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
+ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
 EOF
 
 # The commands that run in the container, the commands (each noun once) and the
@@ -781,14 +786,14 @@ off_limits() {
 # The setup phases.
 
 # Reads the command line into scratch, workspace_opt, force, skip_build,
-# docker_socket, command (empty for the default command), verb (a noun's, or
+# docker_socket, ports_opt (set when -P gave the ports), command (empty for the default command), verb (a noun's, or
 # empty) and args, the command's arguments; or shows the help it asks for
 # (clod help, -h, --help) and exits.
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
   local opt_ports=() dashdash='' arg
-  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' command='' verb='' help=''
+  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' ports_opt='' command='' verb='' help=''
   while (( $# )); do
     case $1 in
       -i|--image|-H|--home|-w|--workspace|-P|--port)
@@ -881,7 +886,7 @@ parse_args() {
   esac
   [[ -n $scratch && -n $workspace_opt ]] && usage_error "--scratch and --workspace don't combine"
   args=("$@")
-  (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}"
+  (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}" ports_opt=1
   return 0
 }
 
@@ -1007,6 +1012,10 @@ setup_container() {
     esac
     container_ports+=("${p##*:}")
   done
+  case ${CLOD_PORTS_BUSY:-skip} in
+    skip|next|error) ;;
+    *) echo "clod: CLOD_PORTS_BUSY is '$CLOD_PORTS_BUSY'; it must be skip, next or error" >&2; exit 1 ;;
+  esac
 
   tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
   tz=${tz##*zoneinfo/}
@@ -1351,6 +1360,10 @@ cmd_complete() {
       1:command) table_items run; offer "${items[@]}" "$reset" ;;
       1:home) [[ -n $path_like ]] && return 1; offer $homes "$reset" ;;
       1:ports) offer "$reset" ;;
+      1:ports-busy)
+        offer $'skip\tleave the port out' $'next\tpublish the next free host port' \
+          $'error\tstop before running' "$reset"
+        ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
     if (( ${#cmd_args[@]} == 0 )); then
@@ -1430,9 +1443,9 @@ show_setting() {
   find_setting "$1"
   value=$(sed -n "s/^$setting_var=//p" "$config" 2>/dev/null | tail -1)
   if [[ -n $value ]]; then
-    printf '%-8s %-14s (%s)\n' "$1" "$value" "$(tildify "$config")"
+    printf '%-10s %-14s (%s)\n' "$1" "$value" "$(tildify "$config")"
   else
-    printf '%-8s %-14s (built in)\n' "$1" "$setting_builtin"
+    printf '%-10s %-14s (built in)\n' "$1" "$setting_builtin"
   fi
 }
 
@@ -1478,6 +1491,9 @@ cmd_default() {
         for p in ${value//,/ }; do
           [[ $p =~ $port_re ]] || usage_error "invalid port '$p'"
         done
+        ;;
+      ports-busy)
+        is_one_of "$value" 'skip next error' || usage_error "ports-busy is one of skip, next, error"
         ;;
     esac
   fi
@@ -2134,6 +2150,12 @@ cmd_env() {
     for p in "${port_args[@]}"; do
       [[ $p == -p ]] || shown+="${shown:+, }${p%:*} → ${p##*:}"
     done
+    if [[ -z $ports_opt ]]; then
+      case ${CLOD_PORTS_BUSY:-skip} in
+        skip) shown+=' (each left out if another container has it)' ;;
+        next) shown+=' (each moved to a free host port if another container has it)' ;;
+      esac
+    fi
     field ports "$shown"
   fi
   [[ -n $docker_socket ]] && field docker "the host's Docker socket (root on the Docker host)"
@@ -2208,6 +2230,79 @@ need_home() {
   [[ $home == vol:* ]] || mkdir -p "$home"
 }
 
+# Sets taken to the host ports the running containers publish, a line each as
+# ADDRESS PORT PORT/PROTO /NAME (the container's port and name), with * for
+# every address.
+taken_ports() {
+  local ids
+  taken=''
+  ids=$(docker ps -q 2>/dev/null)
+  [[ -n $ids ]] || return 0
+  # shellcheck disable=SC2086 # container ids are words
+  taken=$(docker inspect -f '{{$n := .Name}}{{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{or .HostIp "*"}} {{.HostPort}} {{$p}} {{$n}}
+{{end}}{{end}}' $ids 2>/dev/null)
+}
+
+# True when host port $2, protocol $3, on address $1 is in taken; sets REPLY to
+# the container that has it. A wildcard address on either side overlaps any.
+port_taken() {
+  local addr port cport name
+  while read -r addr port cport name; do
+    [[ $port == "$2" && ${cport#*/} == "$3" ]] || continue
+    case $addr in "$1"|'*'|0.0.0.0|::) ;; *) [[ $1 == 0.0.0.0 || $1 == :: ]] || continue ;; esac
+    REPLY=${name#/}
+    return 0
+  done <<<"$taken"
+  return 1
+}
+
+# Checks port_args' host ports against those other running containers publish,
+# and for each one taken, stops when -P gave it or CLOD_PORTS_BUSY is error,
+# leaves it out of port_args and container_ports when it is skip, and publishes
+# the next free host port instead when it is next.
+settle_ports() {
+  local i spec addr ip host first cont proto holder args=() conts=() mode=${CLOD_PORTS_BUSY:-skip}
+  (( ${#port_args[@]} )) || return 0
+  [[ -n $ports_opt ]] && mode=error
+  taken_ports
+  [[ -n $taken ]] || return 0
+  # port_args is -p ADDRESS:HOST:CONTAINER[/PROTO] pairs.
+  for (( i = 1; i < ${#port_args[@]}; i += 2 )); do
+    spec=${port_args[i]}
+    cont=${spec##*:} spec=${spec%:*}
+    host=${spec##*:} addr=${spec%:*}
+    ip=${addr#[} ip=${ip%]}
+    proto=tcp
+    [[ $cont == */* ]] && proto=${cont#*/}
+    if port_taken "$ip" "$host" "$proto"; then
+      holder=$REPLY first=$host
+      case $mode in
+        error)
+          echo "clod: can't publish $addr:$host: container $holder has it" >&2
+          exit 1
+          ;;
+        skip)
+          echo "clod: not publishing $addr:$host → $cont: container $holder has it" >&2
+          continue
+          ;;
+        next)
+          while port_taken "$ip" "$host" "$proto"; do
+            if (( host >= 65535 )); then
+              echo "clod: no free host port from $addr:$first for $cont" >&2
+              exit 1
+            fi
+            host=$(( host + 1 ))
+          done
+          echo "clod: publishing $addr:$host → $cont, since container $holder has $addr:$first" >&2
+          ;;
+      esac
+    fi
+    args+=(-p "$addr:$host:$cont")
+    conts+=("$cont")
+  done
+  port_args=(${args[@]+"${args[@]}"}) container_ports=(${conts[@]+"${conts[@]}"})
+}
+
 # Runs command $command with arguments $@ in the container, building its image
 # first if needed.
 cmd_run() {
@@ -2238,6 +2333,7 @@ cmd_run() {
     run_args+=(--mount "$REPLY" -e "CLOD_WORKSPACE=$workspace_label")
   fi
   [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
+  settle_ports
   if (( ${#port_args[@]} )); then
     run_args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
   fi
