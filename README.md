@@ -87,6 +87,8 @@ Everything below is optional; plain `clod` is all most work needs.
   host notes
 - [Running the image without clod](docs/without-clod.md): plain `docker build`
   and `docker run`
+- [Alternatives to clod](docs/alternatives.md): Docker Sandboxes, devcontainers,
+  Claude Code's own sandbox and others, compared
 
 ## License
 
