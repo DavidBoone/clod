@@ -51,8 +51,9 @@
 # homes. Both ask first in a terminal, and need --force without one.
 #
 # Inside the container, CLOD_HOME, CLOD_WORKSPACE and CLOD_IMAGE hold the home
-# and workspace labels and the image's name as -i takes it, and CLOD_PORTS the
-# published container ports. With --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
+# and workspace labels and the image's name as -i takes it, CLOD_HOME_PATH and
+# CLOD_WORKSPACE_PATH the host folders mounted (unset for a volume), and
+# CLOD_PORTS the published container ports. With --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
 # With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
 #
 # On a Linux host the clod image's claude user is built with the host user's
@@ -2329,6 +2330,7 @@ cmd_run() {
 
   mount_arg "$home_src" /home/claude
   run_args=(-i --mount "$REPLY" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$image")
+  [[ $home != vol:* ]] && run_args+=(-e "CLOD_HOME_PATH=$(tildify "$home")")
   # A scratch workspace is an anonymous volume, which --rm removes. Docker
   # copies the image's /workspace into it, owned by claude.
   # A volume workspace, like a volume home, starts as a copy of it.
@@ -2337,6 +2339,7 @@ cmd_run() {
   else
     mount_arg "$workspace_src" /workspace
     run_args+=(--mount "$REPLY" -e "CLOD_WORKSPACE=$workspace_label")
+    [[ $workspace != vol:* ]] && run_args+=(-e "CLOD_WORKSPACE_PATH=$workspace_label")
   fi
   [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
   settle_ports

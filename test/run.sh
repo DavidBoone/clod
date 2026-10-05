@@ -141,6 +141,7 @@ test_scratch() {
   clod -s bash -c '
     set -e
     test "$CLOD_SCRATCH" = 1
+    test -z "${CLOD_WORKSPACE_PATH:-}"
     test -z "$(ls -A /workspace)"
     test -z "${FOO:-}"
     touch /workspace/written
@@ -170,6 +171,7 @@ test_workspace() {
     test "$(cat /workspace/file)" = from-proj
     test "$FOO" = proj
     test "$CLOD_WORKSPACE" = "'"$here/proj"'"
+    test "$CLOD_WORKSPACE_PATH" = "'"$here/proj"'"
   '
   exits 1 clod -w nope bash -c true
   exits 1 clod -w nope env
@@ -186,6 +188,7 @@ test_workspace() {
   clod -w vol:wtest bash -c '
     set -e
     test "$CLOD_WORKSPACE" = vol:wtest
+    test -z "${CLOD_WORKSPACE_PATH:-}"
     test "$(stat -c %U /workspace)" = claude
     test -z "${FOO:-}"
     echo kept > /workspace/kept
@@ -339,7 +342,7 @@ test_envrc() {
   if CLOD_PORTS='' clod env | has '^ports:'; then false; fi
   if clod -P '' env | has '^ports:'; then false; fi
   clod home new from-envrc >/dev/null
-  clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc'
+  clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc && test "$CLOD_HOME_PATH" = "~/.clod/homes/from-envrc"'
 }
 
 test_volume_home() {
@@ -348,6 +351,7 @@ test_volume_home() {
   clod -H vol:vtest bash -c '
     set -e
     test "$CLOD_HOME" = vol:vtest
+    test -z "${CLOD_HOME_PATH:-}"
     test "$(stat -c %U ~)" = claude
     echo kept > ~/kept
     mkdir ~/owned && chown claude:claude ~/owned
