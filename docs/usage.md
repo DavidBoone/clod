@@ -61,6 +61,9 @@ lives on Docker's own disk, not in a folder on your machine, and is kept
 between runs, for a repository cloned just for the agent, say. Docker creates it
 on first use, owned by the container's user. No `.envrc` is read, and clod runs
 from anywhere. To get files out, push them somewhere or copy them into the home.
+In the container, `CLOD_WORKSPACE` is `vol:NAME` and `CLOD_WORKSPACE_PATH`,
+otherwise the workspace's host folder, is unset (see [the container's
+variables](configuration.md#your-defaults)).
 
 ```bash
 clod workspace                  # list the volume workspaces, and which are in use

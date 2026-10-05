@@ -110,6 +110,9 @@ Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`),
 `CLOD_WORKSPACE` the workspace's path on the host (`~/`-relative) or
 `vol:NAME`, and `CLOD_IMAGE` the image as `-i` names it (`clod`, `go`, `go+sudo`).
+`CLOD_HOME_PATH` and `CLOD_WORKSPACE_PATH` are the host folders mounted as the
+home and workspace (`~/`-relative, so a named home is `~/.clod/homes/NAME`),
+and are unset for a volume home or workspace and a scratch workspace.
 
 ## Per-project environment
 
