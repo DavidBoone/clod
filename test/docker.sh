@@ -28,6 +28,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-in
       python3 jq \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash -G docker runner
+# The classic image store: with containerd's, every build also has containerd
+# unpack its layers, and the builds take about a third longer.
+RUN mkdir -p /etc/docker && echo '{"features": {"containerd-snapshotter": false}}' > /etc/docker/daemon.json
 CMD ["dockerd"]
 EOF
 
