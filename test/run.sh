@@ -24,7 +24,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude codex statusline
-  port docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
+  port port-busy docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine rebuild image-rm image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -254,6 +254,31 @@ test_port() {
   done
   kill $! 2>/dev/null || true
   grep -q served out
+}
+
+# A host port another container has: -P stops, CLOD_PORTS skips it, or with
+# CLOD_PORTS_BUSY=next moves it.
+test_port_busy() {
+  docker rm -f clod-test-ports >/dev/null 2>&1 || true
+  docker run -d --rm --name clod-test-ports -p 127.0.0.1:18090:80 -p 0.0.0.0:18092:80 \
+    --entrypoint sleep clod 300 >/dev/null
+  trap 'docker rm -f clod-test-ports >/dev/null 2>&1' EXIT
+  exits 1 clod -P 18090 bash -c true 2>&1 | has "can't publish 127.0.0.1:18090: container clod-test-ports has it"
+  # a wildcard address takes the port on every address
+  exits 1 clod -P 18092 bash -c true 2>&1 | has "can't publish 127.0.0.1:18092"
+  clod -P 18091 bash -c 'test "$CLOD_PORTS" = 18091'
+  export CLOD_PORTS=18090,18091
+  clod env | has '^ports: .*(each left out if another container has it)$'
+  clod bash -c 'test "$CLOD_PORTS" = 18091' 2>&1 | tee out
+  has -x 'clod: not publishing 127.0.0.1:18090 → 18090: container clod-test-ports has it' < out
+  CLOD_PORTS=18090 CLOD_PORTS_BUSY=next clod bash -c 'test "$CLOD_PORTS" = 18090' 2>&1 | tee out
+  has -x 'clod: publishing 127.0.0.1:18091 → 18090, since container clod-test-ports has 127.0.0.1:18090' < out
+  # 18093 is the first free one after 18092
+  CLOD_PORTS=18092 CLOD_PORTS_BUSY=next clod bash -c true 2>&1 | has 'publishing 127.0.0.1:18093 → 18092'
+  CLOD_PORTS_BUSY=error exits 1 clod bash -c true 2>&1 | has "can't publish 127.0.0.1:18090"
+  CLOD_PORTS_BUSY=nope exits 1 clod bash -c true 2>&1 | has "it must be skip, next or error"
+  # another protocol's port isn't taken
+  CLOD_PORTS=18090/udp CLOD_PORTS_BUSY=error clod bash -c 'test "$CLOD_PORTS" = 18090/udp'
 }
 
 test_docker_socket() {
@@ -491,6 +516,11 @@ test_default() {
   clod env | has '^image: *python '
   clod default image clod
   clod env | has '^image: *clod$'
+  exits 2 clod default ports-busy sometimes
+  clod default ports-busy next | has '^ports-busy  *next .*config'
+  CLOD_PORTS=8000 clod env | has '^ports: .*(each moved to a free host port if another container has it)$'
+  clod -P 8000 env | has '^ports: *127.0.0.1:8000 → 8000$'
+  clod default ports-busy --reset
 }
 
 test_shared() {
@@ -810,6 +840,7 @@ test_completion() {
   clod __complete image '' | has -xF -e "$(printf 'rm\tremove images clod built')"
   clod __complete --sk | has -xF -e "$(printf -- '--skip-build\trun the image as built, even if its files changed')"
   clod __complete default '' | has -xF -e "$(printf 'ports\tports to publish on localhost, comma-separated')"
+  test "$(completes default ports-busy '')" = "$(printf 'skip\nnext\nerror\n--reset')"
   clod __complete default command '' | has -xF -e "$(printf -- '--reset\tremove this default')"
   # no descriptions for names
   if clod __complete -i '' | grep -q $'\t'; then false; fi
@@ -1059,7 +1090,7 @@ for arg in "$@"; do
       if names=$(group_tests "$arg"); then
         # shellcheck disable=SC2206 # test names don't contain spaces or globs
         selected+=($names)
-      elif [[ " $all_tests " == *" $arg "* ]]; then
+      elif [[ " ${all_tests//$'\n'/ } " == *" $arg "* ]]; then
         selected+=("$arg")
       else
         echo "test/run.sh: no test or group named '$arg' (test/run.sh --list)" >&2
