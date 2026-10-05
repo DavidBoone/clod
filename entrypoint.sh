@@ -53,6 +53,13 @@ if [ -d /etc/clod ]; then
     set -- --add-dir=/etc/clod "$@"
     export CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
 fi
+# Claude Code reads only one managed source, so an organisation's server-managed
+# settings replace /etc/claude-code's file, statusline and all. Passing the file
+# as --settings too keeps it in effect then, below the organisation's settings;
+# when the file is the managed source, the same values apply twice.
+if [ -r /etc/claude-code/managed-settings.json ]; then
+    set -- --settings=/etc/claude-code/managed-settings.json "$@"
+fi
 # Installed into the mounted home so Claude Code can update itself.
 command -v claude >/dev/null || {
     echo "clod: installing Claude Code into this home..." >&2

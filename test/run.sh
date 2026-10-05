@@ -23,7 +23,7 @@
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
 lint_tests='lint'
-base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude codex statusline
+base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine rebuild image-rm image-prune completion install'
 classic_tests='classic'
@@ -207,6 +207,17 @@ test_claude() {
   grep -q 'Claude Code' out
   # a symlink into the container's paths, so dangling out here
   test -L ~/.clod/homes/default/.local/bin/claude
+}
+
+test_claude_args() {
+  # a stand-in claude in its own home shows what the entrypoint passes
+  mkdir -p ~/.clod/homes/args/.local/bin
+  printf '#!/bin/sh\nprintf "%%s\\n" "$@"\n' > ~/.clod/homes/args/.local/bin/claude
+  chmod +x ~/.clod/homes/args/.local/bin/claude
+  clod -H args -- -p hi | tee out
+  has -e '^--settings=/etc/claude-code/managed-settings.json$' out
+  has -e '^--dangerously-skip-permissions$' out
+  test "$(tail -2 out | tr '\n' ' ')" = '-p hi '
 }
 
 test_codex() {

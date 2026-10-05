@@ -34,6 +34,14 @@ keeping yours as a backup. Put your own instructions for Claude in a
 `managed-settings.json` or `managed-settings.d/*.json`. Managed settings take
 precedence over a home's own settings, so keep per-client config in the homes.
 
+Claude Code reads only one source of managed settings, and an organisation's
+server-managed settings, where it has them, take the place of
+`/etc/claude-code`'s file. So the entrypoint also passes
+`managed-settings.json` to Claude Code as `--settings`, which keeps it, the
+statusline included, in effect either way: below the organisation's settings,
+but still above a home's own. `managed-settings.d/*.json` isn't passed, so
+settings there apply only when the file is the managed source.
+
 What Claude is told about the container (the mounts, what persists, the
 `CLOD_*` variables) comes with the image, from [`container.md`](../container.md),
 so your `CLAUDE.md` only needs your own additions.
