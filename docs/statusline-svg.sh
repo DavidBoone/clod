@@ -11,12 +11,13 @@ mkdir -p "$tmp/claude-statusline"
 # a project on branch main with three changed files, for the git part
 git init -q -b main "$tmp/project"
 touch "$tmp/project/"{a,b,c}
-# output tokens, cache created, last activity (25s ago), then no cache miss
-echo "759 0 $((now - 25)) 0 0 - - 0 0" > "$tmp/claude-statusline/sample"
+# uncached input, output of finished calls, the latest call's output, last
+# activity (25s ago), then no cache miss
+echo "33100 4700 800 $((now - 25)) 0 0 - - 29400 1200" > "$tmp/claude-statusline/sample"
 cat > "$tmp/input.json" <<JSON
 {"model":{"display_name":"Opus 5.5"},"workspace":{"current_dir":"$tmp/project"},"effort":{"level":"medium"},"session_id":"sample","prompt_id":"p1",
- "context_window":{"total_input_tokens":710700,"total_output_tokens":759,"used_percentage":38,
-   "current_usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},
+ "context_window":{"used_percentage":15,
+   "current_usage":{"input_tokens":3,"output_tokens":800,"cache_creation_input_tokens":1200,"cache_read_input_tokens":29400}},
  "cost":{"total_lines_added":957,"total_lines_removed":151},
  "rate_limits":{"five_hour":{"used_percentage":19,"resets_at":$((now + 18000 * 13 / 100))},
                 "seven_day":{"used_percentage":32,"resets_at":$((now + 604800 * 46 / 100))}}}

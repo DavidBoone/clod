@@ -1,8 +1,8 @@
 #!/bin/bash
 # Claude Code statusline for clod homes, part of the starter shared config.
-# `↑` = rolling total of uncached input + cache creation tokens (the tokens you actually pay premium for).
-# `↓` = rolling total of output tokens (as reported by Claude Code).
-# Cache reads are intentionally omitted from `↑` — they're cheap and mostly mirror the ◔ context meter.
+# `↑` = session total of uncached input: new input + cache writes, summed per API call.
+# `↓` = session total of output tokens, summed per API call.
+# Cache reads are left out of both.
 #
 # Cache-miss detection, two tiers:
 #  - full (red ⚠ MISS):   cache_creation > cache_read and >10k — most of the
@@ -21,11 +21,10 @@
 # to build an empirical picture of when misses actually happen vs idle time.
 # Create the file to start logging; delete it to stop.
 #
-# Since cache_creation_input_tokens is only reported per-turn (no rolling total),
-# we accumulate it ourselves in a per-session state file, using total_output_tokens
-# as a "new turn" fingerprint to avoid double-counting on repeated statusline redraws.
-# The fingerprint can tick more than once while a single API response streams, so
-# turns whose (read, created) pair is identical to the previous one are skipped.
+# Claude Code's context_window.total_*_tokens fields describe only the latest
+# API call, so the totals are summed in a per-session state file. A new call is
+# recognised by a change in its (cache_read, cache_created) pair; output grows
+# while a call streams, so each call's output is added once the next call starts.
 
 set -euo pipefail
 
@@ -37,8 +36,8 @@ model=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 effort=$(echo "$input" | jq -r '.effort.level // empty')
 prompt_id=$(echo "$input" | jq -r '.prompt_id // "-"')
 session_id=$(echo "$input" | jq -r '.session_id // "unknown"')
-total_in=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
-total_out=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
+call_in=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
+call_out=$(echo "$input" | jq -r '.context_window.current_usage.output_tokens // 0')
 cache_create=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
 cache_read=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
 used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
@@ -72,12 +71,13 @@ RED=$'\033[91m'
 BOLD_RED=$'\033[1;91m'
 UL_MAGENTA=$'\033[4;35m'
 
-# State: output-tokens fingerprint, accumulated cache-creation, last-activity
-# timestamp (cache-TTL idle timer), last miss size + when it was detected +
-# which prompt it happened under, and the previous (read, created) pair for
-# streaming-redraw dedupe.
+# State: summed uncached input, output of finished calls, the latest call's
+# output so far, last-activity timestamp (cache-TTL idle timer), last miss size
+# + when it was detected + which prompt it happened under, and the latest call's
+# (read, created) pair.
+cum_in=0
+cum_out=0
 prev_out=0
-cum_cache=0
 last_activity=0
 last_miss=0
 miss_ts=0
@@ -86,7 +86,9 @@ miss_kind="-"
 prev_read=-1
 prev_create=-1
 if [ -f "$state_file" ]; then
-    read -r prev_out cum_cache last_activity last_miss miss_ts miss_prompt miss_kind prev_read prev_create < "$state_file" || true
+    read -r cum_in cum_out prev_out last_activity last_miss miss_ts miss_prompt miss_kind prev_read prev_create < "$state_file" || true
+    : "${cum_out:=0}"
+    : "${prev_out:=0}"
     : "${last_activity:=0}"
     : "${last_miss:=0}"
     : "${miss_ts:=0}"
@@ -98,20 +100,24 @@ fi
 
 now=$(date +%s)
 
-# If output token count changed since we last saw this session, the model just
-# produced new tokens — accumulate this turn's cache_creation and stamp activity.
-# Use != (not -gt): total_output_tokens lives under context_window and can RESET
-# below prev_out after compaction or session resume, freezing last_activity forever.
-# While idle, last_activity is frozen, so "now - last_activity" = cache-cold age.
-# An unchanged (read, created) pair means the fingerprint ticked mid-stream on the
-# same API response — stamp activity but don't re-count or re-log it.
-if [ "$total_out" != "$prev_out" ]; then
+# A changed (read, created) pair is a new API call: bank the previous call's
+# output, add this call's uncached input, and check it for a cache miss. Output
+# growing on the same pair is the same call still streaming. Either one stamps
+# activity; while idle, "now - last_activity" = cache-cold age. Redraws before
+# the first call report all zeros and are ignored.
+new_call=0
+if [ $((call_in + cache_create + cache_read)) -gt 0 ] \
+    && { [ "$cache_read" != "$prev_read" ] || [ "$cache_create" != "$prev_create" ]; }; then
+    new_call=1
+fi
+if [ "$new_call" = 1 ] || [ "$call_out" != "$prev_out" ]; then
     idle_gap=0
     [ "$last_activity" -gt 0 ] && idle_gap=$((now - last_activity))
     last_activity=$now
 
-    if [ "$cache_read" != "$prev_read" ] || [ "$cache_create" != "$prev_create" ]; then
-        cum_cache=$((cum_cache + cache_create))
+    if [ "$new_call" = 1 ]; then
+        cum_out=$((cum_out + prev_out))
+        cum_in=$((cum_in + call_in + cache_create))
 
         # Full miss = most of the context written, not read (10k floor keeps
         # tiny early-session turns from flagging). Partial = read regressed
@@ -133,10 +139,10 @@ if [ "$total_out" != "$prev_out" ]; then
         fi
     fi
 
-    echo "$total_out $cum_cache $last_activity $last_miss $miss_ts $miss_prompt $miss_kind $cache_read $cache_create" > "$state_file"
+    prev_out=$call_out
+    echo "$cum_in $cum_out $prev_out $last_activity $last_miss $miss_ts $miss_prompt $miss_kind $cache_read $cache_create" > "$state_file"
 fi
 
-adjusted_in=$((total_in + cum_cache))
 
 fmt_k() {
     local n=$1
@@ -202,7 +208,7 @@ if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --sh
     head+=("$git_part")
 fi
 
-parts+=("${BLUE}↑${WHITE}$(fmt_k "$adjusted_in") ${BLUE}↓${WHITE}$(fmt_k "$total_out")${RST}")
+parts+=("${BLUE}↑${WHITE}$(fmt_k "$cum_in") ${BLUE}↓${WHITE}$(fmt_k "$((cum_out + prev_out))")${RST}")
 
 if [ "$lines_add" != "0" ] || [ "$lines_rm" != "0" ]; then
     parts+=("${GREEN}+${lines_add}${RST}${DIM}/${RST}${RED}-${lines_rm}${RST}")
