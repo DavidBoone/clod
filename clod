@@ -1195,7 +1195,7 @@ offer() {
 
 # Sets items to candidates from the tables, each a word, a tab and its
 # description: the commands ($1 commands), the verbs of noun $2 (verbs), the
-# run commands (run), the long options (options) or the setting keys
+# run commands (run), both forms of each option (options) or the setting keys
 # (settings).
 table_items() {
   local name args summary flags value desc seen=''
@@ -1211,13 +1211,13 @@ table_items() {
         items+=("$name"$'\t'"$summary")
       done < <(grep '|' <<<"$command_table")
       ;;
-    # An option's first row, which describes it in clod help.
+    # Both forms of each option, with its first row's description, which clod
+    # help shows; zsh lists the two on one line, since they share it.
     options)
       while IFS='|' read -r _ flags value desc; do
-        flags=${flags##* }
-        is_one_of "$flags" "$seen" && continue
-        seen+=" $flags"
-        items+=("$flags"$'\t'"$desc")
+        is_one_of "${flags##* }" "$seen" && continue
+        seen+=" ${flags##* }"
+        for value in $flags; do items+=("$value"$'\t'"$desc"); done
       done <<<"$option_table"
       ;;
     settings)

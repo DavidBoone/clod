@@ -792,6 +792,13 @@ test_completion() {
   mkdir -p ~/.clod/homes/work ~/.clod/images/plain
   printf 'FROM clod\n' > ~/.clod/images/plain/Dockerfile
   test "$(completes --sk)" = --skip-build
+  # both forms of an option after -, each with the description; long ones
+  # only after --
+  completes - | has -x -- -i
+  clod __complete - | has -xF -e "$(printf -- '--image\tthe image or variant to run, or a+b (CLOD_IMAGE)')"
+  clod __complete - | has -xF -e "$(printf -- '-i\tthe image or variant to run, or a+b (CLOD_IMAGE)')"
+  completes -- | has -x -- --image
+  if completes -- | grep -qx -- -i; then false; fi
   # the nouns and their verbs; build and rebuild only after image
   test "$(completes i)" = "$(printf 'image\ninstall')"
   test "$(completes u)" = "$(printf 'uninstall\nupdate')"
@@ -899,8 +906,10 @@ test_completion() {
   # names have none
   command -v zsh >/dev/null || return 0
   for files in '' "$repo/completions"; do
-    "$repo/test/tab-complete.py" ${files:+--files "$files"} --list zsh 'clod image ' 'clod -i ' > out
+    "$repo/test/tab-complete.py" ${files:+--files "$files"} --list zsh 'clod image ' 'clod -i ' 'clod -' > out
     has -E '^rm +-- remove images clod built' < out
+    # the two forms of an option on one line
+    has -E '^--image +-i +-- the image or variant to run' < out
     test "$(grep -oE '^(show|prune) ' out | tr -d ' ' | tr '\n' ' ')" = 'show prune '
     if grep -E '(go|python) +--' out; then false; fi
   done
