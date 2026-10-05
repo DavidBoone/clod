@@ -5,8 +5,10 @@
 #
 # It needs Linux, and a Docker it can have to itself: it builds, replaces and
 # prunes the clod images on the Docker it uses, and starts containers with that
-# Docker's socket mounted. Run it on a CI runner or a throwaway VM; --yes
-# confirms that outside CI. Each run gets a fresh HOME, so ~/.clod is left
+# Docker's socket mounted. Run it on a CI runner or a throwaway VM, or through
+# test/docker.sh (a Docker inside a container, on any Docker) or
+# test/incus.sh (an incus container); --yes confirms that outside CI, and
+# those two pass it. Each run gets a fresh HOME, so ~/.clod is left
 # alone, and the Docker CLI keeps its config (and so its context).
 #
 #   test/run.sh [--yes] [TEST|GROUP...]   run them, or every test
@@ -76,7 +78,7 @@ exits() {
 test_lint() {
   cd "$repo"
   shellcheck clod completions/clod.bash entrypoint.sh shared/statusline.sh docs/statusline-svg.sh \
-    test/run.sh
+    test/run.sh test/incus.sh test/docker.sh
 }
 
 test_env() {
@@ -1111,12 +1113,40 @@ fail_report() {
   echo "$1 failed at line $2:$(sed -n "$2p" "$repo/test/run.sh")" >&2
 }
 
+# Prints $1 seconds as 42s or 2m14s.
+duration() {
+  if (( $1 < 60 )); then echo "$1s"; else echo "$(($1 / 60))m$(($1 % 60))s"; fi
+}
+
+# Builds the base image, then the selected variants at once: their builds
+# mostly wait on downloads, so they overlap well. The variant tests then find
+# their images up to date, and a failed build fails its test there.
+build_variants() {
+  local t start=$SECONDS
+  (
+    cd "$work"
+    clod image build >base-build.log 2>&1
+    for t in "${selected[@]}"; do
+      [[ $t == variant-* ]] && clod -i "${t#variant-}" image build >"$t-build.log" 2>&1 &
+    done
+    wait
+  )
+  echo "     variant builds ($(duration $((SECONDS - start))))"
+}
+
 # GitHub Actions folds each test's output into a group.
 github=${GITHUB_ACTIONS:-}
 failed=()
+run_start=$SECONDS
+built_variants=''
 for t in "${selected[@]}"; do
+  if [[ $t == variant-* && -z $built_variants ]]; then
+    build_variants
+    built_variants=1
+  fi
   [[ -n $github ]] && echo "::group::$t"
   dir=$(mktemp -d "$work/$t.XXXX")
+  start=$SECONDS
   (
     set -eEo pipefail
     # -E carries the trap into command substitutions and pipelines too, where a
@@ -1132,20 +1162,22 @@ for t in "${selected[@]}"; do
     esac
   )
   status=$?
+  took=$(duration $((SECONDS - start)))
   [[ -n $github ]] && echo "::endgroup::"
   if (( status )); then
     failed+=("$t")
-    if [[ -n $github ]]; then echo "::error::$t failed"; else echo "FAIL $t"; fi
+    if [[ -n $github ]]; then echo "::error::$t failed ($took)"; else echo "FAIL $t ($took)"; fi
   else
-    echo "ok   $t"
+    echo "ok   $t ($took)"
   fi
 done
 
 echo
+took=$(duration $((SECONDS - run_start)))
 if (( ${#failed[@]} )); then
-  echo "${#failed[@]} of ${#selected[@]} failed: ${failed[*]}"
+  echo "${#failed[@]} of ${#selected[@]} failed in $took: ${failed[*]}"
   echo "(their directories and the home are in $work)"
   exit 1
 fi
-echo "all ${#selected[@]} passed"
+echo "all ${#selected[@]} passed in $took"
 rm -rf "$work"
