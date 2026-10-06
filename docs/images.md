@@ -20,7 +20,7 @@ clod -i go               # run the go variant
 clod default image go    # run it from now on
 clod image               # list the base, the bundled variants and yours, and which are stale
 clod image show go+sudo  # how an image is built: the images it's FROM, and their Dockerfiles
-clod image rm go         # remove the built image; the next clod -i go builds it again
+clod image clean go      # remove the built image; the next clod -i go builds it again
 clod image prune         # remove the stale images, which their next run rebuilds anyway
 ```
 
@@ -111,18 +111,30 @@ already built locally.
 
 ## Removing images
 
-`clod image rm NAME...` removes images clod built, named as for `-i`
-(`go`, `go+sudo`, `clod`); with no names, it removes the image `-i` or
-`CLOD_IMAGE` selects. A variant's files stay, so its next run builds it
-again. `clod image prune` removes every image clod built that is stale, along
+`clod image rm NAME...` undoes `clod image new`: it deletes your variant
+`~/.clod/images/NAME` and the images clod built from it, combinations that
+include it too. In a terminal it lists what it will delete and asks first;
+without one it needs `--force`. A bundled variant can't be deleted, but if
+yours has the same name, the bundled one takes its place again.
+
+`clod image clean NAME...` removes only images clod built, named as for `-i`
+(`go`, `go+sudo`, `clod`), keeping their variants; with no names, it removes
+the image `-i` or `CLOD_IMAGE` selects. The next run builds them again.
+`clod image prune` removes every image clod built that is stale, along
 with the untagged images builds left behind; an image whose variant you've
-deleted isn't stale, so it stays. Docker won't remove an image a container
-uses, including a stopped one, so `clod image` marks those `in use`, `prune`
-keeps them, and `rm` refuses them; `docker ps -a` lists the containers.
-`clod image` lists every image clod built, including those whose variant
-you've deleted, marked `(no Dockerfile)`. Removing an image that others are
-built on frees its space only once they're gone too; they rebuild on their
-next run.
+deleted by hand isn't stale, so it stays. Docker won't remove an image a
+container uses, including a stopped one, so `clod image` marks those `in use`,
+`prune` keeps them, and `rm` and `clean` refuse them; `docker ps -a` lists the
+containers. `clod image` lists every image clod built, including those whose
+variant you've deleted by hand, marked `(no Dockerfile)`. Removing an image
+that others are built on frees its space only once they're gone too; they
+rebuild on their next run.
+
+```bash
+clod image rm mine          # delete the variant mine and its images (asks first)
+clod image clean go         # remove the built go image; the variant stays
+clod image clean            # remove the image -i or CLOD_IMAGE selects
+```
 
 Docker's build cache isn't removed with the images. `docker system df` shows
 how much space it takes, and `docker builder prune` clears it, for everything

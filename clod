@@ -118,9 +118,10 @@ Images
 image||list the images: base, variants and those clod built
 image show|NAME|show how image NAME is built
 image new|NAME [FROM]|create a variant of your own
+image rm|NAME...|delete your variants and their built images
 image build|[NAME...]|build images and their bases where they're stale
 image rebuild|[NAME...]|rebuild images and their bases from scratch
-image rm|[NAME...]|remove images clod built
+image clean|[NAME...]|remove built images, keeping their variants
 image prune||remove the stale images clod built
 Homes
 home||list the homes and their logins
@@ -185,9 +186,15 @@ Rebuilds the images in the chains of the named images from scratch, each
 once, pulling a fresh base, or with no NAME the image -i or CLOD_IMAGE
 selects. Images it replaces are removed.
 @image rm
+Deletes your variants ~/.clod/images/NAME, which image new creates, and the
+images clod built from them, combinations included. A bundled variant takes
+the place of yours of the same name. In a terminal it lists what it will
+delete and asks first.
+@image clean
 Removes images clod built, named as -i takes them, or with no NAME the image
--i or CLOD_IMAGE selects. A variant's files stay, and its next run builds it
-again; an image others are built on loses only its name.
+-i or CLOD_IMAGE selects. Their variants stay, and the next run builds them
+again, from Docker's build cache where it can; an image others are built on
+loses only its name.
 @image prune
 Removes the stale images clod built, which their next run would rebuild
 anyway, keeping those a container uses.
@@ -259,16 +266,16 @@ EOF
 # else a command as named in command_table. An option can have a row per
 # meaning. VALUE is empty for an option that takes none.
 read -r -d '' option_table <<'EOF' || true
-clod,run,env,image build,image rebuild,image rm|-i --image|NAME|the image or variant to run, or a+b (CLOD_IMAGE)
+clod,run,env,image build,image rebuild,image clean|-i --image|NAME|the image or variant to run, or a+b (CLOD_IMAGE)
 clod,run,env|-H --home|HOME|the home: a name, a path or vol:NAME (CLOD_HOME)
 clod,run,env|-w --workspace|PATH|the directory to mount as /workspace, instead of the current one, or vol:NAME for a Docker volume
 clod,run,env|-P --port|PORT|publish a port on localhost, as 5173 or 3000:5173 (host:container); repeatable (CLOD_PORTS)
 clod,run,env|-s --scratch||an empty /workspace, discarded on exit; no .envrc is read. Not with -w
-clod|-f --force||run from a directory clod otherwise refuses; replace (install, shared new); delete without asking (home rm, workspace rm)
+clod|-f --force||run from a directory clod otherwise refuses; replace (install, shared new); delete without asking (image rm, home rm, workspace rm)
 run,env|-f --force||run from a directory clod otherwise refuses
 install|-f --force||replace an existing clod or completion file
 shared new|-f --force||replace ~/.clod/shared, keeping a backup
-home rm,workspace rm|-f --force||delete without asking; needed without a terminal
+image rm,home rm,workspace rm|-f --force||delete without asking; needed without a terminal
 clod,run|--skip-build||run the image as built, even if its files changed
 clod,run|--docker||mount the host's Docker socket, which is root on the Docker host; the CLI comes from the image (-i docker)
 clod|-h --help||show help; after a command, that command's
@@ -875,11 +882,12 @@ parse_args() {
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
     'home new') (( $# == 1 )) || usage_error "home new takes one home: a name, a path or vol:NAME" ;;
     'home cp'|'home mv') (( $# == 2 )) || usage_error "home $verb takes a SRC and a DEST home" ;;
+    'image rm') (( $# )) || usage_error "image rm takes one or more variant names" ;;
     'home rm') (( $# )) || usage_error "home rm takes one or more NAME or vol:NAME" ;;
     'workspace rm') (( $# )) || usage_error "workspace rm takes one or more NAME or vol:NAME" ;;
   esac
   case $command${verb:+ $verb} in
-    'home '*|'workspace rm')
+    'image rm'|'home '*|'workspace rm')
       for arg; do
         [[ $arg == -* ]] && usage_error "clod's options go before the command"
         [[ $command$verb == homerm && $arg == */* ]] &&
@@ -1275,7 +1283,7 @@ offer_images() {
 # description after a tab, or exits 1 where the word is a file name: a
 # command's arguments, a home's path or install's directory. It reads only the
 # tables and directories, never the envrc, and asks Docker only for volume homes
-# and workspaces and image rm's images, so it's quick.
+# and workspaces and image clean's images, so it's quick.
 cmd_complete() {
   local raw=("$@") words=() cur last pre='' strip='' glue='' cmd='' cmd_args=() prev=''
   local word i homes='' variants verb='' given='' path_like='' value_flags='' flags value items
@@ -1385,8 +1393,14 @@ cmd_complete() {
     case $cmd:$verb in
       image:show) (( ${#cmd_args[@]} )) || offer_images ;;
       image:build|image:rebuild) offer_images ;;
-      # The images clod built, named as clod image lists them.
+      # Your variants, the directories in ~/.clod/images.
       image:rm)
+        for word in "$clod_dir"/images/*/; do
+          [[ -d $word ]] && offer "$(basename "$word")"
+        done
+        ;;
+      # The images clod built, named as clod image lists them.
+      image:clean)
         offer $(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
           sed -n 's/^clod-//p; /^clod$/p' | tr . + | sort -u)
         ;;
@@ -1643,7 +1657,8 @@ cmd_image() {
   echo "bundled  comes with clod, in $(tildify "$script_dir")"
   [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
   [[ -n $any_used ]] && echo "in use   a container, maybe a stopped one, uses it (docker ps -a), so it can't be removed"
-  echo "clod image rm NAME removes a built image, and clod image prune the stale ones"
+  echo "clod image clean NAME removes a built image, clod image prune the stale ones, and"
+  echo "clod image rm NAME deletes a variant of yours with its images"
   return 0
 }
 
@@ -1664,9 +1679,55 @@ remove_tag() {
   fi
 }
 
+# Deletes your variants named $@, ~/.clod/images/NAME, and the images clod built
+# from them, combinations first, once they're listed and, unless --force, the
+# answer to a y/N question is yes. Deletes none if any isn't one of yours or a
+# container uses one of its images.
+cmd_image_rm() {
+  local name dir t parts dirs=() tags=() lines=()
+  for name; do
+    is_one_of "$name" "${dirs[*]##*/}" && continue
+    dir=$clod_dir/images/$name
+    if [[ ! $name =~ $name_re || ! -d $dir ]]; then
+      if [[ $name == clod || $name == *+* || -f $script_dir/images/$name/Dockerfile ]]; then
+        echo "clod: $name has no variant of yours to delete; clod image clean $name removes its built image" >&2
+      else
+        echo "clod: no variant of yours named '$name' (clod image lists them)" >&2
+      fi
+      exit 1
+    fi
+    dirs+=("$dir")
+    lines+=("$(tildify "$dir")")
+    while IFS= read -r t; do
+      IFS=. read -ra parts <<< "${t#clod-}"
+      is_one_of "$name" "${parts[*]}" || continue
+      is_one_of "$t" "${tags[*]}" && continue
+      if in_use "$t"; then
+        image_name "$t"
+        echo "clod: a container uses $REPLY, so it can't be removed; docker ps -a lists the containers" >&2
+        exit 1
+      fi
+      tags+=("$t")
+      image_name "$t"
+      lines+=("$REPLY (the image clod built)")
+    done < <(docker image ls --filter label=clod.hash --format '{{.Repository}}' | grep '^clod-' | sort -u |
+      awk '{ print gsub(/\./, ".") "\t" $0 }' | sort -rn | cut -f2)
+  done
+  confirm_delete image "${lines[@]}"
+  for t in ${tags[@]+"${tags[@]}"}; do
+    remove_tag "$t"
+  done
+  for dir in "${dirs[@]}"; do
+    rm -rf "$dir" || exit 1
+    echo "removed $(tildify "$dir")"
+    [[ -f $script_dir/images/${dir##*/}/Dockerfile ]] && echo "the bundled ${dir##*/} takes its place"
+  done
+  return 0
+}
+
 # Removes the images clod built named $@ (as for -i), or with none named the
 # image -i selects, or none if any isn't one.
-cmd_image_rm() {
+cmd_image_clean() {
   local name n tags=() t
   (( $# )) || set -- "$image"
   for name; do
