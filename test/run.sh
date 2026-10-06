@@ -25,7 +25,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine rebuild image-rm image-prune completion install'
+  multi-stage combine rebuild image-rm image-clean image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -619,7 +619,8 @@ test_help() {
   clod help > out
   has -x 'usage: clod \[OPTIONS\] \[COMMAND \[ARGS...\]\]' < out
   has -x 'Images' < out
-  has -xE '  image rm \[NAME\.\.\.\] +remove images clod built' < out
+  has -xE '  image rm NAME\.\.\. +delete your variants and their built images' < out
+  has -xE '  image clean \[NAME\.\.\.\] +remove built images, keeping their variants' < out
   has -xE '  -i, --image NAME +the image or variant to run, or a\+b \(CLOD_IMAGE\)' < out
   has -x "'clod COMMAND -h' shows more about COMMAND." < out
   if grep -q '^  shared  *the shared config' out; then false; fi
@@ -779,29 +780,72 @@ test_rebuild() {
   test "$(clod build first 2>/dev/null)" = 'clod: first is up to date'
 }
 
+# image rm deletes your variants and the images built from them, asking first
+# in a terminal; a bundled variant or a combination has nothing of yours.
 test_image_rm() {
+  local v
+  for v in mine other go; do
+    mkdir -p ~/.clod/images/$v
+    printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' "$v" > ~/.clod/images/$v/Dockerfile
+  done
+  clod -i other+mine image build
+  clod -i go image build
+  completes image rm '' | has -x mine
+  completes image rm '' | has -x go
+  if completes image rm '' | grep -qx sudo; then false; fi
+  if completes image rm mine '' | grep -qx mine; then false; fi
+  exits 2 clod image rm
+  exits 2 clod image rm -f mine 2>&1 | has "options go before the command"
+  exits 1 clod --force image rm sudo 2>&1 | has 'clod image clean sudo removes its built image'
+  exits 1 clod --force image rm other+mine 2>&1 | has 'clod image clean other+mine removes'
+  exits 1 clod --force image rm mine no-such 2>&1 | has "no variant of yours named 'no-such'"
+  test -d ~/.clod/images/mine
+  exits 1 clod image rm mine < /dev/null 2>&1 | has 'no terminal'
+  # in a terminal it lists the variant and the images built from it, and asks
+  printf 'n\n' | exits 1 script -qec 'clod image rm mine' /dev/null > out
+  has '  ~/.clod/images/mine' < out
+  has 'other+mine (the image clod built)' < out
+  has 'nothing deleted' < out
+  test -d ~/.clod/images/mine
+  # nor while a container uses one of its images
+  docker rm -f clod-test-rm >/dev/null 2>&1 || true
+  docker create --name clod-test-rm clod-other.mine >/dev/null
+  exits 1 clod --force image rm mine 2>&1 | has 'a container uses other+mine'
+  docker rm clod-test-rm >/dev/null
+  printf 'y\n' | script -qec 'clod image rm mine' /dev/null > out
+  has 'removed other+mine' < out
+  has 'removed ~/.clod/images/mine' < out
+  test ! -e ~/.clod/images/mine
+  if docker image inspect clod-other.mine >/dev/null 2>&1; then false; fi
+  docker image inspect clod-other >/dev/null
+  # yours named as a bundled one: the bundled one takes its place
+  clod --force image rm go other | has -x 'the bundled go takes its place'
+  clod image | has '^  go  *-  *bundled$'
+}
+
+test_image_clean() {
   mkdir -p ~/.clod/images/gone ~/.clod/images/top ~/.clod/images/a-very-long-variant-name
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' gone > ~/.clod/images/gone/Dockerfile
   printf 'ARG BASE=clod\nFROM $BASE\nLABEL test=%s\n' top > ~/.clod/images/top/Dockerfile
   printf 'FROM clod\n' > ~/.clod/images/a-very-long-variant-name/Dockerfile
   clod -i gone+top image build
   clod -i top image build
-  clod __complete image rm '' | has -x gone+top
-  if clod __complete image rm gone '' | grep -qx gone; then false; fi
+  clod __complete image clean '' | has -x gone+top
+  if clod __complete image clean gone '' | grep -qx gone; then false; fi
   clod image | has '^  a-very-long-variant-name  -'
-  exits 1 clod -i no-such image rm
-  exits 1 clod image rm no-such
-  exits 1 clod image rm gone no-such
+  exits 1 clod -i no-such image clean
+  exits 1 clod image clean no-such
+  exits 1 clod image clean gone no-such
   docker image inspect clod-gone >/dev/null
   # gone+top is built on gone; a name wins over -i
-  clod -i top image rm gone | has '^removed .*gone'
+  clod -i top image clean gone | has '^removed .*gone'
   if docker image inspect clod-gone >/dev/null 2>&1; then false; fi
   docker image inspect clod-top >/dev/null
-  clod -i top image rm | has -x 'removed top'
+  clod -i top image clean | has -x 'removed top'
   clod image | has '^  gone  *-'
   rm -r ~/.clod/images/gone
   clod image | has '^  gone+top  *built  *gone + top (no Dockerfile)'
-  clod image rm gone+top | has -x 'removed gone+top'
+  clod image clean gone+top | has -x 'removed gone+top'
   if clod image | grep -q gone; then false; fi
 }
 
@@ -829,7 +873,7 @@ test_image_prune() {
   clod image | has '^  keep  *stale, in use  '
   clod image | has '^in use '
   test "$(clod image prune)" = 'kept keep: a container uses it (docker ps -a lists them)'
-  exits 1 clod image rm keep
+  exits 1 clod image clean keep
   docker image inspect clod-keep >/dev/null
   docker rm clod-test-in-use >/dev/null
   test "$(clod image prune)" = 'removed keep'
@@ -859,7 +903,7 @@ test_completion() {
   # in command_table's order, with its descriptions
   test "$(completes '' | head -5)" = "$(printf 'claude\ncodex\nbash\nzsh\nimage')"
   clod __complete '' | has -xF -e "$(printf 'claude\tClaude Code')"
-  clod __complete image '' | has -xF -e "$(printf 'rm\tremove images clod built')"
+  clod __complete image '' | has -xF -e "$(printf 'rm\tdelete your variants and their built images')"
   clod __complete --sk | has -xF -e "$(printf -- '--skip-build\trun the image as built, even if its files changed')"
   clod __complete default '' | has -xF -e "$(printf 'ports\tports to publish on localhost, comma-separated')"
   test "$(completes default ports-busy '')" = "$(printf 'skip\nnext\nerror\n--reset')"
@@ -872,7 +916,7 @@ test_completion() {
   test -z "$(completes help env '')"
   test -z "$(completes uninstall '')"
   if completes '' | grep -qxE 'build|rebuild'; then false; fi
-  test "$(completes image '')" = "$(printf 'show\nnew\nbuild\nrebuild\nrm\nprune')"
+  test "$(completes image '')" = "$(printf 'show\nnew\nrm\nbuild\nrebuild\nclean\nprune')"
   test "$(completes image re)" = rebuild
   test "$(completes home '')" = "$(printf 'new\ncp\nmv\nrm')"
   test -z "$(completes home new '')"
@@ -962,7 +1006,8 @@ test_completion() {
   command -v zsh >/dev/null || return 0
   for files in '' "$repo/completions"; do
     "$repo/test/tab-complete.py" ${files:+--files "$files"} --list zsh 'clod image ' 'clod -i ' 'clod -' > out
-    has -E '^rm +-- remove images clod built' < out
+    has -E '^rm +-- delete your variants and their built images' < out
+    has -E '^clean +-- remove built images, keeping their variants' < out
     # the two forms of an option on one line
     has -E '^--image +-i +-- the image or variant to run' < out
     test "$(grep -oE '^(show|prune) ' out | tr -d ' ' | tr '\n' ' ')" = 'show prune '
