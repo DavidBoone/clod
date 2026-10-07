@@ -124,6 +124,7 @@ image||list the images: base, variants and those clod built
 image show|NAME|show how image NAME is built
 image new|NAME [FROM]|create a variant of your own
 image edit|[NAME [FILE]]|edit your variant's Dockerfile, or another of its files
+image diff|NAME|compare your variant with the bundled one it copies
 image rm|NAME...|delete your variants and their built images
 image build|[NAME...]|build images and their bases where they're stale
 image rebuild|[NAME...]|rebuild images and their bases from scratch
@@ -199,6 +200,10 @@ container. Images it replaces are removed.
 Rebuilds the images in the chains of the named images from scratch, each
 once, pulling a fresh base, or with no NAME the image -i or CLOD_IMAGE
 selects. Images it replaces are removed.
+@image diff
+Shows the differences between the bundled variant NAME and yours of the same
+name, which takes its place: what you changed in your copy, and what clod
+update has changed in the bundled one since you made it.
 @image rm
 Deletes your variants ~/.clod/images/NAME, which image new creates, and the
 images clod built from them, combinations included. A bundled variant takes
@@ -902,6 +907,7 @@ parse_args() {
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
     shared) usage_error "shared takes a command: new or diff" ;;
     'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
+    'image diff') (( $# == 1 )) || usage_error "image diff takes one variant name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
     'image edit') (( $# <= 2 )) || usage_error "image edit takes a variant name and at most one of its files" ;;
     'home new') (( $# == 1 )) || usage_error "home new takes one home: a name, a path or vol:NAME" ;;
@@ -1445,6 +1451,14 @@ cmd_complete() {
           sed -n 's/^clod-//p; /^clod$/p' | tr . + | sort -u)
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
+      # Your variants that have a bundled one of the same name.
+      image:diff)
+        (( ${#cmd_args[@]} )) && return 0
+        for word in "$clod_dir"/images/*/; do
+          word=$(basename "$word")
+          [[ -f $script_dir/images/$word/Dockerfile ]] && offer "$word"
+        done
+        ;;
       # One of your variants, the directories in ~/.clod/images.
       # Then the files in that variant's directory.
       image:edit)
@@ -2232,6 +2246,23 @@ STARTER
   echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
 }
 
+# Shows the differences between the bundled variant $1 and yours, returning
+# diff's status: 1 when they differ.
+cmd_image_diff() {
+  local name=$1 bundled=$script_dir/images/$1 yours=$clod_dir/images/$1 status=0
+  if [[ ! $name =~ $name_re || ! -f $yours/Dockerfile ]]; then
+    echo "clod: no variant of yours named '$name' (clod image lists them)" >&2
+    exit 1
+  fi
+  if [[ ! -f $bundled/Dockerfile ]]; then
+    echo "clod: no bundled variant is named $name, so yours copies nothing to compare it with" >&2
+    exit 1
+  fi
+  diff -ru "$bundled" "$yours" || status=$?
+  (( status == 0 )) && echo "clod: $(tildify "$yours") is the same as the bundled $name"
+  return "$status"
+}
+
 # Opens file $1 in $VISUAL, $EDITOR or vi, returning the editor's status.
 edit_file() {
   local editor=${VISUAL:-${EDITOR:-vi}}
@@ -2641,6 +2672,7 @@ case $command${verb:+ $verb} in
     "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
   # diff's status: 1 when they differ.
   'shared diff') cmd_shared_diff; exit ;;
+  'image diff') cmd_image_diff "$@"; exit ;;
   'image build'|'image rebuild') need_docker; cmd_image_build "$@"; exit 0 ;;
   'image '*|'home '*|workspace*) need_docker; "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
 esac

@@ -30,7 +30,7 @@ export LC_ALL=C.UTF-8
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy clipboard docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine live-files rebuild image-edit image-rm image-clean image-prune completion install'
+  multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -896,6 +896,25 @@ test_image_edit() {
   rm -r ~/.clod/images/editme
 }
 
+# clod image diff compares your copy of a bundled variant with it. Needs no
+# Docker.
+test_image_diff() {
+  clod image new python
+  clod image diff python | has 'same as the bundled python'
+  echo 'RUN true' >> ~/.clod/images/python/Dockerfile
+  exits 1 clod image diff python | has -x '+RUN true'
+  completes image diff '' | has -x python
+  test -z "$(completes image diff python '')"
+  mkdir -p ~/.clod/images/onlymine
+  printf 'FROM clod\n' > ~/.clod/images/onlymine/Dockerfile
+  if completes image diff '' | grep -qx onlymine; then false; fi
+  exits 1 clod image diff onlymine 2>&1 | has 'no bundled variant is named onlymine'
+  exits 1 clod image diff go 2>&1 | has "no variant of yours named 'go'"
+  exits 2 clod image diff
+  exits 2 clod image diff python go
+  rm -r ~/.clod/images/python ~/.clod/images/onlymine
+}
+
 test_image_rm() {
   local v
   for v in mine other go; do
@@ -1030,7 +1049,7 @@ test_completion() {
   test -z "$(completes help env '')"
   test -z "$(completes uninstall '')"
   if completes '' | grep -qxE 'build|rebuild'; then false; fi
-  test "$(completes image '')" = "$(printf 'show\nnew\nedit\nrm\nbuild\nrebuild\nclean\nprune')"
+  test "$(completes image '')" = "$(printf 'show\nnew\nedit\ndiff\nrm\nbuild\nrebuild\nclean\nprune')"
   test "$(completes image re)" = rebuild
   test "$(completes home '')" = "$(printf 'new\ncp\nmv\nrm')"
   test -z "$(completes home new '')"
