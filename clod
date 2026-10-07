@@ -123,7 +123,7 @@ Images
 image||list the images: base, variants and those clod built
 image show|NAME|show how image NAME is built
 image new|NAME [FROM]|create a variant of your own
-image edit|[NAME]|edit your variant's Dockerfile
+image edit|[NAME [FILE]]|edit your variant's Dockerfile, or another of its files
 image rm|NAME...|delete your variants and their built images
 image build|[NAME...]|build images and their bases where they're stale
 image rebuild|[NAME...]|rebuild images and their bases from scratch
@@ -185,9 +185,10 @@ built on combination FROM (A+B), a copy of the bundled variant NAME, or a
 starter. Run it with clod -i NAME.
 @image edit
 Opens your variant ~/.clod/images/NAME's Dockerfile in $VISUAL, or $EDITOR,
-or vi, or with no NAME that of the image -i or CLOD_IMAGE selects. Its next
-run rebuilds it. A bundled variant is clod's own: clod image new NAME makes
-your copy to edit, which takes its place.
+or vi, or with no NAME that of the image -i or CLOD_IMAGE selects. FILE opens
+another file in that directory instead, such as its CLAUDE.md, creating it if
+it isn't there. Its next run rebuilds it. A bundled variant is clod's own:
+clod image new NAME makes your copy to edit, which takes its place.
 @image build
 Builds the images in the chains of the named images where they're stale, or
 with no NAME the image -i or CLOD_IMAGE selects, without starting a
@@ -897,7 +898,7 @@ parse_args() {
     shared) usage_error "shared takes a command: new or diff" ;;
     'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
-    'image edit') (( $# <= 1 )) || usage_error "image edit takes at most one variant name" ;;
+    'image edit') (( $# <= 2 )) || usage_error "image edit takes a variant name and at most one of its files" ;;
     'home new') (( $# == 1 )) || usage_error "home new takes one home: a name, a path or vol:NAME" ;;
     'home cp'|'home mv') (( $# == 2 )) || usage_error "home $verb takes a SRC and a DEST home" ;;
     'image rm') (( $# )) || usage_error "image rm takes one or more variant names" ;;
@@ -1300,6 +1301,14 @@ offer_images() {
   fi
 }
 
+# Offers the files in directory $1, as paths relative to it, skipping hidden
+# ones. Reads $cur from cmd_complete.
+offer_files() {
+  [[ -d $1 ]] || return 0
+  # shellcheck disable=SC2046 # the files clod's directories hold have no spaces
+  offer $(cd "$1" && find . -type f ! -path '*/.*' | sed 's|^\./||' | sort)
+}
+
 # `clod __complete WORDS...`, which the shim calls: prints the candidates for
 # the last word, given the words before it, one per line, each with any
 # description after a tab, or exits 1 where the word is a file name: a
@@ -1431,11 +1440,16 @@ cmd_complete() {
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
       # One of your variants, the directories in ~/.clod/images.
+      # Then the files in that variant's directory.
       image:edit)
-        (( ${#cmd_args[@]} )) && return 0
-        for word in "$clod_dir"/images/*/; do
-          [[ -f $word/Dockerfile ]] && offer "$(basename "$word")"
-        done
+        case ${#cmd_args[@]} in
+          0)
+            for word in "$clod_dir"/images/*/; do
+              [[ -f $word/Dockerfile ]] && offer "$(basename "$word")"
+            done
+            ;;
+          1) [[ ${cmd_args[0]} =~ $name_re ]] && offer_files "$clod_dir/images/${cmd_args[0]}" ;;
+        esac
         ;;
       home:rm) offer $homes $(volume_names clod-home- | sed 's/^/vol:/') ;;
       # A new home: nothing completes but a path.
@@ -2212,11 +2226,27 @@ STARTER
   echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
 }
 
-# Opens the Dockerfile of your variant $1, or with none of the image -i or
-# CLOD_IMAGE selects, in $VISUAL, $EDITOR or vi. Refuses the base image, a
+# Opens file $1 in $VISUAL, $EDITOR or vi, returning the editor's status.
+edit_file() {
+  local editor=${VISUAL:-${EDITOR:-vi}}
+  # Like git, the editor setting may carry arguments (code --wait).
+  # shellcheck disable=SC2086 # split into the command and its arguments
+  $editor "$1"
+}
+
+# Exits with a usage error unless $1, a file named for directory $2, is a path
+# inside it: relative, with no .. in it.
+check_rel_file() {
+  [[ -n $1 && $1 != /* && /$1/ != */../* && /$1/ != */./* ]] ||
+    usage_error "'$1' isn't a file in $(tildify "$2"): name one relative to it, with no . or .."
+  [[ ! -d $2/$1 ]] || usage_error "$(tildify "$2/$1") is a directory"
+}
+
+# Opens file $2 (default Dockerfile) of your variant $1, or with no $1 of the
+# image -i or CLOD_IMAGE selects, in the editor. Refuses the base image, a
 # bundled variant and a combination, which aren't yours to edit.
 cmd_image_edit() {
-  local name=${1:-} file editor
+  local name=${1:-} file=${2:-Dockerfile} dir
   if [[ -z $name ]]; then
     image_name "$image"
     name=$REPLY
@@ -2230,8 +2260,8 @@ cmd_image_edit() {
     echo "clod: $name is a combination; edit each variant in it: clod image edit ${name%%[+.]*}" >&2
     exit 1
   fi
-  file=$clod_dir/images/$name/Dockerfile
-  if [[ ! $name =~ $name_re || ! -f $file ]]; then
+  dir=$clod_dir/images/$name
+  if [[ ! $name =~ $name_re || ! -f $dir/Dockerfile ]]; then
     if [[ $name =~ $name_re && -f $script_dir/images/$name/Dockerfile ]]; then
       echo "clod: $name is bundled with clod; clod image new $name makes your own copy to edit" >&2
     else
@@ -2239,10 +2269,8 @@ cmd_image_edit() {
     fi
     exit 1
   fi
-  editor=${VISUAL:-${EDITOR:-vi}}
-  # Like git, the editor setting may carry arguments (code --wait).
-  # shellcheck disable=SC2086 # split into the command and its arguments
-  $editor "$file"
+  check_rel_file "$file" "$dir"
+  edit_file "$dir/$file"
 }
 
 # Prints a line of clod env: field $1 with value $2.

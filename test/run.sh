@@ -639,7 +639,7 @@ test_command_line() {
     exits 2 clod image new "$name" 2>&1 | has 'invalid image name'
   done
   exits 2 clod image show
-  exits 2 clod image edit a b
+  exits 2 clod image edit a b c
   exits 2 clod image nope
   exits 2 clod home ls
   for old in images homes new-image remove-image prune new-shared; do
@@ -870,7 +870,18 @@ test_image_edit() {
   exits 1 clod image edit clod 2>&1 | has "base image is clod's own"
   exits 1 clod image edit go+editme 2>&1 | has 'is a combination'
   exits 1 clod image edit nope 2>&1 | has "no variant of yours named 'nope'"
-  exits 2 clod image edit editme extra
+  # another file beside the Dockerfile, but nothing outside the directory
+  test "$(EDITOR='echo' clod image edit editme CLAUDE.md)" = "$HOME/.clod/images/editme/CLAUDE.md"
+  for bad in ../x /etc/passwd sub/../../x ./Dockerfile; do
+    exits 2 clod image edit editme "$bad" 2>&1 | has "isn't a file in"
+  done
+  mkdir ~/.clod/images/editme/sub
+  exits 2 clod image edit editme sub 2>&1 | has 'is a directory'
+  exits 2 clod image edit editme Dockerfile extra
+  touch ~/.clod/images/editme/sub/x
+  completes image edit editme '' | has -x Dockerfile
+  completes image edit editme '' | has -x sub/x
+  rm -r ~/.clod/images/editme
 }
 
 test_image_rm() {
@@ -1038,7 +1049,8 @@ test_completion() {
   test -z "$(completes image new mine go '')"
   completes image edit '' | has -x plain
   if completes image edit '' | grep -qxE 'clod|go'; then false; fi
-  test -z "$(completes image edit plain '')"
+  test "$(completes image edit plain '')" = Dockerfile
+  test -z "$(completes image edit plain Dockerfile '')"
   # exit status 1: the word is a file name, which the shell completes
   if completes claude --re; then false; fi
   if completes -- ''; then false; fi
