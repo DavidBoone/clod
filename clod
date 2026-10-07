@@ -618,9 +618,9 @@ files_hash() {
 }
 
 # Prints the hash the clod image is labelled with when built from its files.
-# entrypoint.sh, container.md and clipboard.sh are left out: runs mount them
-# from the checkout, so a change to any of them needs no build, which would
-# also rebuild every variant on top.
+# entrypoint.sh, container.md, clipboard.sh and plugins are left out: runs
+# mount them from the checkout, so a change to any of them needs no build,
+# which would also rebuild every variant on top.
 base_hash() {
   { cat "$base_dir/Dockerfile"
     printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1
@@ -2672,9 +2672,9 @@ cmd_run() {
     mount_arg "$shared_dir" /etc/claude-code ,readonly
     run_args+=(--mount "$REPLY")
   fi
-  # The checkout's entrypoint, container description and clipboard shim
-  # replace the copies the image was built with, which are as of its last
-  # build. Claude Code runs the shim directly as xclip and wl-paste, so it
+  # The checkout's entrypoint, container description, clipboard shim and
+  # plugin replace the copies the image was built with, which are as of its
+  # last build. Claude Code runs the shim directly as xclip and wl-paste, so it
   # relies on the checkout's mode, 755 in git.
   if [[ -n $base_dir ]]; then
     mount_arg "$base_dir/entrypoint.sh" /usr/local/bin/clod-entrypoint ,readonly
@@ -2682,6 +2682,8 @@ cmd_run() {
     mount_arg "$base_dir/container.md" /etc/clod/.claude/rules/clod.md ,readonly
     run_args+=(--mount "$REPLY")
     mount_arg "$base_dir/clipboard.sh" /usr/local/bin/clod-clipboard ,readonly
+    run_args+=(--mount "$REPLY")
+    mount_arg "$base_dir/plugins/show-image" /etc/clod/plugins/show-image ,readonly
     run_args+=(--mount "$REPLY")
   fi
   # Docker Engine on Linux has no built-in host.docker.internal.

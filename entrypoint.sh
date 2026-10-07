@@ -66,6 +66,10 @@ done
 if [ -n "$settings" ] && [ -r "$settings" ]; then
     set -- --settings="$settings" "$@"
 fi
+# Plugins the image brings (show-image) load from their folders.
+for plugin in /etc/clod/plugins/*/; do
+    [ -d "$plugin" ] && set -- --plugin-dir="${plugin%/}" "$@"
+done
 # Installed into the mounted home so Claude Code can update itself.
 command -v claude >/dev/null || {
     echo "clod: installing Claude Code into this home..." >&2

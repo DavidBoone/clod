@@ -2,3 +2,5 @@
 !entrypoint.sh
 !container.md
 !clipboard.sh
+!plugins/show-image
+plugins/show-image/tests

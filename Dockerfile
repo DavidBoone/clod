@@ -22,6 +22,7 @@ ENV LC_ALL=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
 # Language runtimes for agent tooling (MCP servers, scripts, npm-installed CLIs).
+# Pillow converts pictures for the show-image plugin.
 # Node comes from NodeSource; its nodejs package includes npm. The GitHub CLI
 # comes from GitHub's own repository, installed with the CLI tools below.
 RUN mkdir -p /etc/apt/keyrings \
@@ -37,7 +38,7 @@ RUN mkdir -p /etc/apt/keyrings \
        > /etc/apt/sources.list.d/githubcli.sources \
     && apt-get update \
     && apt-get install -y \
-       python3 python3-venv \
+       python3 python3-venv python3-pil \
        nodejs
 
 # CLI tools
@@ -82,6 +83,11 @@ RUN chmod 755 /usr/local/bin/clod-clipboard \
 
 # Tells Claude about the container; the entrypoint loads /etc/clod.
 COPY container.md /etc/clod/.claude/rules/clod.md
+
+# Claude Code plugins the entrypoint loads with --plugin-dir: show-image draws
+# pictures inline in kitty and Ghostty. The launcher mounts its checkout's
+# copy over this one, as it does the files above.
+COPY plugins/show-image /etc/clod/plugins/show-image
 
 USER claude
 ENV PATH="$PATH:/home/claude/.local/bin"
