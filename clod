@@ -2361,9 +2361,9 @@ cmd_shared_edit() {
 # Opens file $1 in $VISUAL, $EDITOR or vi, returning the editor's status.
 edit_file() {
   local editor=${VISUAL:-${EDITOR:-vi}}
-  # Like git, the editor setting may carry arguments (code --wait).
-  # shellcheck disable=SC2086 # split into the command and its arguments
-  $editor "$1"
+  # As git does, sh reads the editor setting, so it can carry arguments (code
+  # --wait), quoted ones and a quoted path with spaces.
+  sh -c "$editor \"\$@\"" "$editor" "$1"
 }
 
 # Exits with a usage error unless $1, a file named for directory $2, is a path
