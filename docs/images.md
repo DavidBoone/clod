@@ -81,7 +81,10 @@ install steps.
 rebuilds each whenever a file in its directory or an image it is `FROM`
 (in any stage) changes. A variant in `~/.clod/images` takes precedence over a bundled one of
 the same name, so copying one there is how to customise it. Apt lists are kept
-in the base, so variants can `apt-get install` without `apt-get update`. The
+in the base, so variants can `apt-get install` without `apt-get update`, and
+packages install without their docs, man pages or translations
+(the base is `debian:trixie-slim`; delete `/etc/dpkg/dpkg.cfg.d/docker` in a
+variant to keep them). The
 directory is the build context, so `COPY` works for files beside the
 `Dockerfile`.
 

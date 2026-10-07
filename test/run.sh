@@ -22,10 +22,15 @@
 
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 
+# Checks count characters, such as the statusline's meter cells, which needs a
+# UTF-8 locale; GitHub's runners have one, a bare container (test/docker.sh)
+# none.
+export LC_ALL=C.UTF-8
+
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine rebuild image-rm image-clean image-prune completion install'
+  multi-stage combine live-files rebuild image-rm image-clean image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -95,6 +100,8 @@ test_run_command() {
     test "$(cat /workspace/from-host)" = hello
     test -f /etc/claude-code/settings.json
     test -r /etc/clod/.claude/rules/clod.md
+    test "$(find /usr/share/doc/git -type f)" = /usr/share/doc/git/copyright
+    test ! -e /usr/share/man/man1/git.1.gz
     touch /workspace/from-container
     apt-cache policy gh | grep -A1 "^ *\*\*\*" | grep -q cli.github.com
     git --version; gh --version | head -1; node --version; python3 --version; jq --version; fd --version
@@ -279,7 +286,7 @@ test_statusline() {
     sed 's/\x1b\[[0-9;]*m//g' | tee out
   head -1 out | has '5h [▰▱▁]\{20\} 48%/50%$'
   # (✨ and 🏠 take two columns each)
-  test "$(head -1 out | sed "s/✨/xx/; s/🏠/xx/" | LC_ALL=C.UTF-8 wc -m)" = 117
+  test "$(head -1 out | sed "s/✨/xx/; s/🏠/xx/" | wc -m)" = 117
 }
 
 test_port() {
@@ -685,7 +692,7 @@ test_help() {
 test_multi_stage() {
   mkdir -p ~/.clod/images/one ~/.clod/images/stages
   printf 'FROM clod\n' > ~/.clod/images/one/Dockerfile
-  printf 'FROM debian:trixie AS build\nFROM clod-one\n' > ~/.clod/images/stages/Dockerfile
+  printf 'FROM debian:trixie-slim AS build\nFROM clod-one\n' > ~/.clod/images/stages/Dockerfile
   clod -i stages bash -c true
   clod image | has '^  stages  *built'
   echo 'RUN true' >> ~/.clod/images/one/Dockerfile
@@ -695,7 +702,7 @@ test_multi_stage() {
   grep -q 'building one\.\.\.' out
   grep -q 'building stages\.\.\.' out
   clod image | has '^  stages  *built'
-  clod image show stages | has '^stages  *built  *debian:trixie, one  '
+  clod image show stages | has '^stages  *built  *debian:trixie-slim, one  '
   clod image show stages | has '^one  *built  *clod  '
 }
 
@@ -760,6 +767,24 @@ test_combine() {
   grep -q 'building ontop\.\.\.' out
 }
 
+# entrypoint.sh and container.md are mounted from the checkout, so changing
+# them applies on the next run without a build. A copy of clod beside copies
+# of the base's files builds the same image, from the layer cache.
+test_live_files() {
+  mkdir standin
+  cp "$repo/clod" "$repo/Dockerfile" "$repo/entrypoint.sh" "$repo/container.md" "$repo/.dockerignore" standin/
+  standin/clod image build
+  echo 'live description' >> standin/container.md
+  sed -i '2a echo live entrypoint >&2' standin/entrypoint.sh
+  standin/clod bash -c 'cat /etc/clod/.claude/rules/clod.md' > out 2> err
+  if grep -q 'building' err; then false; fi
+  has -x 'live entrypoint' err
+  test "$(tail -1 out)" = 'live description'
+  # the image's own copies serve docker run without clod
+  docker run --rm --pull=never clod bash -c 'cat /etc/clod/.claude/rules/clod.md' 2>&1 |
+    if grep -q live; then false; fi
+}
+
 # image rebuild replaces every image in the chain and prunes the old ones. It
 # runs a copy of clod whose base Dockerfile only writes a file, since rebuilding
 # the real one without the cache takes half a minute; that replaces the clod
@@ -769,7 +794,7 @@ test_rebuild() {
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
   mkdir standin
   cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" standin/
-  printf 'FROM debian:trixie\nRUN date > /built\n' > standin/Dockerfile
+  printf 'FROM debian:trixie-slim\nRUN date > /built\n' > standin/Dockerfile
   standin/clod -i first+second image build
   test "$(standin/clod -i first+second image build 2>&1)" = 'clod: first+second is up to date'
   for t in clod clod-first clod-first.second; do before+=("$(docker image inspect -f '{{.Id}}' "$t")"); done

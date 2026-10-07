@@ -1,9 +1,11 @@
-FROM debian:trixie
+FROM debian:trixie-slim
 
 # Generic base for running Claude Code and Codex, with everyday CLI tools.
 # Languages, compilers and browsers go in variants built FROM clod (see docs/images.md). Layers are ordered rarely-changed
 # first. Apt lists are kept so variants can `apt-get install` without
-# re-running update.
+# re-running update. The slim base installs packages without their docs, man
+# pages (there's no man) or translations (/etc/dpkg/dpkg.cfg.d/docker), which
+# would be over 100 MB; variants inherit that.
 
 # Base system
 RUN apt-get update && apt-get upgrade -y \
@@ -63,8 +65,11 @@ RUN groupadd -o -g $CLOD_GID claude \
 # clod --scratch mounts an empty volume here, which takes this directory's owner.
 RUN mkdir /workspace && chown claude:claude /workspace
 
-# A separate chmod rather than COPY --chmod, which needs BuildKit; Homebrew's
-# docker on macOS has no buildx, so it builds with the classic builder.
+# The clod launcher mounts its checkout's entrypoint.sh and container.md over
+# these copies, so changes to them need no build; the copies serve runs
+# without clod. A separate chmod rather than COPY --chmod, which needs
+# BuildKit; Homebrew's docker on macOS has no buildx, so it builds with the
+# classic builder.
 COPY entrypoint.sh /usr/local/bin/clod-entrypoint
 RUN chmod 755 /usr/local/bin/clod-entrypoint
 
@@ -83,6 +88,7 @@ ENV USER=claude TMPDIR=/tmp EDITOR=vim PAGER=less
 
 WORKDIR /workspace
 # tini is PID 1, so orphaned processes (browsers a test run leaves behind) are
-# reaped instead of piling up as zombies.
-ENTRYPOINT ["tini", "--", "clod-entrypoint"]
+# reaped instead of piling up as zombies. sh runs the entrypoint, since the
+# one clod mounts keeps its mode from the checkout, which needn't be executable.
+ENTRYPOINT ["tini", "--", "sh", "/usr/local/bin/clod-entrypoint"]
 CMD []
