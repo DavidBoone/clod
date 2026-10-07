@@ -65,13 +65,20 @@ RUN groupadd -o -g $CLOD_GID claude \
 # clod --scratch mounts an empty volume here, which takes this directory's owner.
 RUN mkdir /workspace && chown claude:claude /workspace
 
-# The clod launcher mounts its checkout's entrypoint.sh and container.md over
-# these copies, so changes to them need no build; the copies serve runs
-# without clod. A separate chmod rather than COPY --chmod, which needs
-# BuildKit; Homebrew's docker on macOS has no buildx, so it builds with the
-# classic builder.
+# The clod launcher mounts its checkout's entrypoint.sh, container.md and
+# clipboard.sh over these copies, so changes to them need no build; the copies
+# serve runs without clod. A separate chmod rather than COPY --chmod, which
+# needs BuildKit; Homebrew's docker on macOS has no buildx, so it builds with
+# the classic builder.
 COPY entrypoint.sh /usr/local/bin/clod-entrypoint
 RUN chmod 755 /usr/local/bin/clod-entrypoint
+
+# xclip and wl-paste that fetch the host clipboard's image for Claude Code's
+# Ctrl+V, with clod --clipboard (or run an installed xclip or wl-paste).
+COPY clipboard.sh /usr/local/bin/clod-clipboard
+RUN chmod 755 /usr/local/bin/clod-clipboard \
+    && ln -s clod-clipboard /usr/local/bin/xclip \
+    && ln -s clod-clipboard /usr/local/bin/wl-paste
 
 # Tells Claude about the container; the entrypoint loads /etc/clod.
 COPY container.md /etc/clod/.claude/rules/clod.md
