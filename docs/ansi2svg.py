@@ -9,6 +9,7 @@ fonts."""
 import html
 import re
 import sys
+import unicodedata
 
 # VS Code's dark terminal palette, indexed by SGR code.
 COLORS = {
@@ -26,6 +27,12 @@ def grey(n):
     """The colour of 256-colour greyscale index n (232 to 255)."""
     v = 8 + (n - 232) * 10
     return f"#{v:02x}{v:02x}{v:02x}"
+
+
+def cols(text):
+    """Terminal columns text takes: two for wide characters and emoji."""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" or ord(c) >= 0x1F000 else 1
+               for c in text)
 
 
 def spans(line):
@@ -62,8 +69,8 @@ def spans(line):
 def main():
     lines = sys.stdin.read().rstrip("\n").split("\n")
     rows = [list(spans(l)) for l in lines]
-    cols = max(sum(len(r[0]) for r in row) for row in rows)
-    width = round(cols * CHAR_W + 2 * PAD)
+    widest = max(sum(cols(r[0]) for r in row) for row in rows)
+    width = round(widest * CHAR_W + 2 * PAD)
     height = len(lines) * LINE_H + 2 * PAD - (LINE_H - FONT_SIZE)
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
@@ -77,7 +84,7 @@ def main():
         col = 0
         for text, fill, bold, dim, under, back in row:
             x = round(PAD + col * CHAR_W, 1)
-            length = round(len(text) * CHAR_W, 1)
+            length = round(cols(text) * CHAR_W, 1)
             if back:
                 out.append(f'<rect x="{x}" y="{y - FONT_SIZE + 1}" width="{length}" '
                            f'height="{FONT_SIZE + 4}" fill="{back}"/>')
@@ -89,7 +96,7 @@ def main():
                     + (' opacity="0.5"' if dim else "")
                     + (' text-decoration="underline"' if under else "")
                     + f">{html.escape(text)}</text>")
-            col += len(text)
+            col += cols(text)
     out.append("</svg>")
     print("\n".join(out))
 

@@ -2,12 +2,13 @@
 # Claude Code statusline for clod homes, part of the starter shared config.
 # `↑` = session total of uncached input: new input + cache writes, summed per API call.
 # `↓` = session total of output tokens, summed per API call.
-# Cache reads are left out of both.
+# Cache reads are left out of both. Both include subagents, summed from their
+# transcripts in <session>/subagents/ beside transcript_path.
 #
 # Cache-miss detection, two tiers:
 #  - full (red ⚠ MISS):   cache_creation > cache_read and >10k — most of the
 #    context rewritten at full price.
-#  - partial (yellow ~miss): cache_read fell below the previous turn's read —
+#  - partial (yellow ⚠ miss): cache_read fell below the previous turn's read —
 #    the cached prefix regressed (e.g. an /effort change invalidates everything
 #    after the effort marker) — with created >1k to skip noise.
 # Shown until the next typed user message (prompt_id change) or 2 minutes,
@@ -27,15 +28,22 @@
 # while a call streams, so each call's output is added once the next call starts.
 
 set -euo pipefail
+shopt -s extglob
+
+# ${#var} counts characters, not bytes, only in a UTF-8 locale.
+export LC_ALL=C.UTF-8
 
 export PATH="$HOME/.local/bin:$PATH"
 
 input=$(cat)
 
 model=$(echo "$input" | jq -r '.model.display_name // "Claude"')
+# The context size, as in "Opus 5.5 (1M context)", is left off.
+model=${model% (* context)}
 effort=$(echo "$input" | jq -r '.effort.level // empty')
 prompt_id=$(echo "$input" | jq -r '.prompt_id // "-"')
 session_id=$(echo "$input" | jq -r '.session_id // "unknown"')
+transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 call_in=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
 call_out=$(echo "$input" | jq -r '.context_window.current_usage.output_tokens // 0')
 cache_create=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
@@ -54,9 +62,10 @@ turn_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/cache-turns.log"
 
 # ANSI helpers (statusline renders escape codes). Basic/bright 16 colors and no
 # backgrounds, so the terminal's own background and theme show through:
-# truecolor gets approximated by the statusline renderer. Line 1 gives each
-# group one hue (cyan Claude, magenta clod, green git); line 2 has blue labels
-# and white values. Green, yellow and red otherwise mean good, warning and bad.
+# truecolor gets approximated by the statusline renderer. Each group has one
+# hue (cyan Claude, magenta home, brown (dark yellow) image, green git); meters
+# and counts have bold blue symbols and labels and white values. Green, yellow
+# and red otherwise mean good, warning and bad.
 RST=$'\033[0m'
 DIM=$'\033[2m'
 MAGENTA=$'\033[35m'
@@ -64,8 +73,9 @@ BR_MAGENTA=$'\033[95m'
 DARK_CYAN=$'\033[36m'
 BOLD_CYAN=$'\033[1;96m'
 YELLOW=$'\033[93m'
+BROWN=$'\033[33m'
 GREEN=$'\033[92m'
-BLUE=$'\033[94m'
+BOLD_BLUE=$'\033[1;94m'
 WHITE=$'\033[97m'
 RED=$'\033[91m'
 BOLD_RED=$'\033[1;91m'
@@ -144,6 +154,31 @@ if [ "$new_call" = 1 ] || [ "$call_out" != "$prev_out" ]; then
 fi
 
 
+# Subagent usage, from their transcripts. A streamed message is written several
+# times with growing output, so only the last entry per message id counts. The
+# sums are cached until a file's size or mtime changes.
+sub_in=0
+sub_out=0
+sub_dir="${transcript%.jsonl}/subagents"
+if [ -n "$transcript" ] && [ -d "$sub_dir" ]; then
+    sub_cache="$state_file.sub"
+    sig=$(find "$sub_dir" -name '*.jsonl' -printf '%p %s %T@\n' | sort | md5sum | cut -d' ' -f1)
+    cached_sig=""
+    if [ -f "$sub_cache" ]; then
+        read -r cached_sig sub_in sub_out < "$sub_cache" || true
+    fi
+    if [ "$sig" != "$cached_sig" ]; then
+        read -r sub_in sub_out < <(find "$sub_dir" -name '*.jsonl' -exec cat {} + 2>/dev/null \
+            | jq -rn '[inputs | select(.message.usage and .message.id) | {id: .message.id, u: .message.usage}]
+                | group_by(.id) | map(last.u)
+                | "\(map(.input_tokens + (.cache_creation_input_tokens // 0)) | add // 0) \(map(.output_tokens // 0) | add // 0)"' 2>/dev/null \
+            || echo "0 0")
+        echo "$sig $sub_in $sub_out" > "$sub_cache"
+    fi
+    : "${sub_in:=0}" "${sub_out:=0}"
+fi
+
+
 fmt_k() {
     local n=$1
     if [ -z "$n" ] || [ "$n" = "0" ]; then
@@ -153,34 +188,43 @@ fmt_k() {
     awk -v n="$n" 'BEGIN { if (n >= 1000) printf "%.1fk", n/1000; else print n }'
 }
 
-# Five-cell meter for percentage $1; filled cells shade green → yellow → red by
+# Ten-cell meter for percentage $1; filled cells shade green → yellow → red by
 # position, and any nonzero value fills at least one cell.
 bar() {
     local pct n i s=""
     pct=$(printf '%.0f' "$1")
-    n=$(( (pct + 19) / 20 ))
-    [ "$n" -gt 5 ] && n=5
-    local cols=("$GREEN" "$GREEN" "$YELLOW" "$YELLOW" "$RED")
-    for i in 0 1 2 3 4; do
+    n=$(( (pct + 9) / 10 ))
+    [ "$n" -gt 10 ] && n=10
+    local cols=("$GREEN" "$GREEN" "$GREEN" "$GREEN" "$YELLOW" "$YELLOW" "$YELLOW" "$YELLOW" "$RED" "$RED")
+    for ((i = 0; i < 10; i++)); do
         if [ "$i" -lt "$n" ]; then s+="${cols[$i]}▰"; else s+="${RST}${DIM}▱"; fi
     done
     printf '%s%s' "$s" "$RST"
 }
 
-# Two lines: `head` is model, clod launch context, ports and git; `parts` is
-# the token counts and meters.
-head=()
-parts=()
+# Two lines in five aligned columns, `top` over `bottom`: model over effort,
+# context meter over token counts, idle timer over cache-miss warning, clod home
+# over image and ports, git branch over lines changed. The 5h and 7d quota
+# meters go at the right end of lines 1 and 2.
+top=("" "" "" "" "")
+bottom=("" "" "" "" "")
 
-model_part="${BOLD_CYAN}✦ ${model}${RST}"
-[ -n "$effort" ] && model_part+=" ${DARK_CYAN}⚡${effort}${RST}"
-head+=("$model_part")
+top[0]="${BOLD_CYAN}✨ ${model}${RST}"
+[ -n "$effort" ] && bottom[0]="${DARK_CYAN}⚡ ${effort}${RST}"
 
-# clod launch context: ⌂ home, ⬢ image.
+# Percentages are padded to two digits so the meters keep their width.
+if [ -n "$used_pct" ]; then
+    ctx_int=$(printf '%.0f' "$used_pct")
+    ctx_color=$WHITE
+    [ "$ctx_int" -ge 60 ] && ctx_color=$YELLOW
+    [ "$ctx_int" -ge 80 ] && ctx_color=$RED
+    top[1]="${BOLD_BLUE}◔${RST} $(bar "$ctx_int") ${ctx_color}$(printf '%2d' "$ctx_int")%${RST}"
+fi
+
+# clod launch context: 🏠 home, 📦 image.
 if [ -n "${CLOD_HOME:-}" ]; then
-    clod_part="${MAGENTA}⌂ ${BR_MAGENTA}${CLOD_HOME}${RST}"
-    [ -n "${CLOD_IMAGE:-}" ] && clod_part+=" ${MAGENTA}⬢ ${CLOD_IMAGE}${RST}"
-    head+=("$clod_part")
+    top[3]="${BR_MAGENTA}🏠 ${CLOD_HOME}${RST}"
+    [ -n "${CLOD_IMAGE:-}" ] && bottom[3]="${BROWN}📦 ${CLOD_IMAGE}${RST}"
 fi
 
 # Published container ports (CLOD_PORTS) as underlined :PORT, each an OSC 8
@@ -195,45 +239,51 @@ if [ -n "${CLOD_PORTS:-}" ]; then
         port=${port%/tcp}
         ports_part+=" ${UL_MAGENTA}"$'\033]8;;'"http://localhost:${port}"$'\a'":${port}"$'\033]8;;\a'"${RST}"
     done
-    head+=("$ports_part")
+    bottom[3]+="${bottom[3]:+  }$ports_part"
 fi
 
 # Git branch (short hash when detached) and ±N changed files, untracked included.
+# A linked worktree (git dir differs from the common one) shows as 🌿 and its
+# folder in place of 🪾 and the branch. A folder inside a host-mounted /workspace
+# shows relative to it, which iTerm resolves against the folder clod ran from
+# and opens on ⌘-click; any other shows only its name. The branch follows,
+# dimmed, when it doesn't contain the folder's name.
 if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --short -q HEAD 2>/dev/null \
         || git -C "$cwd" --no-optional-locks rev-parse --short HEAD 2>/dev/null); then
-    # Two extra spaces set the git part apart from the model/ports/clod group.
-    git_part="  ${GREEN}ᚴ ${branch}${RST}"
+    git_part="🪾 ${GREEN}${branch}${RST}"
+    # Inside .git there is no top level, and rev-parse prints less.
+    git_dir="" common_dir="" top_dir=""
+    { read -r git_dir; read -r common_dir; read -r top_dir; } < <(git -C "$cwd" --no-optional-locks \
+        rev-parse --path-format=absolute --git-dir --git-common-dir --show-toplevel 2>/dev/null) || true
+    if [ -n "$git_dir" ] && [ "$git_dir" != "$common_dir" ]; then
+        wt=${top_dir##*/}
+        [ -n "${CLOD_WORKSPACE_PATH:-}" ] && [[ $top_dir == /workspace/* ]] && wt=${top_dir#/workspace/}
+        git_part="🌿 ${GREEN}${wt}${RST}"
+        [[ $branch == *"${top_dir##*/}"* ]] || git_part+=" ${DIM}${branch}${RST}"
+    fi
     dirty=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null | wc -l) || dirty=0
     [ "$dirty" -gt 0 ] && git_part+=" ${YELLOW}±${dirty}${RST}"
-    head+=("$git_part")
+    top[4]=$git_part
 fi
 
-parts+=("${BLUE}↑${WHITE}$(fmt_k "$cum_in") ${BLUE}↓${WHITE}$(fmt_k "$((cum_out + prev_out))")${RST}")
+bottom[1]="${BOLD_BLUE}↑${RST}${WHITE}$(fmt_k "$((cum_in + sub_in))")"$'\t'"${BOLD_BLUE}↓${RST}${WHITE}$(fmt_k "$((cum_out + prev_out + sub_out))")${RST}"
 
 if [ "$lines_add" != "0" ] || [ "$lines_rm" != "0" ]; then
-    parts+=("${GREEN}+${lines_add}${RST}${DIM}/${RST}${RED}-${lines_rm}${RST}")
-fi
-
-if [ -n "$used_pct" ]; then
-    ctx_int=$(printf '%.0f' "$used_pct")
-    ctx_color=$WHITE
-    [ "$ctx_int" -ge 60 ] && ctx_color=$YELLOW
-    [ "$ctx_int" -ge 80 ] && ctx_color=$RED
-    parts+=("${BLUE}◔ $(bar "$ctx_int") ${ctx_color}${ctx_int}%${RST}")
+    bottom[4]="${GREEN}+${lines_add}${RST}${DIM}/${RST}${RED}-${lines_rm}${RST}"
 fi
 
 if [ "$last_activity" -gt 0 ]; then
     idle=$((now - last_activity))
+    # Whole minutes, so the statusline output changes only once a minute while idle.
     idle_m=$((idle / 60))
-    idle_s=$((idle % 60))
     if [ "$idle" -ge 3600 ]; then
-        parts+=("$(printf '%s💤 %d:%02d%s' "$BOLD_RED" "$idle_m" "$idle_s" "$RST")")
+        top[2]=$(printf '%s💤 %dh%02dm%s' "$BOLD_RED" "$((idle_m / 60))" "$((idle_m % 60))" "$RST")
     else
-        parts+=("$(printf '%s⏱ %s%d:%02d%s' "$BLUE" "$WHITE" "$idle_m" "$idle_s" "$RST")")
+        top[2]=$(printf '%s⏱%s %s%dm%s' "$BOLD_BLUE" "$RST" "$WHITE" "$idle_m" "$RST")
     fi
 fi
 
-# Quota meter, ten cells wide: used % $1, elapsed % $2. The dim ▱ track covers
+# Quota meter $3 cells wide: used % $1, elapsed % $2. The dim ▱ track covers
 # the elapsed share of the window and a dim ▁ line the time still to come, on
 # the terminal's own background; the green fill is usage, and fill past the
 # track is red. Usage rounds up to whole cells, elapsed to the nearest. The
@@ -241,9 +291,9 @@ fi
 # usage is ahead of elapsed, yellow within 5 points behind it, green otherwise. Rounding moves usage at most one cell past
 # the track, and that cell is the last, so red shows only when usage is ahead.
 qbar() {
-    local u=$1 e=$2 W=10 s="" i pace
+    local u=$1 e=$2 W=$3 s="" i pace
     local BG="" FUT="${DIM}▁"
-    # Alternative: a gray background marking out all ten cells, with blank
+    # Alternative: a gray background marking out all the cells, with blank
     # cells for the future (256-color gray; 232 is black, 255 white; 236 suits
     # a black terminal background, and clashes with others).
     # local BG=$'\033[48;5;236m' FUT=" "
@@ -265,44 +315,127 @@ qbar() {
     printf '%s%s' "$s" "$RST"
 }
 
-# Rate-limit meter: label $1 (pre-colored), used % $2, reset epoch $3, window seconds $4.
+# Rate-limit meter: label $1 (pre-colored), used % $2, reset epoch $3, window
+# seconds $4, $5 cells wide.
 # The dim /N% after the value is how much of the window has elapsed; without a
 # reset time the track spans the full width.
 limit_part() {
-    local label=$1 pct elapsed=""
+    local label=$1 pct elapsed="" shown=""
     pct=$(printf '%.0f' "$2")
     if [ -n "$3" ]; then
         elapsed=$(awk -v n="$now" -v r="$3" -v w="$4" 'BEGIN { e = (n - (r - w)) * 100 / w; if (e < 0) e = 0; if (e > 100) e = 100; printf "%.0f", e }')
     fi
-    printf '%s %s %s%s%%%s' "$label" "$(qbar "$pct" "${elapsed:-100}")" "$WHITE" "$pct" "${elapsed:+${DIM}/${elapsed}%}${RST}"
+    [ -n "$elapsed" ] && printf -v shown '%s/%2d%%' "$DIM" "$elapsed"
+    printf '%s %s %s%2d%%%s' "$label" "$(qbar "$pct" "${elapsed:-100}" "$5")" "$WHITE" "$pct" "$shown$RST"
 }
 
-if [ -n "$five_pct" ]; then
-    five_reset=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
-    parts+=("$(limit_part "${BLUE}5h" "$five_pct" "$five_reset" 18000)")
-fi
-if [ -n "$week_pct" ]; then
-    week_reset=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
-    parts+=("$(limit_part "${BLUE}7d" "$week_pct" "$week_reset" 604800)")
-fi
-
-# Miss warning goes last so it stands out at the end of the line.
+# Miss warning, under the idle timer.
 # Shown until the next typed user message (prompt_id change) or 2 minutes,
 # whichever comes first — warm follow-up API calls in the same turn never hide it.
 if [ "$last_miss" -gt 0 ] && [ "$prompt_id" = "$miss_prompt" ] && [ $((now - miss_ts)) -lt 120 ]; then
     if [ "$miss_kind" = "full" ]; then
-        parts+=("${BOLD_RED}⚠ MISS $(fmt_k "$last_miss")${RST}")
+        bottom[2]="${BOLD_RED}⚠ MISS $(fmt_k "$last_miss")${RST}"
     else
-        parts+=("${YELLOW}~miss $(fmt_k "$last_miss")${RST}")
+        bottom[2]="${YELLOW}⚠ miss $(fmt_k "$last_miss")${RST}"
     fi
 fi
 
-join() {
-    local result="" part
-    for part in "$@"; do
-        result="${result:+$result  }$part"
-    done
-    echo "$result"
+# Terminal columns taken by $1: escape codes (SGR colours, OSC 8 links) take
+# none, and the emoji (✨ ⚡ 🏠 📦 💤) take two.
+width() {
+    local s=$1 narrow
+    s=${s//$'\033['*([0-9;])m/}
+    s=${s//$'\033]8;;'*([!$'\a'])$'\a'/}
+    narrow=${s//[✨⚡🏠📦💤🪾🌿]/}
+    echo $(( 2 * ${#s} - ${#narrow} ))
 }
-join "${head[@]}"
-join "${parts[@]}"
+
+# Line $1 with $2 at its right end, starting no further left than column $3.
+# Claude Code sets COLUMNS to the terminal width and shows COLUMNS - 4 columns
+# of the statusline; without COLUMNS, or with too little room, $2 starts at $3.
+row() {
+    local left=$1 right=$2 start pad
+    if [ -z "$right" ]; then
+        echo "$left"
+        return
+    fi
+    start=$(( ${COLUMNS:-0} - 4 - $(width "$right") ))
+    [ "$start" -lt "$3" ] && start=$3
+    printf -v pad '%*s' $(( start - $(width "$left") )) ""
+    echo "$left$pad$right"
+}
+
+# Columns a cell takes: a tab in it marks where padding goes, at least 1 column.
+cell_width() {
+    if [[ $1 == *$'\t'* ]]; then
+        echo $(( $(width "${1/$'\t'/}") + 1 ))
+    else
+        width "$1"
+    fi
+}
+
+# Cell $1 padded with spaces to $2 columns, at its tab or else at its end.
+fit() {
+    local pad
+    printf -v pad '%*s' $(( $2 - $(width "${1/$'\t'/}") )) ""
+    if [[ $1 == *$'\t'* ]]; then
+        echo "${1/$'\t'/$pad}"
+    else
+        echo "$1$pad"
+    fi
+}
+
+# Each column is as wide as its wider cell, 3 spaces apart, and a column empty on
+# both lines is left out. Claude Code trims leading spaces off each line, so the
+# lines start with a reset code to keep the padding of an empty first cell.
+line1=$RST
+line2=$RST
+for i in "${!top[@]}"; do
+    a=${top[i]}
+    b=${bottom[i]}
+    [ -z "$a$b" ] && continue
+    wa=$(cell_width "$a")
+    wb=$(cell_width "$b")
+    w=$(( wa > wb ? wa : wb ))
+    if [ "$line1$line2" != "$RST$RST" ]; then
+        line1+="   "
+        line2+="   "
+    fi
+    line1+=$(fit "$a" "$w")
+    line2+=$(fit "$b" "$w")
+done
+line1=${line1%%+( )}
+line2=${line2%%+( )}
+
+# The quota meters start at least 2 columns after the longer line. Their bars
+# are 20 cells wide, 5% each, narrowed to as few as 10 to fit the terminal.
+w1=$(width "$line1")
+w2=$(width "$line2")
+min_start=$(( (w1 > w2 ? w1 : w2) + 2 ))
+
+quota_part() {
+    local reset
+    reset=$(echo "$input" | jq -r ".rate_limits.$1.resets_at // empty")
+    limit_part "${BOLD_BLUE}$2${RST}" "$3" "$reset" "$4" "$5"
+}
+quota_meters() {
+    five_part=""
+    week_part=""
+    [ -n "$five_pct" ] && five_part=$(quota_part five_hour 5h "$five_pct" 18000 "$1")
+    [ -n "$week_pct" ] && week_part=$(quota_part seven_day 7d "$week_pct" 604800 "$1")
+    return 0
+}
+
+# Measured without bars, the meters show how many cells the room left holds.
+quota_meters 0
+w5=$(width "$five_part")
+w7=$(width "$week_part")
+cells=$(( ${COLUMNS:-0} - 4 - min_start - (w5 > w7 ? w5 : w7) ))
+[ "$cells" -gt 20 ] && cells=20
+[ "$cells" -lt 10 ] && cells=10
+quota_meters "$cells"
+
+row "$line1" "$five_part" "$min_start"
+row "$line2" "$week_part" "$min_start"
+
+
