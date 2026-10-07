@@ -123,6 +123,7 @@ Images
 image||list the images: base, variants and those clod built
 image show|NAME|show how image NAME is built
 image new|NAME [FROM]|create a variant of your own
+image edit|[NAME]|edit your variant's Dockerfile
 image rm|NAME...|delete your variants and their built images
 image build|[NAME...]|build images and their bases where they're stale
 image rebuild|[NAME...]|rebuild images and their bases from scratch
@@ -182,6 +183,11 @@ stale), the images it is FROM and where its files are.
 Creates the variant ~/.clod/images/NAME: a copy of variant FROM, a starter
 built on combination FROM (A+B), a copy of the bundled variant NAME, or a
 starter. Run it with clod -i NAME.
+@image edit
+Opens your variant ~/.clod/images/NAME's Dockerfile in $VISUAL, or $EDITOR,
+or vi, or with no NAME that of the image -i or CLOD_IMAGE selects. Its next
+run rebuilds it. A bundled variant is clod's own: clod image new NAME makes
+your copy to edit, which takes its place.
 @image build
 Builds the images in the chains of the named images where they're stale, or
 with no NAME the image -i or CLOD_IMAGE selects, without starting a
@@ -891,6 +897,7 @@ parse_args() {
     shared) usage_error "shared takes a command: new or diff" ;;
     'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
+    'image edit') (( $# <= 1 )) || usage_error "image edit takes at most one variant name" ;;
     'home new') (( $# == 1 )) || usage_error "home new takes one home: a name, a path or vol:NAME" ;;
     'home cp'|'home mv') (( $# == 2 )) || usage_error "home $verb takes a SRC and a DEST home" ;;
     'image rm') (( $# )) || usage_error "image rm takes one or more variant names" ;;
@@ -1423,6 +1430,13 @@ cmd_complete() {
           sed -n 's/^clod-//p; /^clod$/p' | tr . + | sort -u)
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
+      # One of your variants, the directories in ~/.clod/images.
+      image:edit)
+        (( ${#cmd_args[@]} )) && return 0
+        for word in "$clod_dir"/images/*/; do
+          [[ -f $word/Dockerfile ]] && offer "$(basename "$word")"
+        done
+        ;;
       home:rm) offer $homes $(volume_names clod-home- | sed 's/^/vol:/') ;;
       # A new home: nothing completes but a path.
       home:new) [[ -n $path_like ]] && return 1 ;;
@@ -2198,6 +2212,39 @@ STARTER
   echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
 }
 
+# Opens the Dockerfile of your variant $1, or with none of the image -i or
+# CLOD_IMAGE selects, in $VISUAL, $EDITOR or vi. Refuses the base image, a
+# bundled variant and a combination, which aren't yours to edit.
+cmd_image_edit() {
+  local name=${1:-} file editor
+  if [[ -z $name ]]; then
+    image_name "$image"
+    name=$REPLY
+  fi
+  name=${name#clod-}
+  if [[ $name == clod ]]; then
+    echo "clod: the base image is clod's own; build on it with a variant: clod image new NAME" >&2
+    exit 1
+  fi
+  if [[ $name == *+* || $name == *.* ]]; then
+    echo "clod: $name is a combination; edit each variant in it: clod image edit ${name%%[+.]*}" >&2
+    exit 1
+  fi
+  file=$clod_dir/images/$name/Dockerfile
+  if [[ ! $name =~ $name_re || ! -f $file ]]; then
+    if [[ $name =~ $name_re && -f $script_dir/images/$name/Dockerfile ]]; then
+      echo "clod: $name is bundled with clod; clod image new $name makes your own copy to edit" >&2
+    else
+      echo "clod: no variant of yours named '$name' (clod image lists them)" >&2
+    fi
+    exit 1
+  fi
+  editor=${VISUAL:-${EDITOR:-vi}}
+  # Like git, the editor setting may carry arguments (code --wait).
+  # shellcheck disable=SC2086 # split into the command and its arguments
+  $editor "$file"
+}
+
 # Prints a line of clod env: field $1 with value $2.
 field() { printf '%-11s%s\n' "$1:" "$2"; }
 
@@ -2552,7 +2599,7 @@ setup_image
 setup_container
 case $command${verb:+ $verb} in
   env) check_workspace; cmd_env; exit 0 ;;
-  image|'image show'|'image new'|home|'shared new')
+  image|'image show'|'image new'|'image edit'|home|'shared new')
     "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
   # diff's status: 1 when they differ.
   'shared diff') cmd_shared_diff; exit ;;

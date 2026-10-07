@@ -56,7 +56,13 @@ clod image new mine          # a starter Dockerfile, FROM $BASE
 clod image new mine go       # a copy of the go variant
 clod image new mine go+sudo  # a starter Dockerfile, built on go+sudo
 clod image new go            # your own copy of the bundled go, which then takes its place
+clod image edit mine         # open its Dockerfile in $VISUAL, $EDITOR or vi
 ```
+
+`clod image edit` with no name edits the variant `-i` or `CLOD_IMAGE` selects.
+It edits only your own variants: a bundled one needs `clod image new NAME`
+first, and a combination is edited one variant at a time. The next run picks up
+the change and rebuilds.
 
 For example:
 

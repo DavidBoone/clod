@@ -30,7 +30,7 @@ export LC_ALL=C.UTF-8
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy clipboard docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine live-files rebuild image-rm image-clean image-prune completion install'
+  multi-stage combine live-files rebuild image-edit image-rm image-clean image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -639,6 +639,7 @@ test_command_line() {
     exits 2 clod image new "$name" 2>&1 | has 'invalid image name'
   done
   exits 2 clod image show
+  exits 2 clod image edit a b
   exits 2 clod image nope
   exits 2 clod home ls
   for old in images homes new-image remove-image prune new-shared; do
@@ -857,6 +858,21 @@ test_rebuild() {
 
 # image rm deletes your variants and the images built from them, asking first
 # in a terminal; a bundled variant or a combination has nothing of yours.
+# clod image edit opens only your own variants' Dockerfiles. Needs no Docker.
+test_image_edit() {
+  mkdir -p ~/.clod/images/editme
+  printf 'ARG BASE=clod\nFROM $BASE\n' > ~/.clod/images/editme/Dockerfile
+  test "$(EDITOR='echo edited' clod image edit editme)" = "edited $HOME/.clod/images/editme/Dockerfile"
+  test "$(VISUAL='echo visual' EDITOR=false clod image edit editme)" = "visual $HOME/.clod/images/editme/Dockerfile"
+  # with no name, the image -i selects
+  test "$(EDITOR='echo' clod -i editme image edit)" = "$HOME/.clod/images/editme/Dockerfile"
+  exits 1 clod image edit go 2>&1 | has 'clod image new go makes your own copy'
+  exits 1 clod image edit clod 2>&1 | has "base image is clod's own"
+  exits 1 clod image edit go+editme 2>&1 | has 'is a combination'
+  exits 1 clod image edit nope 2>&1 | has "no variant of yours named 'nope'"
+  exits 2 clod image edit editme extra
+}
+
 test_image_rm() {
   local v
   for v in mine other go; do
@@ -991,7 +1007,7 @@ test_completion() {
   test -z "$(completes help env '')"
   test -z "$(completes uninstall '')"
   if completes '' | grep -qxE 'build|rebuild'; then false; fi
-  test "$(completes image '')" = "$(printf 'show\nnew\nrm\nbuild\nrebuild\nclean\nprune')"
+  test "$(completes image '')" = "$(printf 'show\nnew\nedit\nrm\nbuild\nrebuild\nclean\nprune')"
   test "$(completes image re)" = rebuild
   test "$(completes home '')" = "$(printf 'new\ncp\nmv\nrm')"
   test -z "$(completes home new '')"
@@ -1020,6 +1036,9 @@ test_completion() {
   completes image new mine '' | has -x go
   if completes image new mine '' | grep -qx clod; then false; fi
   test -z "$(completes image new mine go '')"
+  completes image edit '' | has -x plain
+  if completes image edit '' | grep -qxE 'clod|go'; then false; fi
+  test -z "$(completes image edit plain '')"
   # exit status 1: the word is a file name, which the shell completes
   if completes claude --re; then false; fi
   if completes -- ''; then false; fi
