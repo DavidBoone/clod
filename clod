@@ -143,9 +143,10 @@ Shared config
 shared|-|the shared config: settings and instructions for every home
 shared new||create ~/.clod/shared from the starter
 shared diff||compare ~/.clod/shared with the starter
+shared edit|[FILE]|edit a file of ~/.clod/shared, its CLAUDE.md by default
 Settings
 env||show the home, image, ports and variables a run uses
-default|[KEY [VALUE]];KEY --reset|show or set your defaults
+default|[KEY [VALUE]];KEY --reset;edit|show or set your defaults
 Set up and help
 install|[DIR]|link clod onto your PATH, and its tab completion
 uninstall||remove the links install made
@@ -252,13 +253,19 @@ Creates ~/.clod/shared as a copy of the starter, to customise. If it exists,
 lists the starter's files it lacks or differs on.
 @shared diff
 Shows the differences between the starter and ~/.clod/shared.
+@shared edit
+Opens ~/.clod/shared/CLAUDE.md, your instructions for every home, in $VISUAL,
+or $EDITOR, or vi; FILE opens another file there instead, such as
+settings.json, creating it if it isn't there. The next run mounts it. clod
+shared new creates ~/.clod/shared first.
 @env
 Shows what a run here would use: the home, workspace, image, ports, the
 .envrc and the variables it passes in.
 @default
 Shows your defaults in ~/.clod/config, or setting KEY, or sets it to VALUE;
-KEY --reset removes it. Options, then the environment, then a project's
-.envrc, win over these defaults.
+KEY --reset removes it; edit opens ~/.clod/config in $VISUAL, or $EDITOR, or
+vi, then names any line clod won't read. Options, then the environment, then a
+project's .envrc, win over these defaults.
 @install
 Links clod into DIR, or the first of ~/.local/bin, ~/bin, /opt/homebrew/bin
 and /usr/local/bin on your PATH that you can write to, else ~/.local/bin. It
@@ -910,6 +917,7 @@ parse_args() {
     'image diff') (( $# == 1 )) || usage_error "image diff takes one variant name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
     'image edit') (( $# <= 2 )) || usage_error "image edit takes a variant name and at most one of its files" ;;
+    'shared edit') (( $# <= 1 )) || usage_error "shared edit takes at most one file" ;;
     'home new') (( $# == 1 )) || usage_error "home new takes one home: a name, a path or vol:NAME" ;;
     'home cp'|'home mv') (( $# == 2 )) || usage_error "home $verb takes a SRC and a DEST home" ;;
     'image rm') (( $# )) || usage_error "image rm takes one or more variant names" ;;
@@ -1409,7 +1417,7 @@ cmd_complete() {
     esac
   elif [[ $cmd == default ]]; then
     case ${#cmd_args[@]}:${cmd_args[0]} in
-      0:*) table_items settings; offer "${items[@]}" ;;
+      0:*) table_items settings; offer "${items[@]}" $'edit\topen ~/.clod/config in your editor' ;;
       1:image) offer_images; offer "$reset" ;;
       1:command) table_items run; offer "${items[@]}" "$reset" ;;
       1:home) [[ -n $path_like ]] && return 1; offer $homes "$reset" ;;
@@ -1451,6 +1459,7 @@ cmd_complete() {
           sed -n 's/^clod-//p; /^clod$/p' | tr . + | sort -u)
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
+      shared:edit) (( ${#cmd_args[@]} )) || offer_files "$clod_dir/shared" ;;
       # Your variants that have a bundled one of the same name.
       image:diff)
         (( ${#cmd_args[@]} )) && return 0
@@ -1536,6 +1545,11 @@ show_setting() {
 # $2.
 cmd_default() {
   local keys=$setting_keys s key=$1 value=$2 var rest p
+  if [[ $key == edit ]]; then
+    (( $# == 1 )) || usage_error "default edit takes no arguments"
+    edit_config
+    return 0
+  fi
   if [[ $# -eq 0 ]]; then
     for s in $keys; do show_setting "$s"; done
     echo
@@ -2263,6 +2277,34 @@ cmd_image_diff() {
   return "$status"
 }
 
+# Opens ~/.clod/config in the editor, then names the lines load_settings won't
+# read: anything but a blank, a # comment or a launcher setting's NAME=value.
+# Values aren't checked, as clod default KEY VALUE checks them.
+edit_config() {
+  local line n=0 shown
+  mkdir -p "$clod_dir"
+  edit_file "$config" || exit
+  [[ -f $config ]] || return 0
+  shown=$(tildify "$config")
+  while IFS= read -r line || [[ -n $line ]]; do
+    n=$((n + 1))
+    [[ -z ${line//[[:space:]]/} || $line == '#'* ]] && continue
+    [[ $line == CLOD_*=* ]] && find_setting "${line%%=*}" && continue
+    echo "clod: line $n of $shown isn't a setting clod reads: $line" >&2
+  done < "$config"
+}
+
+# Opens file $2 (default CLAUDE.md) of ~/.clod/shared in the editor.
+cmd_shared_edit() {
+  local dir=$clod_dir/shared file=${1:-CLAUDE.md}
+  if [[ ! -d $dir ]]; then
+    echo "clod: there's no $(tildify "$dir") yet, so clod mounts the starter; clod shared new creates yours" >&2
+    exit 1
+  fi
+  check_rel_file "$file" "$dir"
+  edit_file "$dir/$file"
+}
+
 # Opens file $1 in $VISUAL, $EDITOR or vi, returning the editor's status.
 edit_file() {
   local editor=${VISUAL:-${EDITOR:-vi}}
@@ -2668,7 +2710,7 @@ setup_image
 setup_container
 case $command${verb:+ $verb} in
   env) check_workspace; cmd_env; exit 0 ;;
-  image|'image show'|'image new'|'image edit'|home|'shared new')
+  image|'image show'|'image new'|'image edit'|home|'shared new'|'shared edit')
     "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
   # diff's status: 1 when they differ.
   'shared diff') cmd_shared_diff; exit ;;

@@ -595,10 +595,25 @@ test_default() {
   CLOD_PORTS=8000 clod env | has '^ports: .*(each moved to a free host port if another container has it)$'
   clod -P 8000 env | has '^ports: *127.0.0.1:8000 → 8000$'
   clod default ports-busy --reset
+  # default edit opens the config, then names the lines clod won't read
+  rm -f ~/.clod/config
+  test "$(EDITOR='echo' clod default edit)" = "$HOME/.clod/config"
+  exits 2 clod default edit extra
+  completes default '' | has -x edit
+  test -z "$(completes default edit '')"
+  printf '#!/bin/sh\nprintf "# mine\\nCLOD_HOME=work\\nCLOD_NOPE=1\\nimage=go\\n" >> "$1"\n' > append
+  chmod +x append
+  EDITOR=$PWD/append clod default edit 2>&1 | tee out
+  has "line 3 of ~/.clod/config isn't a setting clod reads: CLOD_NOPE=1" < out
+  has "line 4 of .* reads: image=go" < out
+  if grep -q 'CLOD_HOME\|# mine' out; then false; fi
+  clod default home | has '^home  *work '
+  rm ~/.clod/config
 }
 
 test_shared() {
   exits 1 clod shared diff
+  exits 1 clod shared edit 2>&1 | has 'clod shared new creates yours'
   exits 2 clod shared
   clod shared new
   test -f ~/.clod/shared/statusline.sh
@@ -619,6 +634,13 @@ test_shared() {
   clod shared new | has 'describes the container'
   echo '{"statusLine": {}}' > ~/.clod/shared/managed-settings.json
   clod shared new | has 'sets statusLine'
+  # shared edit opens its CLAUDE.md, or a file named
+  test "$(EDITOR='echo' clod shared edit)" = "$HOME/.clod/shared/CLAUDE.md"
+  test "$(EDITOR='echo' clod shared edit settings.json)" = "$HOME/.clod/shared/settings.json"
+  exits 2 clod shared edit ../config 2>&1 | has "isn't a file in"
+  exits 2 clod shared edit a b
+  completes shared edit '' | has -x settings.json
+  test -z "$(completes shared edit settings.json '')"
   clod --force shared new
   test -f ~/.clod/shared/statusline.sh
   ls -d ~/.clod/shared.bak-*
@@ -1055,7 +1077,7 @@ test_completion() {
   test -z "$(completes home new '')"
   if completes home new ./x; then false; fi
   test "$(completes workspace '')" = rm
-  test "$(completes shared '')" = "$(printf 'new\ndiff')"
+  test "$(completes shared '')" = "$(printf 'new\ndiff\nedit')"
   test -z "$(completes shared new '')"
   test -z "$(completes image prune '')"
   completes image show '' | has -x plain
