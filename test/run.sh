@@ -29,7 +29,7 @@ export LC_ALL=C.UTF-8
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
-  port port-busy clipboard docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
+  port port-busy clipboard show-image docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -227,6 +227,7 @@ test_claude_args() {
   clod -H args -- -p hi | tee out
   has -e '^--settings=/etc/claude-code/settings.json$' out
   has -e '^--dangerously-skip-permissions$' out
+  has -e '^--plugin-dir=/etc/clod/plugins/show-image$' out
   test "$(tail -2 out | tr '\n' ' ')" = '-p hi '
   # only the last --settings applies, so the user's own replaces the shared one
   clod -H args -- --settings mine.json -p hi | tee out
@@ -323,6 +324,18 @@ test_port_busy() {
   CLOD_PORTS_BUSY=nope exits 1 clod bash -c true 2>&1 | has "it must be skip, next or error"
   # another protocol's port isn't taken
   CLOD_PORTS=18090/udp CLOD_PORTS_BUSY=error clod bash -c 'test "$CLOD_PORTS" = 18090/udp'
+}
+
+# The show-image plugin passes Claude Code's checks and its own tests, and its
+# convert.py turns a GIF into a PNG no bigger than asked, with Pillow.
+test_show_image() {
+  clod claude --version
+  clod bash -c 'claude plugin validate /etc/clod/plugins/show-image &&
+    cd /etc/clod/plugins/show-image && claude plugin test .'
+  clod bash -c 'cd /tmp && python3 -c "from PIL import Image; Image.new(\"P\", (400, 200)).save(\"a.gif\")" &&
+    python3 /etc/clod/plugins/show-image/convert.py a.gif 100 100000 | base64 -d > a.png &&
+    python3 -c "from PIL import Image; i = Image.open(\"a.png\"); print(i.format, i.size)"' | tee out
+  has -x 'PNG (100, 50)' out
 }
 
 # --clipboard: the image's xclip and wl-paste fetch the host clipboard's image,
@@ -828,24 +841,28 @@ test_combine() {
   grep -q 'building ontop\.\.\.' out
 }
 
-# entrypoint.sh, container.md and clipboard.sh are mounted from the checkout,
-# so changing them applies on the next run without a build. A copy of clod
-# beside copies of the base's files builds the same image, from the layer cache.
+# entrypoint.sh, container.md, clipboard.sh and the plugin are mounted from the
+# checkout, so changing them applies on the next run without a build. A copy of
+# clod beside copies of the base's files builds the same image, from the layer
+# cache.
 test_live_files() {
   mkdir standin
   cp "$repo/clod" "$repo/Dockerfile" "$repo/entrypoint.sh" "$repo/container.md" "$repo/clipboard.sh" \
     "$repo/.dockerignore" standin/
+  cp -R "$repo/plugins" standin/
   standin/clod image build
   echo 'live description' >> standin/container.md
   sed -i '2a echo live entrypoint >&2' standin/entrypoint.sh
   perl -pi -e 'print "echo live clipboard; exit 0\n" if $. == 2' standin/clipboard.sh
-  standin/clod bash -c 'cat /etc/clod/.claude/rules/clod.md; test -x /usr/local/bin/clod-clipboard && xclip -version' \
-    > out 2> err
+  echo '# live plugin' >> standin/plugins/show-image/convert.py
+  standin/clod bash -c 'cat /etc/clod/.claude/rules/clod.md; test -x /usr/local/bin/clod-clipboard && xclip -version
+    tail -1 /etc/clod/plugins/show-image/convert.py' > out 2> err
   if grep -q 'building' err; then false; fi
   has -x 'live entrypoint' err
-  test "$(tail -2 out)" = "$(printf 'live description\nlive clipboard')"
+  test "$(tail -3 out)" = "$(printf 'live description\nlive clipboard\n# live plugin')"
   # the image's own copies serve docker run without clod
-  docker run --rm --pull=never clod bash -c 'cat /etc/clod/.claude/rules/clod.md; xclip -version; true' 2>&1 |
+  docker run --rm --pull=never clod bash -c 'cat /etc/clod/.claude/rules/clod.md; xclip -version
+    cat /etc/clod/plugins/show-image/convert.py; true' 2>&1 |
     if grep -q live; then false; fi
 }
 
@@ -858,6 +875,7 @@ test_rebuild() {
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
   mkdir standin
   cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" "$repo/clipboard.sh" standin/
+  cp -R "$repo/plugins" standin/
   printf 'FROM debian:trixie-slim\nRUN date > /built\n' > standin/Dockerfile
   standin/clod -i first+second image build
   test "$(standin/clod -i first+second image build 2>&1)" = 'clod: first+second is up to date'

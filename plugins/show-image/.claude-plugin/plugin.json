@@ -1,0 +1,6 @@
+{
+  "name": "show-image",
+  "version": "1.0.0",
+  "description": "Shows pictures inline in Claude Code where the terminal can draw them (kitty, Ghostty)",
+  "types": "./types/index.d.ts"
+}

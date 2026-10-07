@@ -1,1 +1,4 @@
 /.claude/
+# what Claude Code writes into a plugin folder it loads with --plugin-dir
+/plugins/*/.claude-plugin/types/
+/plugins/*/tsconfig.json

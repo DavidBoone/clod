@@ -221,6 +221,25 @@ prints the clipboard's image as PNG.
 While the run lasts, the agent can read whatever image is on your clipboard,
 whenever it likes, not only when you press Ctrl+V; turn it on where that's fine.
 
+## Showing images
+
+In kitty or Ghostty, Claude Code shows pictures inline in the conversation,
+through `show-image`, a Claude Code plugin the image brings and clod loads on
+every Claude Code run:
+
+- Claude shows you a picture file when it decides one helps, such as a chart it
+  made or a screenshot it took, with its `show_image` tool. You see the
+  picture; Claude doesn't.
+- `/show-image PATH` shows one yourself.
+
+PNG, JPEG, GIF (its first frame), WebP, TIFF and BMP all show; any but a PNG
+of 2 MiB or less is converted to one first, with Pillow, at most 1200 pixels a
+side. A picture takes at most 60 columns and 30 rows. In other terminals, its
+path shows in its place.
+
+The plugin is built on parts of Claude Code's plugin interface that it doesn't
+document, so a Claude Code update can stop the pictures from showing.
+
 ## Updating and rebuilding
 
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
