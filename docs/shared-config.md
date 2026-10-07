@@ -35,7 +35,7 @@ From then on clod mounts `~/.clod/shared` in place of the starter, so keep
 everything you want from it there. Updates to the repo's `shared/` reach you
 only when you merge them in. `clod shared new` on an existing one lists the
 starter's files yours lacks or differs on; `clod shared diff` shows the
-differences. `clod --force shared new` replaces yours with the starter,
+differences. `clod shared new --force` replaces yours with the starter,
 keeping yours as a backup. Put your own instructions for Claude in a
 `CLAUDE.md` there, and settings for every home in `settings.json`.
 

@@ -412,7 +412,7 @@ help_summary() {
     IFS='|' read -r name args summary <<<"$row"
     [[ $args == - ]] || help_row "$name${args:+ ${args%%;*}}" "$summary"
   done <<<"$command_table"
-  printf '\nOptions, before the command\n'
+  printf '\nOptions, anywhere up to --, but before claude, codex, bash or zsh\n'
   help_options clod
   # shellcheck disable=SC2016 # printed as is
   printf "\n'clod COMMAND -h' shows more about COMMAND.\n"
@@ -421,12 +421,18 @@ help_summary() {
 # Prints the page of command $1, a command or NOUN VERB: its usage forms, what
 # it does, a noun's verbs, default's keys, and the options that apply to it.
 help_page() {
-  local name args summary form label='usage:' key var desc out
+  local name args summary form label='usage:' key var desc out run=''
+  is_one_of "$1" "$run_commands" && run=1
+  if [[ -n $run ]]; then out=$(help_options run); else out=$(help_options "$1"); fi
   while IFS='|' read -r name args summary; do
     [[ $name == "$1" ]] || continue
     [[ $args == - ]] && args=COMMAND
     while IFS= read -r form; do
-      printf '%s clod [OPTIONS] %s%s\n' "$label" "$name" "${form:+ $form}"
+      if [[ -n $run ]]; then
+        printf '%s clod [OPTIONS] %s%s\n' "$label" "$name" "${form:+ $form}"
+      else
+        printf '%s clod %s%s%s\n' "$label" "$name" "${out:+ [OPTIONS]}" "${form:+ $form}"
+      fi
       label='      '
     done <<<"${args//;/$'\n'}"
   done < <(grep '|' <<<"$command_table")
@@ -444,8 +450,7 @@ help_page() {
       help_row "$key ($var)" "$desc"
     done <<<"$settings_table"
   fi
-  if is_one_of "$1" "$run_commands"; then out=$(help_options run); else out=$(help_options "$1"); fi
-  [[ -z $out ]] || printf '\nOptions, before the command\n%s\n' "$out"
+  [[ -z $out ]] || printf '\nOptions%s\n%s\n' "${run:+, before the command}" "$out"
 }
 
 # Prints clod help, or with $1 the page of that command.
@@ -834,37 +839,52 @@ off_limits() {
 # (clod help, -h, --help) and exits.
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
+# Sets the option $1, taking its value from $2 if it has one, and sets REPLY to
+# the number of words it used: 0 when $1 isn't one of clod's options.
+take_option() {
+  REPLY=1
+  case $1 in
+    -i|--image|-H|--home|-w|--workspace|-P|--port)
+      [[ $# -ge 2 ]] || usage_error "$1 needs a value"
+      case $1 in
+        -i|--image) CLOD_IMAGE=$2 ;;
+        -H|--home) CLOD_HOME=$2 ;;
+        -w|--workspace) workspace_opt=$2 ;;
+        -P|--port) opt_ports+=("$2") ;;
+      esac
+      REPLY=2
+      ;;
+    --image=*) CLOD_IMAGE=${1#*=} ;;
+    --home=*) CLOD_HOME=${1#*=} ;;
+    --workspace=*) workspace_opt=${1#*=} ;;
+    --port=*) opt_ports+=("${1#*=}") ;;
+    -s|--scratch) scratch=1 ;;
+    -f|--force) force=1 ;;
+    --skip-build) skip_build=1 ;;
+    --build) build_after=1 ;;
+    --docker) docker_socket=1 ;;
+    --clipboard) CLOD_CLIPBOARD=on ;;
+    -h|--help) help=1 ;;
+    --version) echo "clod $(clod_version)"; exit 0 ;;
+    *) REPLY=0 ;;
+  esac
+}
+
+# Parses the command line. clod's options go before the command, and after it
+# too, up to --, except after a run command, whose arguments are the program's.
 parse_args() {
-  local opt_ports=() dashdash='' arg
+  local opt_ports=() dashdash='' arg rest=() unknown=''
   scratch='' workspace_opt='' force='' skip_build='' build_after='' docker_socket='' ports_opt='' command='' verb='' help=''
   while (( $# )); do
     case $1 in
-      -i|--image|-H|--home|-w|--workspace|-P|--port)
-        [[ $# -ge 2 ]] || usage_error "$1 needs a value"
-        case $1 in
-          -i|--image) CLOD_IMAGE=$2 ;;
-          -H|--home) CLOD_HOME=$2 ;;
-          -w|--workspace) workspace_opt=$2 ;;
-          -P|--port) opt_ports+=("$2") ;;
-        esac
-        shift 2
-        ;;
-      --image=*) CLOD_IMAGE=${1#*=}; shift ;;
-      --home=*) CLOD_HOME=${1#*=}; shift ;;
-      --workspace=*) workspace_opt=${1#*=}; shift ;;
-      --port=*) opt_ports+=("${1#*=}"); shift ;;
-      -s|--scratch) scratch=1; shift ;;
-      -f|--force) force=1; shift ;;
-      --skip-build) skip_build=1; shift ;;
-      --build) build_after=1; shift ;;
-      --docker) docker_socket=1; shift ;;
-      --clipboard) CLOD_CLIPBOARD=on; shift ;;
-      -h|--help) help=1; shift ;;
-      --version) echo "clod $(clod_version)"; exit 0 ;;
       --) shift; dashdash=1; break ;;
       # Claude Code's -p (print) and -c (continue), typed as if clod were claude.
       -p|-c) usage_error "unknown option $1; for Claude Code's $1, use: clod claude $1 ..." ;;
-      -*) usage_error "unknown option $1; a command's own options go after it, or after --" ;;
+      -*)
+        take_option "$@"
+        (( REPLY )) || usage_error "unknown option $1; a run command's own options go after it, or after --"
+        shift "$REPLY"
+        ;;
       *) break ;;
     esac
   done
@@ -874,6 +894,25 @@ parse_args() {
     command=$1
     shift
   fi
+  # The options among a command's arguments, up to --. An unknown one is an
+  # error once -h has had its chance to show the page.
+  if [[ -n $command ]] && ! is_one_of "$command" "$run_commands"; then
+    while (( $# )); do
+      case $1 in
+        --) shift; rest+=("$@"); break ;;
+        --reset)
+          if [[ $command == default ]]; then rest+=("$1"); else unknown=${unknown:-$1}; fi
+          shift
+          ;;
+        -?*)
+          take_option "$@"
+          if (( REPLY )); then shift "$REPLY"; else unknown=${unknown:-$1}; shift; fi
+          ;;
+        *) rest+=("$1"); shift ;;
+      esac
+    done
+    set -- ${rest[@]+"${rest[@]}"}
+  fi
   if is_one_of "$command" "$alias_commands"; then
     echo "clod: clod $command is deprecated; use clod image $command" >&2
     verb=$command command=image
@@ -882,22 +921,15 @@ parse_args() {
     if is_one_of "$1" "$REPLY"; then
       verb=$1
       shift
-    elif [[ $1 != -h && $1 != --help ]]; then
+    elif [[ -z $help ]]; then
       usage_error "unknown $command command '$1' (one of: ${REPLY// /, })"
     fi
-  fi
-  # -h or --help among a command's arguments, up to --, asks for its page,
-  # except for the run commands, whose arguments go to the agent or shell.
-  if [[ -z $dashdash ]] && ! is_one_of "$command" "$run_commands"; then
-    for arg; do
-      [[ $arg == -- ]] && break
-      [[ $arg == -h || $arg == --help ]] && help=1
-    done
   fi
   if [[ -n $help ]]; then
     show_help "$command${verb:+ $verb}"
     exit 0
   fi
+  [[ -z $unknown ]] || usage_error "unknown option $unknown"
   if [[ $command == help ]]; then
     (( $# <= 2 )) || usage_error "help takes a command, and a noun's verb"
     (( $# == 0 )) || is_one_of "$1" "$commands" || usage_error "unknown command '$1'"
@@ -927,7 +959,7 @@ parse_args() {
   case $command${verb:+ $verb} in
     'image rm'|'home '*|'workspace rm')
       for arg; do
-        [[ $arg == -* ]] && usage_error "clod's options go before the command"
+        [[ $arg == -* ]] && usage_error "'$arg' isn't a name: names don't start with -"
         [[ $command$verb == homerm && $arg == */* ]] &&
           usage_error "home rm takes home names and vol:NAME; delete the home $arg yourself"
       done
@@ -1126,7 +1158,7 @@ install_link() {
   if [[ -L $link && $(readlink "$link") == "$target" ]]; then
     echo "clod: $(tildify "$link") is installed already"
   elif [[ -e $link || -L $link ]] && [[ -z $force ]]; then
-    echo "clod: $(tildify "$link") already exists; clod --force install replaces it" >&2
+    echo "clod: $(tildify "$link") already exists; clod install --force replaces it" >&2
     return 1
   else
     mkdir -p "${link%/*}" && ln -sfn "$target" "$link" || return 1
@@ -1261,7 +1293,7 @@ offer() {
 # run commands (run), both forms of each option (options) or the setting keys
 # (settings).
 table_items() {
-  local name args summary flags value desc seen=''
+  local name args summary pages flags value desc seen=''
   items=()
   case $1 in
     commands|verbs|run)
@@ -1276,8 +1308,10 @@ table_items() {
       ;;
     # Both forms of each option, with its first row's description, which clod
     # help shows; zsh lists the two on one line, since they share it.
+    # With $2, only those on page $2.
     options)
-      while IFS='|' read -r _ flags value desc; do
+      while IFS='|' read -r pages flags value desc; do
+        [[ -z $2 || ,$pages, == *,"$2",* ]] || continue
         is_one_of "${flags##* }" "$seen" && continue
         seen+=" ${flags##* }"
         for value in $flags; do items+=("$value"$'\t'"$desc"); done
@@ -1338,6 +1372,7 @@ offer_files() {
 cmd_complete() {
   local raw=("$@") words=() cur last pre='' strip='' glue='' cmd='' cmd_args=() prev=''
   local word i homes='' variants verb='' given='' path_like='' value_flags='' flags value items
+  local opts=1 page
   local reset=--reset$'\t''remove this default'
   # The options that take a value, as -i --image.
   while IFS='|' read -r _ flags value _; do
@@ -1359,21 +1394,33 @@ cmd_complete() {
   last=${raw[${#raw[@]}-1]}
   [[ $last == [=:] ]] && last=''
   strip=${cur%"$last"}
+  # clod's options, and the values of those that take one, go anywhere up to
+  # --, but not after a run command; opts is empty once they can't.
   for (( i = 0; i < ${#words[@]}; i++ )); do
     word=${words[i]}
-    if [[ -n $cmd ]]; then
+    if [[ -z $opts ]]; then
       cmd_args+=("$word")
       continue
     fi
     case $word in
-      --) return 1 ;;
+      --) [[ -z $cmd ]] && return 1; opts='' ;;
+      --reset) cmd_args+=("$word") ;;
       -*) is_one_of "$word" "$value_flags" && (( i++ )) ;;
-      *) cmd=$word ;;
+      *)
+        if [[ -n $cmd ]]; then
+          cmd_args+=("$word")
+        else
+          cmd=$word
+          is_one_of "$cmd" "$run_commands" && opts=''
+        fi
+        ;;
     esac
   done
-  (( ${#words[@]} )) && prev=${words[${#words[@]}-1]}
+  # The word before, when it's an option's: -H then NAME.
+  (( ${#words[@]} )) && [[ -n $opts ]] && prev=${words[${#words[@]}-1]}
+  is_one_of "$prev" "$value_flags" || prev=''
   # An option's value in the same word: --home=NAME.
-  if [[ -z $cmd && $cur == --*=* ]]; then
+  if [[ -n $opts && $cur == --*=* ]]; then
     prev=${cur%%=*} pre=${cur%%=*}= cur=${cur#*=}
   fi
   variants=$(variant_names)
@@ -1390,7 +1437,7 @@ cmd_complete() {
     fi
   fi
   # shellcheck disable=SC2086 # the lists are words without spaces or globs
-  if [[ -z $cmd ]]; then
+  if [[ -n $prev ]]; then
     case $prev in
       -i|--image) offer_images ;;
       -H|--home) [[ -n $path_like ]] && return 1; offer $homes ;;
@@ -1400,12 +1447,17 @@ cmd_complete() {
         # shellcheck disable=SC2046 # volume names are words
         offer $(volume_names clod-workspace- | sed 's/^/vol:/')
         ;;
-      -P|--port) ;;
-      *)
-        if [[ $cur == -* ]]; then table_items options; else table_items commands; fi
-        offer "${items[@]}"
-        ;;
     esac
+  elif [[ -z $cmd ]]; then
+    if [[ $cur == -* ]]; then table_items options; else table_items commands; fi
+    offer "${items[@]}"
+  # After a command, the options on its page, and -h.
+  elif [[ -n $opts && $cur == -* && $cur != --reset ]]; then
+    page=$cmd
+    is_one_of "$cmd" "$nouns" && (( ${#cmd_args[@]} )) && page+=" ${cmd_args[0]}"
+    table_items options "$page"
+    offer "${items[@]}" $'-h\tshow this command\'s help' $'--help\tshow this command\'s help'
+    [[ $cmd == default && ${#cmd_args[@]} == 1 ]] && offer "$reset"
   elif [[ " $run_commands " == *" $cmd "* ]]; then
     return 1
   elif [[ $cmd == install && ${#cmd_args[@]} == 0 ]]; then
@@ -1904,7 +1956,7 @@ confirm_delete() {
   shift
   [[ -n $force ]] && return 0
   if [[ ! -t 0 ]]; then
-    echo "clod: there's no terminal to ask in; clod --force $kind rm deletes without asking" >&2
+    echo "clod: there's no terminal to ask in; clod $kind rm --force deletes without asking" >&2
     exit 1
   fi
   echo "clod: deleting, with every file in them:" >&2
@@ -2176,7 +2228,7 @@ cmd_shared_new() {
     echo "clod: $(tildify "$target") already exists. Compared with the starter in $(tildify "$starter"):"
     echo "$report"
     echo "See the differences: clod shared diff"
-    echo "Replace yours with the starter (yours is kept as a backup): clod --force shared new"
+    echo "Replace yours with the starter (yours is kept as a backup): clod shared new --force"
     return 0
   fi
   mkdir -p "$clod_dir"

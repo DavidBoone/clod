@@ -59,7 +59,7 @@ clod image new go            # your own copy of the bundled go, which then takes
 clod image diff go           # how yours differs from the bundled go, after either changes
 clod image edit mine         # open its Dockerfile in $VISUAL, $EDITOR or vi
 clod image edit mine CLAUDE.md  # or another file beside it, created if need be
-clod --build image edit mine    # then build it, to see a mistake now
+clod image edit mine --build    # then build it, to see a mistake now
 ```
 
 `clod image edit` with no name edits the variant `-i` or `CLOD_IMAGE` selects.

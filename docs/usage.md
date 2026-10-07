@@ -25,13 +25,17 @@ Commands that manage something are a noun and a verb: `clod image build`,
 `clod home rm`. The noun on its own lists them, except `shared`, which needs
 `new` or `diff`.
 
+clod's options go before the command or anywhere after it, up to `--`:
+`clod home rm work --force` is `clod --force home rm work`. Past `--`, a word
+starting with `-` is an argument.
+
 `clod help` lists the commands and options. A command's page, with its usage,
 what it does and the options that apply to it, is `clod help COMMAND`, or `-h`
 or `--help` anywhere after the command: `clod home rm -h`. A noun's page lists
 its verbs. The run commands (`claude`, `codex`, `bash`, `zsh`) are the
-exception: their arguments go to the program they run, so `clod claude --help`
-is Claude Code's help, and `clod help claude` is clod's page for it. A usage
-error names the page to read.
+exception: their arguments go to the program they run, so clod's options go
+before them, `clod claude --help` is Claude Code's help, and `clod help claude`
+is clod's page for it. A usage error names the page to read.
 
 A bare `clod` runs Claude Code, or whatever you've set as the default command.
 To pass it arguments without naming it, put them after `--`: `clod -- --resume`
@@ -68,7 +72,7 @@ variables](configuration.md#your-defaults)).
 ```bash
 clod workspace                  # list the volume workspaces, and which are in use
 clod workspace rm play          # delete clod-workspace-play, after asking
-clod --force workspace rm play  # delete it without asking
+clod workspace rm play --force  # delete it without asking
 ```
 
 `clod workspace rm` takes `NAME` or `vol:NAME`. In a terminal it lists what
@@ -114,7 +118,7 @@ prints the line to add to your `~/.zshrc` or `~/.bashrc` instead:
 eval "$(clod completion)"
 ```
 
-`install` won't replace a file it didn't make; `clod --force install` does.
+`install` won't replace a file it didn't make; `clod install --force` does.
 Running it again only reports what's installed already.
 
 `clod uninstall` removes the links `install` made, and nothing else: `clod` in

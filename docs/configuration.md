@@ -36,7 +36,7 @@ shell in it. `clod home` lists volume homes but shows `?` for their logins.
 ```bash
 clod home rm work               # delete ~/.clod/homes/work, login included, after asking
 clod home rm vol:work           # delete the volume clod-home-work, after asking
-clod --force home rm work       # delete it without asking
+clod home rm work --force       # delete it without asking
 ```
 
 In a terminal, `clod home rm` lists what it will delete and asks first;

@@ -419,7 +419,7 @@ test_volume_home() {
   # without a terminal
   exits 2 clod home rm ./x 2>&1 | has 'delete the home ./x yourself'
   exits 2 clod --force home rm vol:vtest ~/.clod/homes/x
-  exits 2 clod home rm -f vol:vtest 2>&1 | has "options go before the command"
+  exits 2 clod home rm -- -f 2>&1 | has "'-f' isn't a name"
   # a name it doesn't know removes none of them
   exits 1 clod --force home rm vol:vtest vol:no-such
   docker volume inspect clod-home-vtest >/dev/null
@@ -482,7 +482,6 @@ test_home_copy() {
   test -f moved/here/.config/f
   exits 2 clod home cp src
   exits 2 clod home mv a b c
-  exits 2 clod home cp -f a 2>&1 | has "options go before the command"
   exits 1 clod home cp nope vol:x 2>&1 | has -x 'clod: no home nope (clod home lists them)'
   exits 1 clod home cp vol:nope x 2>&1 | has 'no home vol:nope'
   exits 1 clod home cp vol:cp1 vol:cp2 2>&1 | has 'already a home vol:cp2'
@@ -547,9 +546,8 @@ test_volume_workspace() {
   has '^\* used here' < out
   exits 2 clod workspace rm
   exits 2 clod workspace ls
-  exits 2 clod workspace rm -f one 2>&1 | has "options go before the command"
   # a name it doesn't know removes none of them
-  exits 1 clod --force workspace rm one no-such
+  exits 1 clod workspace rm one no-such -f
   docker volume inspect clod-workspace-one >/dev/null
   exits 1 clod workspace rm one < /dev/null 2>&1 | tee out
   has 'no terminal' < out
@@ -657,7 +655,9 @@ test_command_line() {
   exits 2 clod env extra
   exits 2 clod image new a b c
   exits 2 clod image new
-  for name in Mine -mine mine_ my.image; do
+  exits 2 clod image new -mine 2>&1 | has 'unknown option -mine'
+  exits 2 clod image new -- -mine 2>&1 | has 'invalid image name'
+  for name in Mine mine_ my.image; do
     exits 2 clod image new "$name" 2>&1 | has 'invalid image name'
   done
   exits 2 clod image show
@@ -674,6 +674,15 @@ test_command_line() {
   # a run command's -h goes to the program it runs
   test "$(clod bash -c 'echo "$0"' -h)" = -h
   clod --version | has '^clod '
+  # clod's options go after a command too, up to --; an unknown one is an
+  # error, after -h has had its chance
+  clod env -H other -i python | has '^image: *python '
+  clod image -i python edit -h | has -x 'usage: clod image edit \[OPTIONS\] \[NAME \[FILE\]\]'
+  exits 2 clod env --nope 2>&1 | has -x "clod: unknown option --nope (see 'clod env -h')"
+  clod env --nope -h | has '^usage: clod env '
+  exits 2 clod image --reset 2>&1 | has 'unknown option --reset'
+  # after a run command, they're the program's
+  test "$(clod bash -c 'echo "$0"' -i)" = -i
   clod -H other -i python -P 3000:8080 env | tee out
   grep -q '^home: *other' out
   grep -q '^image: *python ' out
@@ -705,21 +714,21 @@ test_help() {
   clod --help | diff - out
   # a command's page: -h or --help after it, before it, or clod help COMMAND
   clod home rm -h > out
-  has -x 'usage: clod \[OPTIONS\] home rm NAME\.\.\.' < out
+  has -x 'usage: clod home rm \[OPTIONS\] NAME\.\.\.' < out
   has -xE '  -f, --force +delete without asking; needed without a terminal' < out
   clod home rm vol:x --help | diff - out
   clod -h home rm | diff - out
   clod help home rm | diff - out
   # not after --
-  exits 2 clod home rm -- -h 2>&1 | has "options go before the command"
+  exits 2 clod home rm -- -h 2>&1 | has "'-h' isn't a name"
   # a noun's page lists its verbs, default's its keys, help's its own
   clod image -h | has -xE '  image prune +remove the stale images clod built'
-  clod shared -h | has -x 'usage: clod \[OPTIONS\] shared COMMAND'
+  clod shared -h | has -x 'usage: clod shared COMMAND'
   clod help default | has -xE '  ports \(CLOD_PORTS\) +ports to publish on localhost, comma-separated'
-  clod help default | has -x '       clod \[OPTIONS\] default KEY --reset'
-  clod help -h | has -x 'usage: clod \[OPTIONS\] help \[COMMAND\]'
+  clod help default | has -x '       clod default KEY --reset'
+  clod help -h | has -x 'usage: clod help \[COMMAND\]'
   clod help claude | has 'ARGS go to Claude Code unchanged'
-  clod build -h 2>/dev/null | has -x 'usage: clod \[OPTIONS\] image build \[NAME\.\.\.\]'
+  clod build -h 2>/dev/null | has -x 'usage: clod image build \[OPTIONS\] \[NAME\.\.\.\]'
   # every command and verb has a page that says what it does, within 80
   # columns
   for c in $(completes ''); do
@@ -906,10 +915,11 @@ test_image_edit() {
   completes image edit editme '' | has -x sub/x
   # --build builds once the editor exits, and not if it fails
   exits 2 clod --build image show editme 2>&1 | has -- '--build goes with image edit'
-  EDITOR=true clod --build image edit editme
+  exits 2 clod image show editme --build 2>&1 | has -- '--build goes with image edit'
+  EDITOR=true clod image edit editme --build
   clod image show editme | has '^editme  *built '
   echo 'LABEL edited=1' >> ~/.clod/images/editme/Dockerfile
-  EDITOR=false exits 1 clod --build image edit editme
+  EDITOR=false exits 1 clod image edit --build editme
   clod image show editme | has '^editme  *stale '
   EDITOR=true clod --build image edit editme
   clod image show editme | has '^editme  *built '
@@ -950,10 +960,9 @@ test_image_rm() {
   if completes image rm '' | grep -qx sudo; then false; fi
   if completes image rm mine '' | grep -qx mine; then false; fi
   exits 2 clod image rm
-  exits 2 clod image rm -f mine 2>&1 | has "options go before the command"
   exits 1 clod --force image rm sudo 2>&1 | has 'clod image clean sudo removes its built image'
   exits 1 clod --force image rm other+mine 2>&1 | has 'clod image clean other+mine removes'
-  exits 1 clod --force image rm mine no-such 2>&1 | has "no variant of yours named 'no-such'"
+  exits 1 clod image rm mine --force no-such 2>&1 | has "no variant of yours named 'no-such'"
   test -d ~/.clod/images/mine
   exits 1 clod image rm mine < /dev/null 2>&1 | has 'no terminal'
   # in a terminal it lists the variant and the images built from it, and asks
@@ -1104,7 +1113,18 @@ test_completion() {
   if completes image edit '' | grep -qxE 'clod|go'; then false; fi
   test "$(completes image edit plain '')" = Dockerfile
   test -z "$(completes image edit plain Dockerfile '')"
+  # after a command, the options on its page and -h, with the page's
+  # description; the arguments around them complete as without them
+  test "$(completes image edit -)" = "$(printf -- '--build\n-h\n--help')"
+  clod __complete home rm - | has -xF -e "$(printf -- '--force\tdelete without asking; needed without a terminal')"
+  completes default ports-busy - | has -x -- --reset
+  completes image edit --build '' | has -x plain
+  test "$(completes image edit -i go plain '')" = Dockerfile
+  completes image build -i '' | has -x go
+  completes env --home=w | has -x -- --home=work
+  test -z "$(completes image edit -- -)"
   # exit status 1: the word is a file name, which the shell completes
+  if completes claude -; then false; fi
   if completes claude --re; then false; fi
   if completes -- ''; then false; fi
   if completes -H ./w; then false; fi
@@ -1245,9 +1265,9 @@ test_install() {
   # someone else's files: refused, then replaced with --force
   mkdir taken
   touch taken/clod
-  exits 1 clod install "$PWD/taken" 2>&1 | has 'taken/clod already exists; clod --force install replaces it'
+  exits 1 clod install "$PWD/taken" 2>&1 | has 'taken/clod already exists; clod install --force replaces it'
   test ! -L taken/clod
-  clod --force install "$PWD/taken" >/dev/null
+  clod install "$PWD/taken" --force >/dev/null
   test "$(readlink taken/clod)" = "$repo/clod"
   mkdir zfn2
   touch zfn2/_clod
