@@ -892,6 +892,9 @@ test_rebuild() {
 # clod image edit opens only your own variants' files, and with --build builds
 # them.
 test_image_edit() {
+  # image new names image edit
+  clod image new newone | has -x 'Edit its Dockerfile with: clod image edit newone'
+  rm -r ~/.clod/images/newone
   mkdir -p ~/.clod/images/editme
   printf 'ARG BASE=clod\nFROM $BASE\n' > ~/.clod/images/editme/Dockerfile
   test "$(EDITOR='echo edited' clod image edit editme)" = "edited $HOME/.clod/images/editme/Dockerfile"

@@ -2309,7 +2309,8 @@ USER claude
 STARTER
     echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, built on $variants}"
   fi
-  echo "Edit $(tildify "$target")/Dockerfile, then run it with: clod -i $name"
+  echo "Edit its Dockerfile with: clod image edit $name"
+  echo "Then run it with: clod -i $name"
 }
 
 # Shows the differences between the bundled variant $1 and yours, returning
