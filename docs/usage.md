@@ -195,7 +195,10 @@ Only the ports other running containers publish are checked.
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
 what changed, one line per change. The next `clod` rebuilds the image if it
 changed; `clod image build` builds it straight away instead, without starting
-a container. An update that changes the base image leaves every variant you've
+a container. Only a change to the base `Dockerfile` rebuilds the base:
+`entrypoint.sh` and `container.md` (what Claude is told about the container)
+are mounted from the checkout on every run, so changes to them apply without a
+build. An update that changes the base image leaves every variant you've
 built stale; `clod image prune` removes the stale images to free their space,
 and each builds again on its next run.
 

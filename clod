@@ -583,8 +583,11 @@ files_hash() {
 }
 
 # Prints the hash the clod image is labelled with when built from its files.
+# entrypoint.sh and container.md are left out: runs mount them from the
+# checkout, so a change to either needs no build, which would also rebuild
+# every variant on top.
 base_hash() {
-  { cat "$base_dir/Dockerfile" "$base_dir/entrypoint.sh" "$base_dir/container.md"
+  { cat "$base_dir/Dockerfile"
     printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1
 }
 
@@ -2409,6 +2412,14 @@ cmd_run() {
   fi
   if [[ -n $shared_dir ]]; then
     mount_arg "$shared_dir" /etc/claude-code ,readonly
+    run_args+=(--mount "$REPLY")
+  fi
+  # The checkout's entrypoint and container description replace the copies
+  # the image was built with, which are as of its last build.
+  if [[ -n $base_dir ]]; then
+    mount_arg "$base_dir/entrypoint.sh" /usr/local/bin/clod-entrypoint ,readonly
+    run_args+=(--mount "$REPLY")
+    mount_arg "$base_dir/container.md" /etc/clod/.claude/rules/clod.md ,readonly
     run_args+=(--mount "$REPLY")
   fi
   # Docker Engine on Linux has no built-in host.docker.internal.
