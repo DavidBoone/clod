@@ -80,6 +80,7 @@ A setting given empty still wins and means its default, so `clod -P ''` or
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 | `CLOD_PORTS_BUSY` | none | `skip` | What a run does with a `CLOD_PORTS` host port another running container publishes: `skip` leaves it out, `next` publishes the next free host port, `error` stops. A taken port given with `-P` always stops the run (see [Publishing ports](usage.md#publishing-ports)). |
+| `CLOD_CLIPBOARD` | `--clipboard` | `off` | `on` lets Ctrl+V in Claude Code paste the image on your machine's clipboard (see [Pasting images](usage.md#pasting-images)). |
 
 In an `.envrc`, `$PWD` is the `.envrc`'s directory, so
 `export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
@@ -97,11 +98,12 @@ clod default command codex      # a bare clod runs Codex
 clod default home work          # CLOD_HOME=work
 clod default ports 5173         # CLOD_PORTS=5173
 clod default ports-busy next    # CLOD_PORTS_BUSY=next
+clod default clipboard on       # CLOD_CLIPBOARD=on
 clod default image              # show one
 clod default image --reset      # back to the built-in default
 ```
 
-The keys are `image`, `command`, `home`, `ports` and `ports-busy`. Values are checked when
+The keys are `image`, `command`, `home`, `ports`, `ports-busy` and `clipboard`. Values are checked when
 you set them, and a home path is stored as an absolute path. Your shell's
 settings and a project's `.envrc` win over these defaults; `clod env` shows
 what a run will actually use.

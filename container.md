@@ -10,6 +10,7 @@ Running in a disposable Docker container (`docker run --rm`) started by the user
 - Files for the user to open: put them under `/workspace` or `/home/claude` and give the host path, `$CLOD_WORKSPACE_PATH` in place of `/workspace` and `$CLOD_HOME_PATH` in place of `/home/claude` (e.g. `~/proj/out/shot.png`), which their terminal can open with a click. `/tmp` and other container paths don't exist on the host, so never point the user at them; copy the file somewhere mounted first. A volume or scratch mount has no host folder, so say that instead
 - `$CLOD_PORTS`, when set, lists the container ports published to the user's machine, comma-separated (`5000,8080`); a server must listen on `0.0.0.0` to be reachable through them. When another container already had one of their host ports, clod left that port out or published it on another host port, and said which on the host
 - `$TERM` is `xterm`. When clod runs in a terminal, `$TERM_PROGRAM`, `$TERM_PROGRAM_VERSION`, `$LC_TERMINAL`, `$LC_TERMINAL_VERSION` and `$COLORTERM` are the host terminal's, where it sets them
+- `$CLOD_CLIPBOARD_URL`, set with `clod --clipboard`, is where `xclip` and `wl-paste` here (shims, image only) fetch the image on the user's clipboard, which is how Claude Code's Ctrl+V pastes one. Without it, Ctrl+V can't paste images; the user turns it on with `clod --clipboard` or `clod default clipboard on`
 - The host is `host.docker.internal`. The Docker socket is mounted only with `clod --docker` (then `$CLOD_HOST_WORKSPACE` is the project's host path, unset for a volume or scratch workspace)
 
 When the home and workspace are virtiofs mounts (`mount` shows it; usual on a macOS host), GNU `sed -i` leaves the file mode 600 (it restores the mode through an ACL, which the mount stores but doesn't apply); edit files with your own tools or `perl -i` instead.
@@ -22,7 +23,7 @@ You can't run `clod` or see the host's `~/.clod`; the user changes these on the 
 
 - Packages or system setup: a variant, `~/.clod/images/<name>/Dockerfile` (`ARG BASE=clod` / `FROM $BASE`, `USER root` … `USER claude`), run with `clod -i <name>`; `clod image new <name>` starts one. Variants combine (`-i go+<name>`), and clod rebuilds them when their files change. For root while running, the bundled `sudo` variant
 - Environment variables for the container: `.envrc` in the project (`export FOO=bar`), loaded by direnv on the host, where it must be allowed
-- Defaults for every run: `clod default image|command|home|ports|ports-busy VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.envrc`
+- Defaults for every run: `clod default image|command|home|ports|ports-busy|clipboard VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.envrc`
 - Instructions or managed settings for every home: `~/.clod/shared/` (`clod shared new` creates it)
 - A home on the shared folders that's slow, or that `chown` fails in: a volume home, which `clod home mv NAME vol:NAME` moves it to, login included (`clod home cp` copies)
 - Ports: `clod -P 3000` or `CLOD_PORTS`; Docker access: `clod -i docker --docker`, which gives the agent root on the Docker host

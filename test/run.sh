@@ -29,7 +29,7 @@ export LC_ALL=C.UTF-8
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
-  port port-busy docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
+  port port-busy clipboard docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine live-files rebuild image-rm image-clean image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -82,7 +82,7 @@ exits() {
 
 test_lint() {
   cd "$repo"
-  shellcheck clod completions/clod.bash entrypoint.sh shared/statusline.sh docs/statusline-svg.sh \
+  shellcheck clod completions/clod.bash entrypoint.sh clipboard.sh shared/statusline.sh docs/statusline-svg.sh \
     test/run.sh test/incus.sh test/docker.sh
 }
 
@@ -323,6 +323,35 @@ test_port_busy() {
   CLOD_PORTS_BUSY=nope exits 1 clod bash -c true 2>&1 | has "it must be skip, next or error"
   # another protocol's port isn't taken
   CLOD_PORTS=18090/udp CLOD_PORTS_BUSY=error clod bash -c 'test "$CLOD_PORTS" = 18090/udp'
+}
+
+# --clipboard: the image's xclip and wl-paste fetch the host clipboard's image,
+# here whatever CLOD_CLIPBOARD_COMMAND prints, as Claude Code's Ctrl+V asks.
+test_clipboard() {
+  printf '\x89PNG\r\n\x1a\nnot really' > clip.png
+  export CLOD_CLIPBOARD_COMMAND="cat $PWD/clip.png"
+  clod bash -c 'test -z "${CLOD_CLIPBOARD_URL:-}" && ! xclip -selection clipboard -t TARGETS -o'
+  if clod env | has '^clipboard:'; then false; fi
+  clod --clipboard env | has '^clipboard:'
+  clod --clipboard bash -c '
+    set -e
+    xclip -selection clipboard -t TARGETS -o | grep -q image/png
+    xclip -selection clipboard -t image/png -o > /workspace/xclip.png
+    wl-paste -l | grep -q image/png
+    wl-paste --type image/png > /workspace/wl-paste.png
+    if xclip -selection clipboard -t text/plain -o; then exit 1; fi
+    if curl -fs "${CLOD_CLIPBOARD_URL%/*}/wrong"; then exit 1; fi
+  ' 2>&1 | tee out
+  has 'clipboard$' < out
+  cmp clip.png xclip.png
+  cmp clip.png wl-paste.png
+  # no image on the clipboard
+  CLOD_CLIPBOARD_COMMAND=true CLOD_CLIPBOARD=on clod bash -c '! xclip -selection clipboard -t TARGETS -o'
+  CLOD_CLIPBOARD=maybe exits 1 clod bash -c true 2>&1 | has 'it must be on or off'
+  exits 2 clod default clipboard maybe
+  # the server exits with the run
+  sleep 3
+  if pgrep -f clipboard-server.py; then false; fi
 }
 
 test_docker_socket() {
@@ -767,21 +796,24 @@ test_combine() {
   grep -q 'building ontop\.\.\.' out
 }
 
-# entrypoint.sh and container.md are mounted from the checkout, so changing
-# them applies on the next run without a build. A copy of clod beside copies
-# of the base's files builds the same image, from the layer cache.
+# entrypoint.sh, container.md and clipboard.sh are mounted from the checkout,
+# so changing them applies on the next run without a build. A copy of clod
+# beside copies of the base's files builds the same image, from the layer cache.
 test_live_files() {
   mkdir standin
-  cp "$repo/clod" "$repo/Dockerfile" "$repo/entrypoint.sh" "$repo/container.md" "$repo/.dockerignore" standin/
+  cp "$repo/clod" "$repo/Dockerfile" "$repo/entrypoint.sh" "$repo/container.md" "$repo/clipboard.sh" \
+    "$repo/.dockerignore" standin/
   standin/clod image build
   echo 'live description' >> standin/container.md
   sed -i '2a echo live entrypoint >&2' standin/entrypoint.sh
-  standin/clod bash -c 'cat /etc/clod/.claude/rules/clod.md' > out 2> err
+  perl -pi -e 'print "echo live clipboard; exit 0\n" if $. == 2' standin/clipboard.sh
+  standin/clod bash -c 'cat /etc/clod/.claude/rules/clod.md; test -x /usr/local/bin/clod-clipboard && xclip -version' \
+    > out 2> err
   if grep -q 'building' err; then false; fi
   has -x 'live entrypoint' err
-  test "$(tail -1 out)" = 'live description'
+  test "$(tail -2 out)" = "$(printf 'live description\nlive clipboard')"
   # the image's own copies serve docker run without clod
-  docker run --rm --pull=never clod bash -c 'cat /etc/clod/.claude/rules/clod.md' 2>&1 |
+  docker run --rm --pull=never clod bash -c 'cat /etc/clod/.claude/rules/clod.md; xclip -version; true' 2>&1 |
     if grep -q live; then false; fi
 }
 
@@ -793,7 +825,7 @@ test_rebuild() {
   local t i before=() after=()
   [[ -f ~/.clod/images/first/Dockerfile ]] || order_variants
   mkdir standin
-  cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" standin/
+  cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" "$repo/clipboard.sh" standin/
   printf 'FROM debian:trixie-slim\nRUN date > /built\n' > standin/Dockerfile
   standin/clod -i first+second image build
   test "$(standin/clod -i first+second image build 2>&1)" = 'clod: first+second is up to date'

@@ -73,7 +73,7 @@ reach](docs/security.md) goes through this in full.
 Everything below is optional; plain `clod` is all most work needs.
 
 - [Using clod](docs/usage.md): the command line, Codex, shells, publishing
-  ports, git and GitHub logins, updating and rebuilding
+  ports, pasting images, git and GitHub logins, updating and rebuilding
 - [Image variants](docs/images.md): the bundled Go, Rust, Python, .NET, LAMP,
   browser and Docker images, combining them, and writing your own
 - [Homes, settings and per-project environment](docs/configuration.md): one

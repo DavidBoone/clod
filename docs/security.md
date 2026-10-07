@@ -17,6 +17,8 @@ without asking:
 - **The variables you pass in** from `.envrc`, tokens included.
 - **The network**, including services on your machine through
   `host.docker.internal`.
+- **Your clipboard's images**, with `--clipboard` (or `clipboard on`): whatever
+  image you have copied, at any time during the run, not only when you paste.
 
 Everything else on your machine is out of reach: your own home directory,
 other projects, host processes and system files. In the container the agent

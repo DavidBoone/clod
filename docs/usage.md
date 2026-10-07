@@ -190,17 +190,45 @@ clod default ports-busy skip   # leave it out (the default)
 
 Only the ports other running containers publish are checked.
 
+## Pasting images
+
+Claude Code pastes an image from the clipboard with Ctrl+V, but the container
+has no clipboard: it can't see your machine's. With `--clipboard` it can, for
+images:
+
+```bash
+clod --clipboard                 # this run
+clod default clipboard on        # every run
+```
+
+Copy or screenshot an image to the clipboard, then press Ctrl+V in Claude
+Code. clod starts a small server on your machine for the run, which reads the
+clipboard each time the container asks and hands over only an image, as PNG;
+in the container, `xclip` and `wl-paste` fetch it from there, which is what
+Claude Code runs on Linux. Text still pastes through the terminal as usual.
+
+It needs `python3` on your machine. On macOS it reads the clipboard with
+`pngpaste` if you have it (`brew install pngpaste`), else with `osascript`; on
+Linux with `wl-paste` (Wayland) or `xclip` (X11), and only on the machine Docker
+runs on, since the container reaches the server on the Docker bridge's gateway.
+`CLOD_CLIPBOARD_COMMAND`, set in your shell, replaces those with a command that
+prints the clipboard's image as PNG.
+
+While the run lasts, the agent can read whatever image is on your clipboard,
+whenever it likes, not only when you press Ctrl+V; turn it on where that's fine.
+
 ## Updating and rebuilding
 
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
 what changed, one line per change. The next `clod` rebuilds the image if it
 changed; `clod image build` builds it straight away instead, without starting
 a container. Only a change to the base `Dockerfile` rebuilds the base:
-`entrypoint.sh` and `container.md` (what Claude is told about the container)
-are mounted from the checkout on every run, so changes to them apply without a
-build. An update that changes the base image leaves every variant you've
-built stale; `clod image prune` removes the stale images to free their space,
-and each builds again on its next run.
+`entrypoint.sh`, `container.md` (what Claude is told about the container) and
+`clipboard.sh` (the `xclip` and `wl-paste` behind `--clipboard`) are mounted
+from the checkout on every run, so changes to them apply without a build. An
+update that changes the base image leaves every variant you've built stale;
+`clod image prune` removes the stale images to free their space, and each
+builds again on its next run.
 
 An image is otherwise kept as built. To refresh its system packages, Node and
 whatever its variant downloads, rebuild it from scratch. When an image's files

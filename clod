@@ -26,6 +26,8 @@
 #               running container publishes: skip (default) leaves it out, next
 #               publishes the next free host port, error stops. A port given
 #               with -P that is taken always stops the run.
+#   CLOD_CLIPBOARD  on lets Ctrl+V in Claude Code paste the image on the
+#               host's clipboard (default off); --clipboard turns it on for a run
 #
 # The .envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
@@ -55,6 +57,9 @@
 # CLOD_WORKSPACE_PATH the host folders mounted (unset for a volume), and
 # CLOD_PORTS the published container ports. With --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
 # With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
+# With --clipboard, CLOD_CLIPBOARD_URL is where the image's xclip and wl-paste
+# fetch the host clipboard's image, from clipboard-server.py, which clod starts
+# on the host for the run.
 #
 # On a Linux host the clod image's claude user is built with the host user's
 # uid and gid, and host.docker.internal is mapped to the host.
@@ -277,6 +282,7 @@ install|-f --force||replace an existing clod or completion file
 shared new|-f --force||replace ~/.clod/shared, keeping a backup
 image rm,home rm,workspace rm|-f --force||delete without asking; needed without a terminal
 clod,run|--skip-build||run the image as built, even if its files changed
+clod,run,env|--clipboard||let Ctrl+V in Claude Code paste the host clipboard's image (CLOD_CLIPBOARD)
 clod,run|--docker||mount the host's Docker socket, which is root on the Docker host; the CLI comes from the image (-i docker)
 clod|-h --help||show help; after a command, that command's
 clod|--version||show clod's version
@@ -290,6 +296,7 @@ command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, bash or zsh
 home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
 ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
+clipboard|CLOD_CLIPBOARD|off|on lets Ctrl+V in Claude Code paste the image on the host's clipboard
 EOF
 
 # The commands that run in the container, the commands (each noun once) and the
@@ -583,9 +590,9 @@ files_hash() {
 }
 
 # Prints the hash the clod image is labelled with when built from its files.
-# entrypoint.sh and container.md are left out: runs mount them from the
-# checkout, so a change to either needs no build, which would also rebuild
-# every variant on top.
+# entrypoint.sh, container.md and clipboard.sh are left out: runs mount them
+# from the checkout, so a change to any of them needs no build, which would
+# also rebuild every variant on top.
 base_hash() {
   { cat "$base_dir/Dockerfile"
     printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1
@@ -827,6 +834,7 @@ parse_args() {
       -f|--force) force=1; shift ;;
       --skip-build) skip_build=1; shift ;;
       --docker) docker_socket=1; shift ;;
+      --clipboard) CLOD_CLIPBOARD=on; shift ;;
       -h|--help) help=1; shift ;;
       --version) echo "clod $(clod_version)"; exit 0 ;;
       --) shift; dashdash=1; break ;;
@@ -1029,6 +1037,10 @@ setup_container() {
   case ${CLOD_PORTS_BUSY:-skip} in
     skip|next|error) ;;
     *) echo "clod: CLOD_PORTS_BUSY is '$CLOD_PORTS_BUSY'; it must be skip, next or error" >&2; exit 1 ;;
+  esac
+  case ${CLOD_CLIPBOARD:-off} in
+    on|off) ;;
+    *) echo "clod: CLOD_CLIPBOARD is '$CLOD_CLIPBOARD'; it must be on or off" >&2; exit 1 ;;
   esac
 
   tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
@@ -1378,6 +1390,9 @@ cmd_complete() {
         offer $'skip\tleave the port out' $'next\tpublish the next free host port' \
           $'error\tstop before running' "$reset"
         ;;
+      1:clipboard)
+        offer $'on\tpaste the host clipboard\'s image with Ctrl+V' $'off\tno clipboard' "$reset"
+        ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
     if (( ${#cmd_args[@]} == 0 )); then
@@ -1514,6 +1529,9 @@ cmd_default() {
         ;;
       ports-busy)
         is_one_of "$value" 'skip next error' || usage_error "ports-busy is one of skip, next, error"
+        ;;
+      clipboard)
+        is_one_of "$value" 'on off' || usage_error "clipboard is on or off"
         ;;
     esac
   fi
@@ -2229,6 +2247,7 @@ cmd_env() {
     fi
     field ports "$shown"
   fi
+  [[ ${CLOD_CLIPBOARD:-off} == on ]] && field clipboard "the host clipboard's image, for Ctrl+V in Claude Code"
   [[ -n $docker_socket ]] && field docker "the host's Docker socket (root on the Docker host)"
   [[ -f $config ]] && field config "$(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
@@ -2376,6 +2395,35 @@ settle_ports() {
 
 # Runs command $command with arguments $@ in the container, building its image
 # first if needed.
+# Starts clipboard-server.py on the host, serving the clipboard's image to this
+# run, and sets REPLY to its URL as the container sees it. It listens on
+# 127.0.0.1, which host.docker.internal reaches from Docker Desktop's and
+# Colima's VMs, or on Linux on the gateway of Docker's bridge network, where
+# --add-host maps host.docker.internal; a random token in the URL keeps other
+# containers out. It exits when this process, which becomes docker run, does.
+start_clipboard() {
+  local addr=127.0.0.1 token port
+  if ! command -v python3 >/dev/null; then
+    echo "clod: --clipboard needs python3 on the host" >&2
+    exit 1
+  fi
+  if [[ $OSTYPE == linux* ]]; then
+    addr=$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null)
+    if [[ -z $addr ]]; then
+      echo "clod: --clipboard: can't find the gateway of Docker's bridge network" >&2
+      exit 1
+    fi
+  fi
+  token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  read -r port < <(python3 "$script_dir/clipboard-server.py" "$addr" "$$" "$token" </dev/null 2>&1)
+  if [[ ! $port =~ ^[0-9]+$ ]]; then
+    echo "clod: --clipboard: the clipboard server didn't start: ${port#error }" >&2
+    exit 1
+  fi
+  clipboard_on=1
+  REPLY=http://host.docker.internal:$port/$token
+}
+
 cmd_run() {
   local run_args variants endpoint sock mount probe sock_stat
   need_home
@@ -2414,12 +2462,16 @@ cmd_run() {
     mount_arg "$shared_dir" /etc/claude-code ,readonly
     run_args+=(--mount "$REPLY")
   fi
-  # The checkout's entrypoint and container description replace the copies
-  # the image was built with, which are as of its last build.
+  # The checkout's entrypoint, container description and clipboard shim
+  # replace the copies the image was built with, which are as of its last
+  # build. Claude Code runs the shim directly as xclip and wl-paste, so it
+  # relies on the checkout's mode, 755 in git.
   if [[ -n $base_dir ]]; then
     mount_arg "$base_dir/entrypoint.sh" /usr/local/bin/clod-entrypoint ,readonly
     run_args+=(--mount "$REPLY")
     mount_arg "$base_dir/container.md" /etc/clod/.claude/rules/clod.md ,readonly
+    run_args+=(--mount "$REPLY")
+    mount_arg "$base_dir/clipboard.sh" /usr/local/bin/clod-clipboard ,readonly
     run_args+=(--mount "$REPLY")
   fi
   # Docker Engine on Linux has no built-in host.docker.internal.
@@ -2455,6 +2507,10 @@ cmd_run() {
     # A volume workspace has no path on the Docker host.
     [[ -n $workspace && $workspace != vol:* ]] && run_args+=(-e "CLOD_HOST_WORKSPACE=$workspace")
   fi
+  if [[ ${CLOD_CLIPBOARD:-off} == on ]]; then
+    start_clipboard
+    run_args+=(-e "CLOD_CLIPBOARD_URL=$REPLY")
+  fi
   # In a terminal, the host terminal's name, version and colour support go in
   # too, so programs inside can tell what it supports, such as links. TERM
   # stays Docker's xterm: the container may lack the host's terminfo entry.
@@ -2464,7 +2520,7 @@ cmd_run() {
       [[ -n ${!v:-} ]] && run_args+=(-e "$v")
     done
   fi
-  echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}" >&2
+  echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }
