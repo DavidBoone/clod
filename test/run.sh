@@ -858,7 +858,8 @@ test_rebuild() {
 
 # image rm deletes your variants and the images built from them, asking first
 # in a terminal; a bundled variant or a combination has nothing of yours.
-# clod image edit opens only your own variants' Dockerfiles. Needs no Docker.
+# clod image edit opens only your own variants' files, and with --build builds
+# them.
 test_image_edit() {
   mkdir -p ~/.clod/images/editme
   printf 'ARG BASE=clod\nFROM $BASE\n' > ~/.clod/images/editme/Dockerfile
@@ -881,6 +882,17 @@ test_image_edit() {
   touch ~/.clod/images/editme/sub/x
   completes image edit editme '' | has -x Dockerfile
   completes image edit editme '' | has -x sub/x
+  # --build builds once the editor exits, and not if it fails
+  exits 2 clod --build image show editme 2>&1 | has -- '--build goes with image edit'
+  EDITOR=true clod --build image edit editme
+  clod image show editme | has '^editme  *built '
+  echo 'LABEL edited=1' >> ~/.clod/images/editme/Dockerfile
+  EDITOR=false exits 1 clod --build image edit editme
+  clod image show editme | has '^editme  *stale '
+  EDITOR=true clod --build image edit editme
+  clod image show editme | has '^editme  *built '
+  EDITOR=true clod --build image edit editme | has 'editme is up to date'
+  clod image clean editme
   rm -r ~/.clod/images/editme
 }
 

@@ -58,6 +58,7 @@ clod image new mine go+sudo  # a starter Dockerfile, built on go+sudo
 clod image new go            # your own copy of the bundled go, which then takes its place
 clod image edit mine         # open its Dockerfile in $VISUAL, $EDITOR or vi
 clod image edit mine CLAUDE.md  # or another file beside it, created if need be
+clod --build image edit mine    # then build it, to see a mistake now
 ```
 
 `clod image edit` with no name edits the variant `-i` or `CLOD_IMAGE` selects.

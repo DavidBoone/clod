@@ -187,7 +187,9 @@ starter. Run it with clod -i NAME.
 Opens your variant ~/.clod/images/NAME's Dockerfile in $VISUAL, or $EDITOR,
 or vi, or with no NAME that of the image -i or CLOD_IMAGE selects. FILE opens
 another file in that directory instead, such as its CLAUDE.md, creating it if
-it isn't there. Its next run rebuilds it. A bundled variant is clod's own:
+it isn't there. Its next run rebuilds it, or with --build, clod builds it as
+soon as the editor exits, so a broken Dockerfile shows now; an editor that
+exits with an error skips the build. A bundled variant is clod's own:
 clod image new NAME makes your copy to edit, which takes its place.
 @image build
 Builds the images in the chains of the named images where they're stale, or
@@ -290,6 +292,8 @@ shared new|-f --force||replace ~/.clod/shared, keeping a backup
 image rm,home rm,workspace rm|-f --force||delete without asking; needed without a terminal
 clod,run|--skip-build||run the image as built, even if its files changed
 clod,run,env|--clipboard||let Ctrl+V in Claude Code paste the host clipboard's image (CLOD_CLIPBOARD)
+clod|--build||build the image after editing it (image edit)
+image edit|--build||build the image once the editor exits, as image build does
 clod,run|--docker||mount the host's Docker socket, which is root on the Docker host; the CLI comes from the image (-i docker)
 clod|-h --help||show help; after a command, that command's
 clod|--version||show clod's version
@@ -812,7 +816,7 @@ off_limits() {
 
 # The setup phases.
 
-# Reads the command line into scratch, workspace_opt, force, skip_build,
+# Reads the command line into scratch, workspace_opt, force, skip_build, build_after,
 # docker_socket, ports_opt (set when -P gave the ports), command (empty for the default command), verb (a noun's, or
 # empty) and args, the command's arguments; or shows the help it asks for
 # (clod help, -h, --help) and exits.
@@ -820,7 +824,7 @@ off_limits() {
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
 parse_args() {
   local opt_ports=() dashdash='' arg
-  scratch='' workspace_opt='' force='' skip_build='' docker_socket='' ports_opt='' command='' verb='' help=''
+  scratch='' workspace_opt='' force='' skip_build='' build_after='' docker_socket='' ports_opt='' command='' verb='' help=''
   while (( $# )); do
     case $1 in
       -i|--image|-H|--home|-w|--workspace|-P|--port)
@@ -840,6 +844,7 @@ parse_args() {
       -s|--scratch) scratch=1; shift ;;
       -f|--force) force=1; shift ;;
       --skip-build) skip_build=1; shift ;;
+      --build) build_after=1; shift ;;
       --docker) docker_socket=1; shift ;;
       --clipboard) CLOD_CLIPBOARD=on; shift ;;
       -h|--help) help=1; shift ;;
@@ -915,6 +920,7 @@ parse_args() {
       ;;
   esac
   [[ -n $scratch && -n $workspace_opt ]] && usage_error "--scratch and --workspace don't combine"
+  [[ -n $build_after && $command${verb:+ $verb} != 'image edit' ]] && usage_error "--build goes with image edit"
   args=("$@")
   (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}" ports_opt=1
   return 0
@@ -2270,7 +2276,11 @@ cmd_image_edit() {
     exit 1
   fi
   check_rel_file "$file" "$dir"
-  edit_file "$dir/$file"
+  edit_file "$dir/$file" || exit
+  if [[ -n $build_after ]]; then
+    need_docker
+    cmd_image_build "$name"
+  fi
 }
 
 # Prints a line of clod env: field $1 with value $2.
