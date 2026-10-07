@@ -910,12 +910,22 @@ test_rebuild() {
 # clod image edit opens only your own variants' files, and with --build builds
 # them.
 test_image_edit() {
+  # image new names image edit
+  clod image new newone | has -x 'Edit its Dockerfile with: clod image edit newone'
+  rm -r ~/.clod/images/newone
   mkdir -p ~/.clod/images/editme
   printf 'ARG BASE=clod\nFROM $BASE\n' > ~/.clod/images/editme/Dockerfile
   test "$(EDITOR='echo edited' clod image edit editme)" = "edited $HOME/.clod/images/editme/Dockerfile"
   test "$(VISUAL='echo visual' EDITOR=false clod image edit editme)" = "visual $HOME/.clod/images/editme/Dockerfile"
   # with no name, the image -i selects
   test "$(EDITOR='echo' clod -i editme image edit)" = "$HOME/.clod/images/editme/Dockerfile"
+  # sh reads the editor setting, as git does: quoted arguments, and a path with
+  # a space
+  mkdir -p 'my tools'
+  printf '#!/bin/sh\nprintf "[%%s]" "$@"\n' > 'my tools/ed'
+  chmod +x 'my tools/ed'
+  test "$(EDITOR="\"$PWD/my tools/ed\" -c 'set ft=x'" clod image edit editme)" = \
+    "[-c][set ft=x][$HOME/.clod/images/editme/Dockerfile]"
   exits 1 clod image edit go 2>&1 | has 'clod image new go makes your own copy'
   exits 1 clod image edit clod 2>&1 | has "base image is clod's own"
   exits 1 clod image edit go+editme 2>&1 | has 'is a combination'
