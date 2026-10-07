@@ -27,13 +27,15 @@ To customise them, make your own copy and edit that:
 ```bash
 clod shared new       # copies the starter to ~/.clod/shared
 clod shared diff      # shows how yours differs from the starter
+clod shared edit      # opens its CLAUDE.md in $VISUAL, $EDITOR or vi
+clod shared edit settings.json  # or another file there
 ```
 
 From then on clod mounts `~/.clod/shared` in place of the starter, so keep
 everything you want from it there. Updates to the repo's `shared/` reach you
 only when you merge them in. `clod shared new` on an existing one lists the
 starter's files yours lacks or differs on; `clod shared diff` shows the
-differences. `clod --force shared new` replaces yours with the starter,
+differences. `clod shared new --force` replaces yours with the starter,
 keeping yours as a backup. Put your own instructions for Claude in a
 `CLAUDE.md` there, and settings for every home in `settings.json`.
 

@@ -36,7 +36,7 @@ shell in it. `clod home` lists volume homes but shows `?` for their logins.
 ```bash
 clod home rm work               # delete ~/.clod/homes/work, login included, after asking
 clod home rm vol:work           # delete the volume clod-home-work, after asking
-clod --force home rm work       # delete it without asking
+clod home rm work --force       # delete it without asking
 ```
 
 In a terminal, `clod home rm` lists what it will delete and asks first;
@@ -101,10 +101,12 @@ clod default ports-busy next    # CLOD_PORTS_BUSY=next
 clod default clipboard on       # CLOD_CLIPBOARD=on
 clod default image              # show one
 clod default image --reset      # back to the built-in default
+clod default edit               # open ~/.clod/config in $VISUAL, $EDITOR or vi
 ```
 
 The keys are `image`, `command`, `home`, `ports`, `ports-busy` and `clipboard`. Values are checked when
-you set them, and a home path is stored as an absolute path. Your shell's
+you set them, and a home path is stored as an absolute path; `clod default
+edit` checks only that each line is a setting clod reads. Your shell's
 settings and a project's `.envrc` win over these defaults; `clod env` shows
 what a run will actually use.
 

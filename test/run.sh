@@ -30,7 +30,7 @@ export LC_ALL=C.UTF-8
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy clipboard docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine live-files rebuild image-rm image-clean image-prune completion install'
+  multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -419,7 +419,7 @@ test_volume_home() {
   # without a terminal
   exits 2 clod home rm ./x 2>&1 | has 'delete the home ./x yourself'
   exits 2 clod --force home rm vol:vtest ~/.clod/homes/x
-  exits 2 clod home rm -f vol:vtest 2>&1 | has "options go before the command"
+  exits 2 clod home rm -- -f 2>&1 | has "'-f' isn't a name"
   # a name it doesn't know removes none of them
   exits 1 clod --force home rm vol:vtest vol:no-such
   docker volume inspect clod-home-vtest >/dev/null
@@ -482,7 +482,6 @@ test_home_copy() {
   test -f moved/here/.config/f
   exits 2 clod home cp src
   exits 2 clod home mv a b c
-  exits 2 clod home cp -f a 2>&1 | has "options go before the command"
   exits 1 clod home cp nope vol:x 2>&1 | has -x 'clod: no home nope (clod home lists them)'
   exits 1 clod home cp vol:nope x 2>&1 | has 'no home vol:nope'
   exits 1 clod home cp vol:cp1 vol:cp2 2>&1 | has 'already a home vol:cp2'
@@ -547,9 +546,8 @@ test_volume_workspace() {
   has '^\* used here' < out
   exits 2 clod workspace rm
   exits 2 clod workspace ls
-  exits 2 clod workspace rm -f one 2>&1 | has "options go before the command"
   # a name it doesn't know removes none of them
-  exits 1 clod --force workspace rm one no-such
+  exits 1 clod workspace rm one no-such -f
   docker volume inspect clod-workspace-one >/dev/null
   exits 1 clod workspace rm one < /dev/null 2>&1 | tee out
   has 'no terminal' < out
@@ -595,10 +593,25 @@ test_default() {
   CLOD_PORTS=8000 clod env | has '^ports: .*(each moved to a free host port if another container has it)$'
   clod -P 8000 env | has '^ports: *127.0.0.1:8000 → 8000$'
   clod default ports-busy --reset
+  # default edit opens the config, then names the lines clod won't read
+  rm -f ~/.clod/config
+  test "$(EDITOR='echo' clod default edit)" = "$HOME/.clod/config"
+  exits 2 clod default edit extra
+  completes default '' | has -x edit
+  test -z "$(completes default edit '')"
+  printf '#!/bin/sh\nprintf "# mine\\nCLOD_HOME=work\\nCLOD_NOPE=1\\nimage=go\\n" >> "$1"\n' > append
+  chmod +x append
+  EDITOR=$PWD/append clod default edit 2>&1 | tee out
+  has "line 3 of ~/.clod/config isn't a setting clod reads: CLOD_NOPE=1" < out
+  has "line 4 of .* reads: image=go" < out
+  if grep -q 'CLOD_HOME\|# mine' out; then false; fi
+  clod default home | has '^home  *work '
+  rm ~/.clod/config
 }
 
 test_shared() {
   exits 1 clod shared diff
+  exits 1 clod shared edit 2>&1 | has 'clod shared new creates yours'
   exits 2 clod shared
   clod shared new
   test -f ~/.clod/shared/statusline.sh
@@ -619,6 +632,13 @@ test_shared() {
   clod shared new | has 'describes the container'
   echo '{"statusLine": {}}' > ~/.clod/shared/managed-settings.json
   clod shared new | has 'sets statusLine'
+  # shared edit opens its CLAUDE.md, or a file named
+  test "$(EDITOR='echo' clod shared edit)" = "$HOME/.clod/shared/CLAUDE.md"
+  test "$(EDITOR='echo' clod shared edit settings.json)" = "$HOME/.clod/shared/settings.json"
+  exits 2 clod shared edit ../config 2>&1 | has "isn't a file in"
+  exits 2 clod shared edit a b
+  completes shared edit '' | has -x settings.json
+  test -z "$(completes shared edit settings.json '')"
   clod --force shared new
   test -f ~/.clod/shared/statusline.sh
   ls -d ~/.clod/shared.bak-*
@@ -635,10 +655,13 @@ test_command_line() {
   exits 2 clod env extra
   exits 2 clod image new a b c
   exits 2 clod image new
-  for name in Mine -mine mine_ my.image; do
+  exits 2 clod image new -mine 2>&1 | has 'unknown option -mine'
+  exits 2 clod image new -- -mine 2>&1 | has 'invalid image name'
+  for name in Mine mine_ my.image; do
     exits 2 clod image new "$name" 2>&1 | has 'invalid image name'
   done
   exits 2 clod image show
+  exits 2 clod image edit a b c
   exits 2 clod image nope
   exits 2 clod home ls
   for old in images homes new-image remove-image prune new-shared; do
@@ -651,6 +674,15 @@ test_command_line() {
   # a run command's -h goes to the program it runs
   test "$(clod bash -c 'echo "$0"' -h)" = -h
   clod --version | has '^clod '
+  # clod's options go after a command too, up to --; an unknown one is an
+  # error, after -h has had its chance
+  clod env -H other -i python | has '^image: *python '
+  clod image -i python edit -h | has -x 'usage: clod image edit \[OPTIONS\] \[NAME \[FILE\]\]'
+  exits 2 clod env --nope 2>&1 | has -x "clod: unknown option --nope (see 'clod env -h')"
+  clod env --nope -h | has '^usage: clod env '
+  exits 2 clod image --reset 2>&1 | has 'unknown option --reset'
+  # after a run command, they're the program's
+  test "$(clod bash -c 'echo "$0"' -i)" = -i
   clod -H other -i python -P 3000:8080 env | tee out
   grep -q '^home: *other' out
   grep -q '^image: *python ' out
@@ -682,21 +714,21 @@ test_help() {
   clod --help | diff - out
   # a command's page: -h or --help after it, before it, or clod help COMMAND
   clod home rm -h > out
-  has -x 'usage: clod \[OPTIONS\] home rm NAME\.\.\.' < out
+  has -x 'usage: clod home rm \[OPTIONS\] NAME\.\.\.' < out
   has -xE '  -f, --force +delete without asking; needed without a terminal' < out
   clod home rm vol:x --help | diff - out
   clod -h home rm | diff - out
   clod help home rm | diff - out
   # not after --
-  exits 2 clod home rm -- -h 2>&1 | has "options go before the command"
+  exits 2 clod home rm -- -h 2>&1 | has "'-h' isn't a name"
   # a noun's page lists its verbs, default's its keys, help's its own
   clod image -h | has -xE '  image prune +remove the stale images clod built'
-  clod shared -h | has -x 'usage: clod \[OPTIONS\] shared COMMAND'
+  clod shared -h | has -x 'usage: clod shared COMMAND'
   clod help default | has -xE '  ports \(CLOD_PORTS\) +ports to publish on localhost, comma-separated'
-  clod help default | has -x '       clod \[OPTIONS\] default KEY --reset'
-  clod help -h | has -x 'usage: clod \[OPTIONS\] help \[COMMAND\]'
+  clod help default | has -x '       clod default KEY --reset'
+  clod help -h | has -x 'usage: clod help \[COMMAND\]'
   clod help claude | has 'ARGS go to Claude Code unchanged'
-  clod build -h 2>/dev/null | has -x 'usage: clod \[OPTIONS\] image build \[NAME\.\.\.\]'
+  clod build -h 2>/dev/null | has -x 'usage: clod image build \[OPTIONS\] \[NAME\.\.\.\]'
   # every command and verb has a page that says what it does, within 80
   # columns
   for c in $(completes ''); do
@@ -857,6 +889,64 @@ test_rebuild() {
 
 # image rm deletes your variants and the images built from them, asking first
 # in a terminal; a bundled variant or a combination has nothing of yours.
+# clod image edit opens only your own variants' files, and with --build builds
+# them.
+test_image_edit() {
+  mkdir -p ~/.clod/images/editme
+  printf 'ARG BASE=clod\nFROM $BASE\n' > ~/.clod/images/editme/Dockerfile
+  test "$(EDITOR='echo edited' clod image edit editme)" = "edited $HOME/.clod/images/editme/Dockerfile"
+  test "$(VISUAL='echo visual' EDITOR=false clod image edit editme)" = "visual $HOME/.clod/images/editme/Dockerfile"
+  # with no name, the image -i selects
+  test "$(EDITOR='echo' clod -i editme image edit)" = "$HOME/.clod/images/editme/Dockerfile"
+  exits 1 clod image edit go 2>&1 | has 'clod image new go makes your own copy'
+  exits 1 clod image edit clod 2>&1 | has "base image is clod's own"
+  exits 1 clod image edit go+editme 2>&1 | has 'is a combination'
+  exits 1 clod image edit nope 2>&1 | has "no variant of yours named 'nope'"
+  # another file beside the Dockerfile, but nothing outside the directory
+  test "$(EDITOR='echo' clod image edit editme CLAUDE.md)" = "$HOME/.clod/images/editme/CLAUDE.md"
+  for bad in ../x /etc/passwd sub/../../x ./Dockerfile; do
+    exits 2 clod image edit editme "$bad" 2>&1 | has "isn't a file in"
+  done
+  mkdir ~/.clod/images/editme/sub
+  exits 2 clod image edit editme sub 2>&1 | has 'is a directory'
+  exits 2 clod image edit editme Dockerfile extra
+  touch ~/.clod/images/editme/sub/x
+  completes image edit editme '' | has -x Dockerfile
+  completes image edit editme '' | has -x sub/x
+  # --build builds once the editor exits, and not if it fails
+  exits 2 clod --build image show editme 2>&1 | has -- '--build goes with image edit'
+  exits 2 clod image show editme --build 2>&1 | has -- '--build goes with image edit'
+  EDITOR=true clod image edit editme --build
+  clod image show editme | has '^editme  *built '
+  echo 'LABEL edited=1' >> ~/.clod/images/editme/Dockerfile
+  EDITOR=false exits 1 clod image edit --build editme
+  clod image show editme | has '^editme  *stale '
+  EDITOR=true clod --build image edit editme
+  clod image show editme | has '^editme  *built '
+  EDITOR=true clod --build image edit editme | has 'editme is up to date'
+  clod image clean editme
+  rm -r ~/.clod/images/editme
+}
+
+# clod image diff compares your copy of a bundled variant with it. Needs no
+# Docker.
+test_image_diff() {
+  clod image new python
+  clod image diff python | has 'same as the bundled python'
+  echo 'RUN true' >> ~/.clod/images/python/Dockerfile
+  exits 1 clod image diff python | has -x '+RUN true'
+  completes image diff '' | has -x python
+  test -z "$(completes image diff python '')"
+  mkdir -p ~/.clod/images/onlymine
+  printf 'FROM clod\n' > ~/.clod/images/onlymine/Dockerfile
+  if completes image diff '' | grep -qx onlymine; then false; fi
+  exits 1 clod image diff onlymine 2>&1 | has 'no bundled variant is named onlymine'
+  exits 1 clod image diff go 2>&1 | has "no variant of yours named 'go'"
+  exits 2 clod image diff
+  exits 2 clod image diff python go
+  rm -r ~/.clod/images/python ~/.clod/images/onlymine
+}
+
 test_image_rm() {
   local v
   for v in mine other go; do
@@ -870,10 +960,9 @@ test_image_rm() {
   if completes image rm '' | grep -qx sudo; then false; fi
   if completes image rm mine '' | grep -qx mine; then false; fi
   exits 2 clod image rm
-  exits 2 clod image rm -f mine 2>&1 | has "options go before the command"
   exits 1 clod --force image rm sudo 2>&1 | has 'clod image clean sudo removes its built image'
   exits 1 clod --force image rm other+mine 2>&1 | has 'clod image clean other+mine removes'
-  exits 1 clod --force image rm mine no-such 2>&1 | has "no variant of yours named 'no-such'"
+  exits 1 clod image rm mine --force no-such 2>&1 | has "no variant of yours named 'no-such'"
   test -d ~/.clod/images/mine
   exits 1 clod image rm mine < /dev/null 2>&1 | has 'no terminal'
   # in a terminal it lists the variant and the images built from it, and asks
@@ -991,13 +1080,13 @@ test_completion() {
   test -z "$(completes help env '')"
   test -z "$(completes uninstall '')"
   if completes '' | grep -qxE 'build|rebuild'; then false; fi
-  test "$(completes image '')" = "$(printf 'show\nnew\nrm\nbuild\nrebuild\nclean\nprune')"
+  test "$(completes image '')" = "$(printf 'show\nnew\nedit\ndiff\nrm\nbuild\nrebuild\nclean\nprune')"
   test "$(completes image re)" = rebuild
   test "$(completes home '')" = "$(printf 'new\ncp\nmv\nrm')"
   test -z "$(completes home new '')"
   if completes home new ./x; then false; fi
   test "$(completes workspace '')" = rm
-  test "$(completes shared '')" = "$(printf 'new\ndiff')"
+  test "$(completes shared '')" = "$(printf 'new\ndiff\nedit')"
   test -z "$(completes shared new '')"
   test -z "$(completes image prune '')"
   completes image show '' | has -x plain
@@ -1020,7 +1109,22 @@ test_completion() {
   completes image new mine '' | has -x go
   if completes image new mine '' | grep -qx clod; then false; fi
   test -z "$(completes image new mine go '')"
+  completes image edit '' | has -x plain
+  if completes image edit '' | grep -qxE 'clod|go'; then false; fi
+  test "$(completes image edit plain '')" = Dockerfile
+  test -z "$(completes image edit plain Dockerfile '')"
+  # after a command, the options on its page and -h, with the page's
+  # description; the arguments around them complete as without them
+  test "$(completes image edit -)" = "$(printf -- '--build\n-h\n--help')"
+  clod __complete home rm - | has -xF -e "$(printf -- '--force\tdelete without asking; needed without a terminal')"
+  completes default ports-busy - | has -x -- --reset
+  completes image edit --build '' | has -x plain
+  test "$(completes image edit -i go plain '')" = Dockerfile
+  completes image build -i '' | has -x go
+  completes env --home=w | has -x -- --home=work
+  test -z "$(completes image edit -- -)"
   # exit status 1: the word is a file name, which the shell completes
+  if completes claude -; then false; fi
   if completes claude --re; then false; fi
   if completes -- ''; then false; fi
   if completes -H ./w; then false; fi
@@ -1161,9 +1265,9 @@ test_install() {
   # someone else's files: refused, then replaced with --force
   mkdir taken
   touch taken/clod
-  exits 1 clod install "$PWD/taken" 2>&1 | has 'taken/clod already exists; clod --force install replaces it'
+  exits 1 clod install "$PWD/taken" 2>&1 | has 'taken/clod already exists; clod install --force replaces it'
   test ! -L taken/clod
-  clod --force install "$PWD/taken" >/dev/null
+  clod install "$PWD/taken" --force >/dev/null
   test "$(readlink taken/clod)" = "$repo/clod"
   mkdir zfn2
   touch zfn2/_clod
