@@ -1,20 +1,25 @@
 # Shared config and the statusline
 
-![The clod statusline: on the first line the model and effort, the home and image, the published ports and the git branch; on the second tokens, lines changed, context use, idle time, and 5-hour and 7-day rate limits](statusline.svg)
+![The clod statusline in five columns over two lines: the model over its effort, context use over token counts, the idle time, the home over the image and ports, and the git branch over lines changed, with the 5-hour and 7-day rate limits at the right](statusline.svg)
 
 Claude Code reads managed settings and a managed `CLAUDE.md` from
 `/etc/claude-code`, for every home, and the entrypoint passes its
 `settings.json` to Claude Code as `--settings`. Until `~/.clod/shared` exists,
 clod mounts this repo's [`shared/`](../shared) there, which updates with `git pull`:
 
-- `statusline.sh` is the statusline, on two lines: the model, the home
-  (`⌂`) and image (`⬢`), the published ports (`⇄`, TCP only, as links to
-  `localhost` where the terminal supports them, right when the host port is
-  the container's) and the git branch with its count of
-  changed files; then tokens, context use, cache idle time and rate limits.
-  A rate limit's bar shows usage against how much of its window has passed.
-  Its last usage cell is red when usage is ahead, yellow when it's within 5
-  points behind, and green otherwise; any usage past the elapsed part is red.
+- `statusline.sh` is the statusline, in five columns over two lines: the
+  model (`✨`) over its effort (`⚡`); context use over the session's input
+  and output tokens, subagents included; the cache idle time over a
+  cache-miss warning; the home (`🏠`) over the image (`📦`) and the
+  published ports (`⇄`, TCP only, as links to `localhost` where the terminal
+  supports them, right when the host port is the container's); and the git
+  branch (`🪾`, or `🌿` and its folder in a linked worktree) with its count
+  of changed files, over the lines changed. The 5-hour and 7-day rate limits
+  sit at the right end of the two lines, their bars 10 to 20 cells wide as
+  the terminal allows. A rate limit's bar shows usage against how much of its
+  window has passed. Its last usage cell is red when usage is ahead, yellow
+  when it's within 5 points behind, and green otherwise; any usage past the
+  elapsed part is red.
 - `settings.json` turns that statusline on.
 
 To customise them, make your own copy and edit that:

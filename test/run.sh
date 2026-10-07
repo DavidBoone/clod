@@ -241,13 +241,25 @@ test_statusline() {
          "cost":{"total_lines_added":120,"total_lines_removed":35},
          "rate_limits":{"five_hour":{"used_percentage":12}}}' > input.json
   git init -q -b main .
-  # the model, clod's home, image and ports, and git on one line; the meters on the next
+  # five columns over two lines: model over effort, context over tokens, home
+  # over image and ports, git over lines changed; the 5h meter ends line 1
   clod -P 5173 -P 6000/udp bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g; s/\x1b\]8;;[^\x07]*\x07//g' | tee out
   test "$(wc -l < out)" = 2
-  head -1 out | has '✦ Opus .*⌂ default ⬢ clod  ⇄ :5173  .*ᚴ main ±[0-9]'
+  head -1 out | has '^✨ Opus  *◔ [▰▱]* 42%  *🏠 default  *🪾 main ±[0-9]  *5h '
+  tail -1 out | has '^⚡ high  *↑0  *↓0  *📦 clod  ⇄ :5173  *+120/-35$'
   if grep -q 6000 out; then false; fi
-  tail -1 out | has '42%'
+  # subagents' transcripts beside the session's add to the token counts, each
+  # streamed message counted once, at its last entry
+  mkdir -p s/subagents
+  echo '{"type":"assistant"}' > s.jsonl
+  { echo '{"message":{"id":"m1","usage":{"input_tokens":10,"cache_creation_input_tokens":5000,"output_tokens":4}}}'
+    echo '{"message":{"id":"m1","usage":{"input_tokens":10,"cache_creation_input_tokens":5000,"output_tokens":275}}}'
+    echo '{"message":{"id":"m2","usage":{"input_tokens":3,"cache_creation_input_tokens":800,"cache_read_input_tokens":5000,"output_tokens":725}}}'
+  } > s/subagents/agent-a.jsonl
+  sed -i 's|"session_id":"ci"|"session_id":"sub","transcript_path":"/workspace/s.jsonl"|' input.json
+  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+    sed 's/\x1b\[[0-9;]*m//g' | tail -1 | has '↑5.8k  *↓1.0k '
   # inside .git, where git status fails, it still shows both lines
   sed -i 's|"/workspace"|"/workspace/.git"|' input.json
   clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' > out
@@ -258,10 +270,16 @@ test_statusline() {
   now=$(date +%s)
   printf '{"session_id":"q","rate_limits":{"five_hour":{"used_percentage":48,"resets_at":%d},
     "seven_day":{"used_percentage":60,"resets_at":%d}}}' $((now + 9000)) $((now + 302400)) > input.json
-  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' | tail -1 |
+  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[92m▰/G/g; s/\x1b\[93m▰/Y/g; s/\x1b\[91m▰/R/g; s/\x1b\[[0-9;]*m//g' | tee out
-  has '5h GGGGY▁▁▁▁▁ 48%/50%' out
-  has '7d GGGGGR▁▁▁▁ 60%/50%' out
+  head -1 out | has '5h GGGGY▁▁▁▁▁ 48%/50%$'
+  tail -1 out | has '7d GGGGGR▁▁▁▁ 60%/50%$'
+  # with room in the terminal the bars widen to 20 cells and end 4 columns short
+  clod bash -c 'COLUMNS=120 bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+    sed 's/\x1b\[[0-9;]*m//g' | tee out
+  head -1 out | has '5h [▰▱▁]\{20\} 48%/50%$'
+  # (✨ and 🏠 take two columns each)
+  test "$(head -1 out | sed "s/✨/xx/; s/🏠/xx/" | LC_ALL=C.UTF-8 wc -m)" = 117
 }
 
 test_port() {
