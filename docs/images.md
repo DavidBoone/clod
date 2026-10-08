@@ -167,7 +167,7 @@ lifecycle commands (`postCreateCommand` and the rest), `mounts`, `runArgs`,
 `-P` or `CLOD_PORTS`, and set run-time variables in the `.envrc`. Nothing in a
 project's `devcontainer.json` can widen what the container reaches.
 
-The layer on top needs a Debian or Ubuntu image (`apt-get`). Two things carry
+The layer on top needs a Debian or Ubuntu image (`apt-get`). Three things carry
 over from the devcontainer:
 
 - **Its user**: `remoteUser` (or `containerUser`) takes `claude`'s uid and gid,
@@ -176,6 +176,9 @@ over from the devcontainer:
   `claude`, with its home at `/home/claude`.
 - **Its `containerEnv`**: each variable the image and the run don't already
   set. The image's own `ENV`, `PATH` included, is kept.
+- **Its apt repositories**: where it already lists GitHub's (as the
+  `github-cli` feature does) or NodeSource's Node 26, the base's layer installs
+  `gh` or Node from that entry instead of adding its own.
 
 The image is `clod-devcontainer-HASH` to Docker, `HASH` being of the config
 file's path, so each project's is its own; `clod image` lists them by their
