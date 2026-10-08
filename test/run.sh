@@ -1105,7 +1105,8 @@ test_devcontainer_names() {
   local nocli d
   devcontainer_project proj
   cd proj
-  clod env | has '^devcontainer: .*/proj/.devcontainer/devcontainer.json (clod -i devcontainer runs it)$'
+  # (with a note when the devcontainer CLI isn't installed, checked below)
+  clod env | has '^devcontainer: .*/proj/.devcontainer/devcontainer.json (clod -i devcontainer runs it)'
   clod -i devcontainer env | has '^image: *devcontainer (.*/proj/.devcontainer/devcontainer.json)$'
   if clod -i devcontainer env | has '^devcontainer:'; then false; fi
   clod -i devcontainer:py+sudo env |
@@ -1122,7 +1123,7 @@ test_devcontainer_names() {
   mv .devcontainer/devcontainer.json default.json
   exits 1 clod -i devcontainer bash -c true 2>&1 |
     has -x "clod: $PWD has several devcontainers; choose one: devcontainer:py"
-  clod env | has '^devcontainer: *devcontainer:py (clod -i devcontainer:NAME runs one)$'
+  clod env | has '^devcontainer: *devcontainer:py (clod -i devcontainer:NAME runs one)'
   mv default.json .devcontainer/devcontainer.json
   # not a variant
   exits 2 clod image new devcontainer
@@ -1151,6 +1152,7 @@ test_devcontainer_names() {
   CLOD_DEVCONTAINER=auto PATH=$nocli clod env 2>&1 | tee out
   has '^image: *clod$' < out
   has "the devcontainer CLI isn't installed (npm install -g @devcontainers/cli)$" < out
+  has "^devcontainer: .*(clod -i devcontainer runs it); the devcontainer CLI isn't installed$" < out
   exits 1 env CLOD_DEVCONTAINER=maybe clod env
 }
 
