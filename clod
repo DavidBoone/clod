@@ -750,8 +750,8 @@ dc_label() {
 # Prints the hash a devcontainer image from config file $1 is labelled with:
 # of the files beside it (a .devcontainer/NAME folder's, subfolders included;
 # a .devcontainer.json's alone) and the base's. A file the config names from
-# elsewhere, such as a Dockerfile above, isn't in it; image build picks up a
-# change to one.
+# elsewhere, such as a Dockerfile above, isn't in it; only image rebuild picks
+# up a change to one.
 dc_hash() {
   local dir=${1%/*}
   { case $1 in

@@ -185,10 +185,10 @@ file's path, so each project's is its own; `clod image` lists them by their
 config file. It rebuilds when a file beside the config changes (in
 `.devcontainer/`, or the `.devcontainer/NAME` folder), or the base's
 `Dockerfile` does. A file it names from elsewhere, such as `"dockerfile":
-"../Dockerfile"`, isn't checked: `clod image build devcontainer` picks up a
-change to one, and `clod image rebuild devcontainer` rebuilds it without the
-cache. `clod image clean devcontainer` removes this project's, and `clod image
-prune` removes those whose project has changed or gone.
+"../Dockerfile"`, isn't checked: `clod image rebuild devcontainer` rebuilds it
+without the cache, picking up a change to one. `clod image clean devcontainer`
+removes this project's, and `clod image prune` removes those whose project has
+changed or gone.
 
 ## Removing images
 
