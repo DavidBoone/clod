@@ -1,6 +1,20 @@
 #!/bin/sh
 set -eu
 
+# A devcontainer image's containerEnv, which its build wrote out (see the
+# Dockerfile), for those the run doesn't set, as from the .envrc.
+env_file=/usr/local/share/clod/devcontainer.env
+if [ -r "$env_file" ]; then
+    while IFS= read -r line; do
+        name=${line%%=*}
+        eval "given=\${$name+x}"
+        # shellcheck disable=SC2163 # line is NAME=value, which export sets
+        [ -n "$given" ] || export "$line"
+    done < "$env_file"
+    unset line name given
+fi
+unset env_file
+
 case "${1:-}" in
     codex)
         shift

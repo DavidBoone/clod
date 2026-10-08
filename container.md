@@ -1,6 +1,6 @@
 # Environment
 
-Running in a disposable Docker container (`docker run --rm`) started by the user's `clod` launcher (https://github.com/DavidBoone/clod), a bash script on their macOS (Colima or Docker Desktop) or Linux host. Image is `clod` or a variant built `FROM clod`.
+Running in a disposable Docker container (`docker run --rm`) started by the user's `clod` launcher (https://github.com/DavidBoone/clod), a bash script on their macOS (Colima or Docker Desktop) or Linux host. Image is `clod`, a variant built `FROM clod`, or, when `$CLOD_IMAGE` starts with `devcontainer`, the project's devcontainer (built by the devcontainer CLI, with clod's layer on top; its `postCreateCommand` and other lifecycle commands, mounts and forwarded ports aren't used, so run any setup they'd do yourself).
 
 - `/home/claude` ← host `~/.clod/homes/<name>` (or another path chosen by `CLOD_HOME`), or, when `$CLOD_HOME` is `vol:<name>`, the Docker volume `clod-home-<name>` on Docker's own disk
 - `/workspace` ← the host directory `$CLOD_WORKSPACE` (the one `clod` was run from, or `clod -w PATH`): the user's real project, not a scratch dir. When `$CLOD_WORKSPACE` is `vol:<name>`, it's the Docker volume `clod-workspace-<name>`, kept between runs but not in a host folder. When `$CLOD_SCRATCH` is set, it's an empty volume (`clod --scratch`), discarded with the container, so anything worth keeping goes in the home or to a remote
@@ -24,7 +24,8 @@ You can't run `clod` or see the host's `~/.clod`; the user changes these on the 
 
 - Packages or system setup: a variant, `~/.clod/images/<name>/Dockerfile` (`ARG BASE=clod` / `FROM $BASE`, `USER root` … `USER claude`), run with `clod -i <name>`; `clod image new <name>` starts one and `clod image edit <name>` opens its Dockerfile. Variants combine (`-i go+<name>`), and clod rebuilds them when their files change. For root while running, the bundled `sudo` variant
 - Environment variables for the container: `.envrc` in the project (`export FOO=bar`), loaded by direnv on the host, where it must be allowed
-- Defaults for every run: `clod default image|command|home|ports|ports-busy|clipboard VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.envrc`
+- Defaults for every run: `clod default image|command|home|ports|ports-busy|clipboard|devcontainer VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.envrc`
+- A project with a `.devcontainer`: `clod -i devcontainer` runs in it (`clod -i devcontainer:PATH/` for one in another folder, such as below the workspace) (the devcontainer CLI on the host builds it), and `clod default devcontainer auto` does so wherever there is one; the devcontainer config, in the project, is what to change for its packages
 - Instructions or managed settings for every home: `~/.clod/shared/` (`clod shared new` creates it)
 - A home on the shared folders that's slow, or that `chown` fails in: a volume home, which `clod home mv NAME vol:NAME` moves it to, login included (`clod home cp` copies)
 - Ports: `clod -P 3000` or `CLOD_PORTS`; Docker access: `clod -i docker --docker`, which gives the agent root on the Docker host

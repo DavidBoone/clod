@@ -76,11 +76,12 @@ A setting given empty still wins and means its default, so `clod -P ''` or
 | Setting      | Option | Default   | Meaning |
 |--------------|--------|-----------|---------|
 | `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory; `vol:NAME` is the Docker volume `clod-home-NAME` (see [Volume homes](#volume-homes)). |
-| `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod image` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`. Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
+| `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod image` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`, or `devcontainer` for the project's devcontainer (see [Devcontainers](images.md#devcontainers)). Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 | `CLOD_PORTS_BUSY` | none | `skip` | What a run does with a `CLOD_PORTS` host port another running container publishes: `skip` leaves it out, `next` publishes the next free host port, `error` stops. A taken port given with `-P` always stops the run (see [Publishing ports](usage.md#publishing-ports)). |
 | `CLOD_CLIPBOARD` | `--clipboard` | `off` | `on` lets Ctrl+V in Claude Code paste the image on your machine's clipboard (see [Pasting images](usage.md#pasting-images)). |
+| `CLOD_DEVCONTAINER` | none | `off` | `auto` runs the project's devcontainer when it has one, unless `-i`, the shell or the `.envrc` chooses an image (see [Devcontainers](images.md#devcontainers)). |
 
 In an `.envrc`, `$PWD` is the `.envrc`'s directory, so
 `export CLOD_HOME=$PWD/.clod-home` pins a project-local home. A home inside the
@@ -99,6 +100,7 @@ clod default home work          # CLOD_HOME=work
 clod default ports 5173         # CLOD_PORTS=5173
 clod default ports-busy next    # CLOD_PORTS_BUSY=next
 clod default clipboard on       # CLOD_CLIPBOARD=on
+clod default devcontainer auto  # CLOD_DEVCONTAINER=auto
 clod default image              # show one
 clod default image --reset      # back to the built-in default
 clod default edit               # open ~/.clod/config in $VISUAL, $EDITOR or vi

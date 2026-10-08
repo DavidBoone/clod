@@ -44,6 +44,9 @@ builds and opens it.
 
 Choose it when you work in VS Code, want the setup checked into each
 repository, or want the network locked down without running anything else.
+A project's devcontainer also works with clod: `clod -i devcontainer` builds
+it, with clod's layer on top, and runs it as any clod image (see
+[Devcontainers](images.md#devcontainers)).
 
 ## Claude Code's built-in sandbox
 

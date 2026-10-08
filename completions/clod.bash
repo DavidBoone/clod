@@ -11,9 +11,10 @@ _clod() {
     return 0
   }
   # Each candidate is a word with any description after a tab, which bash
-  # doesn't show.
+  # doesn't show. A folder, ending in /, takes no space after it.
   while IFS= read -r line; do
     [[ -n $line ]] && COMPREPLY+=("${line%%$'\t'*}")
+    [[ $line == */ ]] && compopt -o nospace 2>/dev/null
   done <<<"$out"
 }
 # bash 3.2 has no compopt, so there it falls back to file names whenever

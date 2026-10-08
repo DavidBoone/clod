@@ -1,14 +1,24 @@
-FROM debian:trixie-slim
-
 # Generic base for running Claude Code and Codex, with everyday CLI tools.
-# Languages, compilers and browsers go in variants built FROM clod (see docs/images.md). Layers are ordered rarely-changed
-# first. Apt lists are kept so variants can `apt-get install` without
-# re-running update. The slim base installs packages without their docs, man
-# pages (there's no man) or translations (/etc/dpkg/dpkg.cfg.d/docker), which
-# would be over 100 MB; variants inherit that.
+# Languages, compilers and browsers go in variants built FROM clod (see
+# docs/images.md). BASE can instead name another Debian or Ubuntu image, such
+# as one with a project's toolchain, to add clod's layer to: its PATH and other
+# ENV are kept, and a user it has at claude's uid keeps its files. Layers are
+# ordered rarely-changed first. Apt lists are kept so variants can `apt-get
+# install` without re-running update. The slim base installs packages without
+# their docs, man pages (there's no man) or translations
+# (/etc/dpkg/dpkg.cfg.d/docker), which would be over 100 MB; variants inherit
+# that.
+
+ARG BASE=debian:trixie-slim
+FROM $BASE
+
+# Another BASE may end as a user of its own; installing needs root.
+USER root
 
 # Base system
-RUN apt-get update && apt-get upgrade -y \
+RUN command -v apt-get >/dev/null \
+       || { echo "clod's image needs a Debian or Ubuntu base, with apt-get" >&2; exit 1; } \
+    && apt-get update && apt-get upgrade -y \
     && apt-get install -y \
        curl wget ca-certificates \
        git \
@@ -24,18 +34,26 @@ ENV LANG=en_US.UTF-8
 # Language runtimes for agent tooling (MCP servers, scripts, npm-installed CLIs).
 # Pillow converts pictures for the show-image plugin.
 # Node comes from NodeSource; its nodejs package includes npm. The GitHub CLI
-# comes from GitHub's own repository, installed with the CLI tools below.
-RUN mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-       -o /etc/apt/keyrings/nodesource.asc \
-    && printf '%s\n' 'Types: deb' 'URIs: https://deb.nodesource.com/node_26.x' \
-       'Suites: nodistro' 'Components: main' 'Signed-By: /etc/apt/keyrings/nodesource.asc' \
-       > /etc/apt/sources.list.d/nodesource.sources \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-       -o /etc/apt/keyrings/githubcli.gpg \
-    && printf '%s\n' 'Types: deb' 'URIs: https://cli.github.com/packages' \
-       'Suites: stable' 'Components: main' 'Signed-By: /etc/apt/keyrings/githubcli.gpg' \
-       > /etc/apt/sources.list.d/githubcli.sources \
+# comes from GitHub's own repository, installed with the CLI tools below. A
+# repository the base already lists (a devcontainer's github-cli feature adds
+# GitHub's) is left as it is, since apt refuses one listed twice with
+# different keys.
+RUN has_source() { grep -rqsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d; } \
+    && mkdir -p /etc/apt/keyrings \
+    && if ! has_source deb.nodesource.com/node_26.x; then \
+         curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+           -o /etc/apt/keyrings/nodesource.asc \
+         && printf '%s\n' 'Types: deb' 'URIs: https://deb.nodesource.com/node_26.x' \
+           'Suites: nodistro' 'Components: main' 'Signed-By: /etc/apt/keyrings/nodesource.asc' \
+           > /etc/apt/sources.list.d/nodesource.sources; \
+       fi \
+    && if ! has_source cli.github.com/packages; then \
+         curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+           -o /etc/apt/keyrings/githubcli.gpg \
+         && printf '%s\n' 'Types: deb' 'URIs: https://cli.github.com/packages' \
+           'Suites: stable' 'Components: main' 'Signed-By: /etc/apt/keyrings/githubcli.gpg' \
+           > /etc/apt/sources.list.d/githubcli.sources; \
+       fi \
     && apt-get update \
     && apt-get install -y \
        python3 python3-venv python3-pil \
@@ -57,14 +75,51 @@ RUN git config --system --add safe.directory '*'
 
 # Create claude user. On a Linux host the launcher passes the host user's ids,
 # since bind mounts there keep host ownership; -l avoids sparse lastlog bloat
-# with large uids.
+# with large uids. A user or group a base already has at those ids keeps its
+# name and files, and claude's entries move ahead of its, so the ids resolve
+# to claude (whoami, ssh's home).
 ARG CLOD_UID=1000
 ARG CLOD_GID=1000
+
+# On a devcontainer's image, clod passes in its devcontainer.metadata label.
+# The user its tools run as (remoteUser, else containerUser) moves to claude's
+# ids, files included, so claude can use and update what it installed. Its
+# containerEnv, which the devcontainer CLI leaves in the label unless it
+# builds features, goes in a file the entrypoint sets them from.
+ARG DEVCONTAINER_METADATA=
+RUN [ -n "$DEVCONTAINER_METADATA" ] || exit 0; \
+    user=$(python3 -c 'import json, os, re; \
+m = json.loads(os.environ["DEVCONTAINER_METADATA"]); \
+m = [x for x in (m if isinstance(m, list) else [m]) if isinstance(x, dict)]; \
+env = {}; [env.update(x.get("containerEnv") or {}) for x in m]; \
+os.makedirs("/usr/local/share/clod", exist_ok=True); \
+open("/usr/local/share/clod/devcontainer.env", "w").write("".join("%s=%s\n" % (k, v) for k, v in env.items() \
+  if re.match(r"[A-Za-z_][A-Za-z0-9_]*$", k) and "\n" not in str(v))); \
+u = [x["remoteUser"] for x in m if x.get("remoteUser")] or [x["containerUser"] for x in m if x.get("containerUser")]; \
+print(u[-1] if u else "")') \
+    && if [ -n "$user" ] && [ "$user" != root ] && [ "$CLOD_UID" != 0 ] && uid=$(id -u "$user" 2>/dev/null); then \
+         gid=$(id -g "$user") group=$(id -gn "$user"); \
+         if [ "$uid" != "$CLOD_UID" ]; then \
+           find / -xdev -uid "$uid" -exec chown -h "$CLOD_UID" {} + && usermod -o -u "$CLOD_UID" "$user"; \
+         fi \
+         && if [ "$gid" != "$CLOD_GID" ]; then \
+           find / -xdev -gid "$gid" -exec chgrp -h "$CLOD_GID" {} + && groupmod -o -g "$CLOD_GID" "$group"; \
+         fi; \
+       fi
+
 RUN groupadd -o -g $CLOD_GID claude \
-    && useradd -l -m -o -u $CLOD_UID -g claude -s /bin/bash claude
+    && useradd -l -m -o -u $CLOD_UID -g claude -s /bin/bash claude \
+    && for f in /etc/passwd:$CLOD_UID /etc/group:$CLOD_GID; do \
+         [ "${f#*:}" = 0 ] && continue; \
+         awk -F: -v id=${f#*:} 'NR == FNR { if ($1 == "claude") c = $0; next } \
+           $1 == "claude" { if (!done) print; done = 1; next } \
+           $3 == id && !done { print c; done = 1 } { print }' ${f%:*} ${f%:*} > /tmp/ids \
+         && cat /tmp/ids > ${f%:*}; \
+       done \
+    && rm /tmp/ids
 
 # clod --scratch mounts an empty volume here, which takes this directory's owner.
-RUN mkdir /workspace && chown claude:claude /workspace
+RUN mkdir -p /workspace && chown claude:claude /workspace
 
 # The clod launcher mounts its checkout's entrypoint.sh, container.md and
 # clipboard.sh over these copies, so changes to them need no build; the copies

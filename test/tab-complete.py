@@ -2,7 +2,7 @@
 """Completes command lines in a real interactive shell, through a pty, with
 clod's completion loaded, and prints each line as the shell completed it.
 
-    test/tab-complete.py [--files DIR] [--list] bash|zsh LINE...
+    test/tab-complete.py [--files DIR] [--list | --mark] bash|zsh LINE...
 
 The completion is loaded as clod completion prints it, or with --files from
 the files in DIR, as clod install links them: zsh finds _clod on its $fpath
@@ -13,7 +13,8 @@ Ctrl-A and `echo RESULT: `, and Enter: the shell handles keys in order,
 completion included, so the echoed line is the completed one. Keys typed before
 the prompt would reach the terminal's own line editing instead of the shell's,
 so nothing is typed until the prompt shows. The environment (HOME, PATH) is
-passed through.
+passed through. With --mark it types % after the Tab, so the line shows
+whether the shell added a space after the word.
 
 With --list it prints what the shell shows after the line and Tab, escape
 sequences removed, instead: the candidates it lists, with zsh's descriptions.
@@ -28,10 +29,13 @@ import time
 args = sys.argv[1:]
 files = None
 listing = False
+mark = b""
 if args[0] == "--files":
     files, args = args[1], args[2:]
 if args[0] == "--list":
     listing, args = True, args[1:]
+elif args[0] == "--mark":
+    mark, args = b"%", args[1:]
 shell, lines = args[0], args[1:]
 prompt = "tab-complete> "
 argv = {"bash": ["bash", "--norc", "--noprofile", "-i"], "zsh": ["zsh", "-f", "-i"]}[shell]
@@ -96,7 +100,7 @@ for line in lines:
         wait_for(b"\nLISTED")
         wait_for(prompt.encode())
         continue
-    os.write(fd, line.encode() + b"\t\x01echo RESULT: \n")
+    os.write(fd, line.encode() + b"\t" + mark + b"\x01echo RESULT: \n")
     # the terminal echoes the typed "echo RESULT: " too, but not after a newline
     wait_for(b"\nRESULT: ")
     print(wait_for(b"\r\n").decode().rstrip())

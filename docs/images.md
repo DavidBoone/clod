@@ -123,6 +123,73 @@ USER claude
 Images are never pulled at launch, so `-i` must name a variant or an image
 already built locally.
 
+## Devcontainers
+
+A project with a [devcontainer](https://containers.dev) can run in it: clod
+builds the devcontainer with the [devcontainer
+CLI](https://github.com/devcontainers/cli), then the base image's layer on top,
+so the agent gets the project's toolchain and clod's container alike. It needs
+the CLI on your machine (`npm install -g @devcontainers/cli`); nothing else
+does.
+
+```bash
+clod -i devcontainer               # .devcontainer/devcontainer.json, or .devcontainer.json
+clod -i devcontainer:python        # .devcontainer/python/devcontainer.json
+clod -i devcontainer+sudo          # a variant on top, as in any combination
+clod -i devcontainer:app/          # app/'s, from the folder above it
+clod default devcontainer auto     # run a project's devcontainer whenever it has one
+```
+
+`devcontainer` means the workspace's, found in the directory clod mounts as
+`/workspace` (`-w`), not above it. To run one from somewhere else, such as a
+folder holding several projects, name it by its path, relative to the current
+directory: anything with a `/` (or starting with `.` or `~`) is a path, to a
+project (`devcontainer:app/`), a config folder
+(`devcontainer:app/.devcontainer/python`) or a config file. `/workspace` is
+still the directory clod runs in, and the image is the one `clod -i
+devcontainer` builds in the project. In an `.envrc`, `export
+CLOD_IMAGE=devcontainer:$PWD/app` pins it. It goes first in a combination,
+and a variant can't be built `FROM` it, since it differs from one project to
+the next: make your variant `FROM $BASE` and combine them. `clod env` mentions
+a devcontainer the run doesn't use. With `auto`, a run uses the devcontainer
+unless `-i`, `CLOD_IMAGE` in your shell or the project's `.envrc` chooses an
+image; one in `~/.clod/config` doesn't count, so `clod default image go` still
+applies elsewhere. Without the CLI, `auto` says so and runs the image it
+otherwise would.
+
+clod uses the devcontainer for its image and nothing else. The CLI's `build`
+handles `image`, `build` (a Dockerfile), `dockerComposeFile` (the service's
+image only; the other services don't run) and `features`, from registries your
+`docker login` reaches. clod never runs `devcontainer up`, so a run is a clod
+run as usual: `initializeCommand` (which would run on your machine), the
+lifecycle commands (`postCreateCommand` and the rest), `mounts`, `runArgs`,
+`forwardPorts` and `customizations` are all left unused. Publish ports with
+`-P` or `CLOD_PORTS`, and set run-time variables in the `.envrc`. Nothing in a
+project's `devcontainer.json` can widen what the container reaches.
+
+The layer on top needs a Debian or Ubuntu image (`apt-get`). Three things carry
+over from the devcontainer:
+
+- **Its user**: `remoteUser` (or `containerUser`) takes `claude`'s uid and gid,
+  its files with it, so `claude` can use and update the tools installed in its
+  home, such as nvm's Node in `/home/vscode`. The container still runs as
+  `claude`, with its home at `/home/claude`.
+- **Its `containerEnv`**: each variable the image and the run don't already
+  set. The image's own `ENV`, `PATH` included, is kept.
+- **Its apt repositories**: where it already lists GitHub's (as the
+  `github-cli` feature does) or NodeSource's Node 26, the base's layer installs
+  `gh` or Node from that entry instead of adding its own.
+
+The image is `clod-devcontainer-HASH` to Docker, `HASH` being of the config
+file's path, so each project's is its own; `clod image` lists them by their
+config file. It rebuilds when a file beside the config changes (in
+`.devcontainer/`, or the `.devcontainer/NAME` folder), or the base's
+`Dockerfile` does. A file it names from elsewhere, such as `"dockerfile":
+"../Dockerfile"`, isn't checked: `clod image rebuild devcontainer` rebuilds it
+without the cache, picking up a change to one. `clod image clean devcontainer`
+removes this project's, and `clod image prune` removes those whose project has
+changed or gone.
+
 ## Removing images
 
 `clod image rm NAME...` undoes `clod image new`: it deletes your variant
