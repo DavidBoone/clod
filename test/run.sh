@@ -1441,10 +1441,22 @@ test_classic() {
 }
 
 # Builds the base on an image like a devcontainer's: Ubuntu, a user of its own
-# at claude's uid, ending as that user. claude shares the uid, resolves first,
-# and keeps the image's ENV; a base without apt-get is refused at once.
+# at claude's uid, GitHub's apt repository under another key path (as the
+# github-cli feature adds it), ending as that user. claude shares the uid,
+# resolves first, and keeps the image's ENV; a base without apt-get is refused
+# at once.
 test_other_base() {
-  printf 'FROM ubuntu:24.04\nRUN mkdir /workspace\nENV FROM_BASE=1\nUSER ubuntu\n' > Dockerfile
+  cat > Dockerfile <<'EOF'
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y curl \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo 'deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main' \
+       > /etc/apt/sources.list.d/github-cli.list
+RUN mkdir /workspace
+ENV FROM_BASE=1
+USER ubuntu
+EOF
   docker build -q -t clod-test-ubuntu . >/dev/null
   docker build -q -t clod-test-on-ubuntu --build-arg BASE=clod-test-ubuntu \
     --build-arg CLOD_UID=1000 --build-arg CLOD_GID=1000 "$repo" >/dev/null

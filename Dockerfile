@@ -34,18 +34,26 @@ ENV LANG=en_US.UTF-8
 # Language runtimes for agent tooling (MCP servers, scripts, npm-installed CLIs).
 # Pillow converts pictures for the show-image plugin.
 # Node comes from NodeSource; its nodejs package includes npm. The GitHub CLI
-# comes from GitHub's own repository, installed with the CLI tools below.
-RUN mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-       -o /etc/apt/keyrings/nodesource.asc \
-    && printf '%s\n' 'Types: deb' 'URIs: https://deb.nodesource.com/node_26.x' \
-       'Suites: nodistro' 'Components: main' 'Signed-By: /etc/apt/keyrings/nodesource.asc' \
-       > /etc/apt/sources.list.d/nodesource.sources \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-       -o /etc/apt/keyrings/githubcli.gpg \
-    && printf '%s\n' 'Types: deb' 'URIs: https://cli.github.com/packages' \
-       'Suites: stable' 'Components: main' 'Signed-By: /etc/apt/keyrings/githubcli.gpg' \
-       > /etc/apt/sources.list.d/githubcli.sources \
+# comes from GitHub's own repository, installed with the CLI tools below. A
+# repository the base already lists (a devcontainer's github-cli feature adds
+# GitHub's) is left as it is, since apt refuses one listed twice with
+# different keys.
+RUN has_source() { grep -rqsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d; } \
+    && mkdir -p /etc/apt/keyrings \
+    && if ! has_source deb.nodesource.com/node_26.x; then \
+         curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+           -o /etc/apt/keyrings/nodesource.asc \
+         && printf '%s\n' 'Types: deb' 'URIs: https://deb.nodesource.com/node_26.x' \
+           'Suites: nodistro' 'Components: main' 'Signed-By: /etc/apt/keyrings/nodesource.asc' \
+           > /etc/apt/sources.list.d/nodesource.sources; \
+       fi \
+    && if ! has_source cli.github.com/packages; then \
+         curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+           -o /etc/apt/keyrings/githubcli.gpg \
+         && printf '%s\n' 'Types: deb' 'URIs: https://cli.github.com/packages' \
+           'Suites: stable' 'Components: main' 'Signed-By: /etc/apt/keyrings/githubcli.gpg' \
+           > /etc/apt/sources.list.d/githubcli.sources; \
+       fi \
     && apt-get update \
     && apt-get install -y \
        python3 python3-venv python3-pil \
