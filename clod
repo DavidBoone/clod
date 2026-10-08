@@ -1601,10 +1601,13 @@ volume_names() {
 
 # Offers image names: clod and the current directory's devcontainers (unless
 # $1 is "variants") and the variants, or after a + the variants that can go on
-# top and aren't in the combination yet. Reads $cur and $variants from
-# cmd_complete.
+# top and aren't in the combination yet. A devcontainer elsewhere is
+# devcontainer:PATH: the subdirectories that have one, or once the word starts
+# devcontainer:, the folders and config files in the path typed so far, each
+# folder ending in /, after which the shell adds no space. Reads $cur and
+# $variants from cmd_complete.
 offer_images() {
-  local v below on_top=() dcs=()
+  local v below on_top=() dcs=() path dir real
   if [[ $cur == *+* ]]; then
     below=${cur%+*}
     for v in $variants; do
@@ -1620,6 +1623,30 @@ offer_images() {
       for v in $dc_names; do
         [[ $v =~ $variant_re ]] && dcs+=("devcontainer:$v")
       done
+      if [[ $cur == devcontainer:* ]]; then
+        path=${cur#devcontainer:}
+        dir=${path%"${path##*/}"}
+        real=${dir:-./}
+        [[ $real == \~/* ]] && real=$HOME${real#\~}
+        [[ $path == \~ ]] && dcs+=('devcontainer:~/')
+        for v in "$real"*/ "$real"devcontainer.json; do
+          [[ -e $v ]] && dcs+=("devcontainer:$dir${v#"$real"}")
+        done
+        # hidden ones once the name being typed starts with .
+        if [[ ${path##*/} == .* ]]; then
+          dcs+=("devcontainer:$dir./" "devcontainer:$dir../")
+          for v in "$real".*/ "$real".devcontainer.json; do
+            [[ $v == */./ || $v == */../ ]] && continue
+            [[ -e $v ]] && dcs+=("devcontainer:$dir${v#"$real"}")
+          done
+        fi
+      else
+        for v in */; do
+          [[ -d $v ]] || continue
+          find_devcontainer "${v%/}" ''
+          [[ -n $REPLY || -n $dc_names ]] && dcs+=("devcontainer:$v")
+        done
+      fi
       offer clod ${dcs[@]+"${dcs[@]}"}
     fi
     # shellcheck disable=SC2086 # variant names don't contain spaces or globs

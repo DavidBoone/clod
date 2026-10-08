@@ -1152,6 +1152,20 @@ test_devcontainer_names() {
     "$repo/test/tab-complete.py" "$sh" 'clod -i devcontainer:p' 'clod --image=devcontainer:p' |
       diff - <(printf '%s\n' 'clod -i devcontainer:py' 'clod --image=devcontainer:py')
   done
+  # devcontainer:PATH: the subdirectories that have one, then the folders and
+  # config files in the path typed, with no space after a folder
+  (cd .. && completes -i '' | has -x devcontainer:proj/)
+  (cd .. && completes -i devcontainer: | has -x devcontainer:proj/)
+  (cd .. && completes -i devcontainer:proj/. | has -x devcontainer:proj/.devcontainer/)
+  (cd .. && completes -i devcontainer:proj/.devcontainer/ | has -x devcontainer:proj/.devcontainer/py/)
+  (cd .. && completes -i devcontainer:proj/.devcontainer/ | has -x devcontainer:proj/.devcontainer/devcontainer.json)
+  for sh in bash zsh; do
+    [[ $sh == bash ]] || command -v zsh >/dev/null || continue
+    (cd .. && "$repo/test/tab-complete.py" --mark "$sh" 'clod -i devcontainer:pro' \
+      'clod -i devcontainer:proj/.devcontainer/py/d' 'clod -i devcontainer:proj/+su') |
+      diff - <(printf '%s\n' 'clod -i devcontainer:proj/%' \
+        'clod -i devcontainer:proj/.devcontainer/py/devcontainer.json %' 'clod -i devcontainer:proj/+sudo %')
+  done
   # without the devcontainer CLI: a build says how to get it, and auto runs
   # the image it would otherwise
   nocli=''
