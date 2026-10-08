@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tests: [variant-browser, variant-lamp, variant-rust, variant-dotnet variant-python variant-go+sudo]
+        tests: [variant-browser, variant-lamp, variant-rust, variant-dotnet variant-python variant-go+sudo, other-base]
     steps:
       - uses: actions/checkout@v4
       - run: test/run.sh ${{ matrix.tests }}

@@ -35,7 +35,8 @@ classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
 variant_names='browser dotnet lamp python rust go+sudo'
-variants_tests=$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)
+# other-base builds the base on another image, as a devcontainer's.
+variants_tests="$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)other-base"
 
 # Prints the tests in group $1, or fails if there's no such group.
 group_tests() {
@@ -1332,6 +1333,28 @@ test_install() {
 test_classic() {
   DOCKER_BUILDKIT=0 docker build -q -t clod-classic "$repo"
   DOCKER_BUILDKIT=0 docker build -q --build-arg BASE=clod-classic "$repo/images/sudo"
+}
+
+# Builds the base on an image like a devcontainer's: Ubuntu, a user of its own
+# at claude's uid, ending as that user. claude shares the uid, resolves first,
+# and keeps the image's ENV; a base without apt-get is refused at once.
+test_other_base() {
+  printf 'FROM ubuntu:24.04\nRUN mkdir /workspace\nENV FROM_BASE=1\nUSER ubuntu\n' > Dockerfile
+  docker build -q -t clod-test-ubuntu . >/dev/null
+  docker build -q -t clod-test-on-ubuntu --build-arg BASE=clod-test-ubuntu \
+    --build-arg CLOD_UID=1000 --build-arg CLOD_GID=1000 "$repo" >/dev/null
+  docker run --rm --entrypoint bash clod-test-on-ubuntu -c '
+    set -e
+    test "$(whoami)" = claude && test "$(id -gn)" = claude && test ~ = /home/claude
+    test "$(getent passwd 1000 | cut -d: -f1)" = claude && test "$(getent group 1000 | cut -d: -f1)" = claude
+    test "$(getent passwd ubuntu | cut -d: -f3)" = 1000 && test -O /home/ubuntu
+    test "$(head -1 /etc/passwd | cut -d: -f1)" = root
+    test -O /workspace && test "$FROM_BASE" = 1
+    git --version; node --version; gh --version | head -1
+  '
+  docker rmi -f clod-test-on-ubuntu clod-test-ubuntu >/dev/null
+  if docker build --build-arg BASE=alpine:3.22 "$repo" > out 2>&1; then false; fi
+  has "clod's image needs a Debian or Ubuntu base" < out
 }
 
 # Builds variant (or combination) $1 and checks its tools in the container.

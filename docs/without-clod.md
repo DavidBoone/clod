@@ -28,6 +28,17 @@ docker build -t clod \
 On macOS, Docker Desktop and Colima map ownership on their own, so the default
 (1000) is fine.
 
+To add the same layer to another Debian or Ubuntu image, such as one a
+project's devcontainer builds, pass it as `BASE`:
+
+```bash
+docker build -t clod-myproject --build-arg BASE=myproject-dev ~/.clod/src
+```
+
+The image's `PATH` and other `ENV` are kept. If it already has a user at
+`claude`'s uid (often `vscode` or `node`, at 1000), that user keeps its name
+and files, which `claude` can then use, and the uid resolves to `claude`.
+
 The image keeps whatever it was built with. To pick up changes to the repo,
 `git -C ~/.clod/src pull` and build again; to also refresh Debian's packages
 and Node, add `--pull --no-cache`. The image a build replaces is left untagged;
