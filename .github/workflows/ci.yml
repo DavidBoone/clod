@@ -27,7 +27,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tests: [variant-browser, variant-lamp, variant-rust, variant-dotnet variant-python variant-go+sudo, other-base]
+        tests: [variant-browser, variant-lamp, variant-rust, variant-dotnet variant-python variant-go+sudo, other-base devcontainer]
     steps:
       - uses: actions/checkout@v4
+      # the devcontainer CLI, which clod runs on the host to build devcontainers
+      - if: contains(matrix.tests, 'devcontainer')
+        run: sudo npm install -g @devcontainers/cli
       - run: test/run.sh ${{ matrix.tests }}

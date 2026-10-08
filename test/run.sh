@@ -30,13 +30,15 @@ export LC_ALL=C.UTF-8
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy clipboard show-image docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune completion install'
+  multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune devcontainer-names
+  completion install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
 variant_names='browser dotnet lamp python rust go+sudo'
-# other-base builds the base on another image, as a devcontainer's.
-variants_tests="$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)other-base"
+# other-base builds the base on another image, as a devcontainer's, and
+# devcontainer builds devcontainers with the devcontainer CLI.
+variants_tests="$(for v in $variant_names; do printf 'variant-%s ' "$v"; done)other-base devcontainer"
 
 # Prints the tests in group $1, or fails if there's no such group.
 group_tests() {
@@ -1077,6 +1079,81 @@ completes() {
   clod __complete "$@" | cut -f1
 }
 
+# Writes a project with a devcontainer in directory $1: the default one on
+# Ubuntu, whose user ubuntu has claude's uid once built, and devcontainer:py,
+# built from a Dockerfile, whose user vscode starts at uid 1500.
+devcontainer_project() {
+  mkdir -p "$1/.devcontainer/py"
+  cat > "$1/.devcontainer/devcontainer.json" <<'EOF'
+{
+  // JSON with comments, which clod never reads
+  "image": "ubuntu:24.04",
+  "containerEnv": { "FROM_DC": "yes", "EDITOR": "nano" },
+  "remoteUser": "ubuntu"
+}
+EOF
+  printf '{ "build": { "dockerfile": "Dockerfile" }, "remoteUser": "vscode" }\n' \
+    > "$1/.devcontainer/py/devcontainer.json"
+  printf '%s\n' 'FROM debian:trixie-slim' \
+    'RUN useradd -m -u 1500 vscode && mkdir /opt/tool && chown vscode /opt/tool' 'USER vscode' \
+    > "$1/.devcontainer/py/Dockerfile"
+}
+
+# The devcontainer image names, their errors, env and completion, which need
+# neither the devcontainer CLI nor a build.
+test_devcontainer_names() {
+  local nocli d
+  devcontainer_project proj
+  cd proj
+  clod env | has '^devcontainer: .*/proj/.devcontainer/devcontainer.json (clod -i devcontainer runs it)$'
+  clod -i devcontainer env | has '^image: *devcontainer (.*/proj/.devcontainer/devcontainer.json)$'
+  if clod -i devcontainer env | has '^devcontainer:'; then false; fi
+  clod -i devcontainer:py+sudo env |
+    has '^image: *devcontainer:py+sudo (.*/proj/.devcontainer/py/devcontainer.json + .*/images/sudo)$'
+  exits 1 clod -i devcontainer:nope bash -c true 2>&1 |
+    has -x "clod: no devcontainer named 'nope' in $PWD (it has: py)"
+  exits 1 clod -i go+devcontainer env 2>&1 | has -x 'clod: a devcontainer goes first in a combination, as devcontainer+go'
+  exits 1 clod -s -i devcontainer bash -c true 2>&1 | has -x 'clod: a scratch workspace has no devcontainer'
+  exits 1 clod -w vol:dcvol -i devcontainer bash -c true 2>&1 | has -x 'clod: a volume workspace has no devcontainer'
+  # one the workspace hasn't is an error only for what needs it
+  (cd .. && clod -i devcontainer env | has '^image: *devcontainer (no devcontainer in ')
+  (cd .. && clod -i devcontainer home >/dev/null)
+  (cd .. && exits 1 clod -i devcontainer bash -c true)
+  mv .devcontainer/devcontainer.json default.json
+  exits 1 clod -i devcontainer bash -c true 2>&1 |
+    has -x "clod: $PWD has several devcontainers; choose one: devcontainer:py"
+  clod env | has '^devcontainer: *devcontainer:py (clod -i devcontainer:NAME runs one)$'
+  mv default.json .devcontainer/devcontainer.json
+  # not a variant
+  exits 2 clod image new devcontainer
+  exits 1 clod image new mine devcontainer 2>&1 | has 'clod -i devcontainer+mine$'
+  exits 1 clod image edit devcontainer 2>&1 | has "edit that: $PWD/.devcontainer/devcontainer.json$"
+  exits 1 clod -i devcontainer+sudo image edit 2>&1 | has 'clod image edit sudo$'
+  exits 1 clod image rm devcontainer 2>&1 | has 'clod image clean devcontainer removes its built image$'
+  completes -i '' | has -x devcontainer
+  completes -i '' | has -x devcontainer:py
+  if completes image new mine '' | grep -q devcontainer; then false; fi
+  # bash splits words at :, as in vol:NAME
+  for sh in bash zsh; do
+    [[ $sh == bash ]] || command -v zsh >/dev/null || continue
+    "$repo/test/tab-complete.py" "$sh" 'clod -i devcontainer:p' 'clod --image=devcontainer:p' |
+      diff - <(printf '%s\n' 'clod -i devcontainer:py' 'clod --image=devcontainer:py')
+  done
+  # without the devcontainer CLI: a build says how to get it, and auto runs
+  # the image it would otherwise
+  nocli=''
+  while IFS= read -r d; do
+    [[ -x $d/devcontainer ]] || nocli+=${nocli:+:}$d
+  done < <(tr : '\n' <<<"$PATH")
+  PATH=$nocli command -v docker >/dev/null
+  exits 1 env PATH="$nocli" clod -i devcontainer image build 2>&1 |
+    has -x 'clod: devcontainer images need the devcontainer CLI on the host: npm install -g @devcontainers/cli'
+  CLOD_DEVCONTAINER=auto PATH=$nocli clod env 2>&1 | tee out
+  has '^image: *clod$' < out
+  has "the devcontainer CLI isn't installed (npm install -g @devcontainers/cli)$" < out
+  exits 1 env CLOD_DEVCONTAINER=maybe clod env
+}
+
 # Tab completion: clod __complete's candidates and their descriptions, and the
 # shim it prints, typed into bash and (if installed) zsh. Needs no Docker.
 test_completion() {
@@ -1355,6 +1432,49 @@ test_other_base() {
   docker rmi -f clod-test-on-ubuntu clod-test-ubuntu >/dev/null
   if docker build --build-arg BASE=alpine:3.22 "$repo" > out 2>&1; then false; fi
   has "clod's image needs a Debian or Ubuntu base" < out
+}
+
+# Builds devcontainers with the devcontainer CLI, with the base on top: their
+# users take claude's ids, their containerEnv fills in variables, a variant can
+# go on top, and a change beside the config makes one stale. CLOD_DEVCONTAINER
+# auto runs one unless an image is chosen; image prune removes one whose
+# config has gone.
+test_devcontainer() {
+  devcontainer_project proj
+  cd proj
+  clod -i devcontainer bash -c '
+    set -e
+    test "$(whoami)" = claude && test "$(id -u)" = "'"$(id -u)"'"
+    test "$(id -u ubuntu)" = "$(id -u)" && test -O /home/ubuntu
+    test "$FROM_DC" = yes && test "$EDITOR" = vim && test "$CLOD_IMAGE" = devcontainer
+    grep -q "Ubuntu 24.04" /etc/os-release
+    git --version; node --version; gh --version | head -1
+  '
+  clod image build devcontainer | has -x 'clod: devcontainer is up to date'
+  clod image | has "^  devcontainer  *built  *$PWD/.devcontainer/devcontainer.json\$"
+  clod -i devcontainer:py+sudo bash -c '
+    test "$(stat -c %u /opt/tool)" = "$(id -u)" && test "$(sudo -n whoami)" = root &&
+      test "$CLOD_IMAGE" = devcontainer:py+sudo
+  '
+  clod image show devcontainer:py+sudo |
+    has "^devcontainer:py  *built  *-  *$PWD/.devcontainer/py/devcontainer.json, then the base\$"
+  echo '// changed' >> .devcontainer/devcontainer.json
+  clod image show devcontainer | has '^devcontainer  *stale '
+  CLOD_DEVCONTAINER=auto clod env | has '^image: *devcontainer '
+  CLOD_DEVCONTAINER=auto clod -i sudo env | has '^image: *sudo '
+  clod default devcontainer auto
+  clod env | has '^image: *devcontainer '
+  clod default devcontainer --reset
+  completes image clean '' | has -x devcontainer:py
+  clod image clean devcontainer:py+sudo devcontainer:py | has -x 'removed devcontainer:py'
+  # one whose config has gone is stale, and image prune removes it
+  mkdir -p ../gone/.devcontainer
+  echo '{ "image": "debian:trixie-slim" }' > ../gone/.devcontainer/devcontainer.json
+  (cd ../gone && clod image build devcontainer)
+  mv ../gone ../moved
+  clod image | has '^  devcontainer  *stale  .*/gone/.devcontainer/devcontainer.json (gone)$'
+  clod image prune | grep -c '^removed devcontainer$' | has -x 2
+  if clod image | grep -q '^  devcontainer '; then false; fi
 }
 
 # Builds variant (or combination) $1 and checks its tools in the container.

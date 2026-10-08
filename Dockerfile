@@ -72,9 +72,37 @@ RUN git config --system --add safe.directory '*'
 # to claude (whoami, ssh's home).
 ARG CLOD_UID=1000
 ARG CLOD_GID=1000
+
+# On a devcontainer's image, clod passes in its devcontainer.metadata label.
+# The user its tools run as (remoteUser, else containerUser) moves to claude's
+# ids, files included, so claude can use and update what it installed. Its
+# containerEnv, which the devcontainer CLI leaves in the label unless it
+# builds features, goes in a file the entrypoint sets them from.
+ARG DEVCONTAINER_METADATA=
+RUN [ -n "$DEVCONTAINER_METADATA" ] || exit 0; \
+    user=$(python3 -c 'import json, os, re; \
+m = json.loads(os.environ["DEVCONTAINER_METADATA"]); \
+m = [x for x in (m if isinstance(m, list) else [m]) if isinstance(x, dict)]; \
+env = {}; [env.update(x.get("containerEnv") or {}) for x in m]; \
+os.makedirs("/usr/local/share/clod", exist_ok=True); \
+open("/usr/local/share/clod/devcontainer.env", "w").write("".join("%s=%s\n" % (k, v) for k, v in env.items() \
+  if re.match(r"[A-Za-z_][A-Za-z0-9_]*$", k) and "\n" not in str(v))); \
+u = [x["remoteUser"] for x in m if x.get("remoteUser")] or [x["containerUser"] for x in m if x.get("containerUser")]; \
+print(u[-1] if u else "")') \
+    && if [ -n "$user" ] && [ "$user" != root ] && [ "$CLOD_UID" != 0 ] && uid=$(id -u "$user" 2>/dev/null); then \
+         gid=$(id -g "$user") group=$(id -gn "$user"); \
+         if [ "$uid" != "$CLOD_UID" ]; then \
+           find / -xdev -uid "$uid" -exec chown -h "$CLOD_UID" {} + && usermod -o -u "$CLOD_UID" "$user"; \
+         fi \
+         && if [ "$gid" != "$CLOD_GID" ]; then \
+           find / -xdev -gid "$gid" -exec chgrp -h "$CLOD_GID" {} + && groupmod -o -g "$CLOD_GID" "$group"; \
+         fi; \
+       fi
+
 RUN groupadd -o -g $CLOD_GID claude \
     && useradd -l -m -o -u $CLOD_UID -g claude -s /bin/bash claude \
     && for f in /etc/passwd:$CLOD_UID /etc/group:$CLOD_GID; do \
+         [ "${f#*:}" = 0 ] && continue; \
          awk -F: -v id=${f#*:} 'NR == FNR { if ($1 == "claude") c = $0; next } \
            $1 == "claude" { if (!done) print; done = 1; next } \
            $3 == id && !done { print c; done = 1 } { print }' ${f%:*} ${f%:*} > /tmp/ids \

@@ -177,7 +177,12 @@ Runs zsh in a throwaway container on the current directory, which is mounted
 as /workspace. ARGS go to zsh unchanged.
 @image
 Lists the base image, the bundled variants, yours in ~/.clod/images and the
-images clod built, marking those that are stale or in use.
+images clod built, marking those that are stale or in use. The image
+devcontainer is the workspace's devcontainer (.devcontainer/devcontainer.json
+or .devcontainer.json; devcontainer:NAME for .devcontainer/NAME), which the
+devcontainer CLI on the host builds, with the base on top. It goes first in a
+combination, as devcontainer+sudo, and rebuilds when a file beside its config
+changes. clod default devcontainer auto runs it wherever there is one.
 @image show
 Shows how image NAME is built: each image in its chain, its state (built,
 stale), the images it is FROM and where its files are.
@@ -320,6 +325,7 @@ home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
 ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
 clipboard|CLOD_CLIPBOARD|off|on lets Ctrl+V in Claude Code paste the image on the host's clipboard
+devcontainer|CLOD_DEVCONTAINER|off|auto runs the workspace's devcontainer image when it has one and no image is chosen
 EOF
 
 # The commands that run in the container, the commands (each noun once) and the
@@ -613,6 +619,145 @@ variant_names() {
   done | sort -u
 }
 
+# A devcontainer image is a project's devcontainer, which the devcontainer CLI
+# on the host builds, with clod's base Dockerfile built on top. -i devcontainer
+# names the workspace's, and devcontainer:NAME its .devcontainer/NAME one. Its
+# Docker name is clod-devcontainer-HASH, or clod-devcontainer-NAME-HASH, HASH
+# being of the config file's real path; image_name turns it back into the -i
+# name.
+dc_re='^devcontainer-(([a-z0-9][a-z0-9_-]*)-)?([0-9a-f]{12})$'
+
+# Sets REPLY to the devcontainer config file of workspace directory $1: its
+# .devcontainer/$2/devcontainer.json, or with no $2 .devcontainer/devcontainer.json
+# or .devcontainer.json, or nothing if there's none. Sets dc_names to the NAMEs
+# of its .devcontainer/NAME/devcontainer.json files.
+find_devcontainer() {
+  local f
+  REPLY='' dc_names=''
+  for f in "$1"/.devcontainer/*/devcontainer.json; do
+    [[ -f $f ]] || continue
+    f=${f%/devcontainer.json}
+    dc_names+="${dc_names:+ }${f##*/}"
+  done
+  if [[ -n $2 ]]; then
+    f=$1/.devcontainer/$2/devcontainer.json
+  else
+    f=$1/.devcontainer/devcontainer.json
+    [[ -f $f ]] || f=$1/.devcontainer.json
+  fi
+  [[ -f $f ]] && REPLY=$f
+  return 0
+}
+
+# Sets REPLY to the Docker name of devcontainer image $1 (devcontainer or
+# devcontainer:NAME) in this run's workspace, and dc_tag, dc_config and
+# dc_workspace to that name, its config file and the workspace. Fails with the
+# reason in dc_error when there isn't one.
+devcontainer_tag() {
+  local name='' hash
+  dc_error=''
+  [[ $1 == devcontainer:* ]] && name=${1#devcontainer:}
+  if [[ $1 == devcontainer: || -n $name && ! $name =~ $variant_re ]]; then
+    dc_error="clod: invalid devcontainer name '$name': clod takes .devcontainer/NAME folders named in lowercase letters and digits, joined by - or _"
+  elif [[ -n $scratch ]]; then
+    dc_error="clod: a scratch workspace has no devcontainer"
+  elif [[ $workspace == vol:* ]]; then
+    dc_error="clod: a volume workspace has no devcontainer"
+  else
+    find_devcontainer "$workspace" "$name"
+    if [[ -z $REPLY && -n $name ]]; then
+      dc_error="clod: no devcontainer named '$name' in $workspace_label${dc_names:+ (it has: ${dc_names// /, })}"
+    elif [[ -z $REPLY && -n $dc_names ]]; then
+      dc_error="clod: $workspace_label has several devcontainers; choose one: devcontainer:${dc_names// /, devcontainer:}"
+    elif [[ -z $REPLY ]]; then
+      dc_error="clod: no devcontainer in $workspace_label (looked for .devcontainer/devcontainer.json and .devcontainer.json)"
+    fi
+  fi
+  [[ -z $dc_error ]] || return 1
+  dc_config=$REPLY dc_workspace=$workspace
+  # The same project through a symlink is the same image.
+  realdir "$workspace"
+  hash=$(printf '%s' "$REPLY${dc_config#"$workspace"}" | $sum | cut -c1-12)
+  dc_tag=clod-devcontainer-${name:+$name-}$hash
+  REPLY=$dc_tag
+}
+
+# Sets dc_cfg and dc_ws to the config file and workspace devcontainer image $1
+# is built from: this run's, or those it was built with. Fails if the config
+# file has gone.
+dc_source() {
+  if [[ $1 == "${dc_tag:-}" ]]; then
+    dc_cfg=$dc_config dc_ws=$dc_workspace
+  else
+    dc_cfg=$(docker image inspect -f '{{index .Config.Labels "clod.devcontainer.config"}}' "$1" 2>/dev/null)
+    dc_ws=$(docker image inspect -f '{{index .Config.Labels "clod.devcontainer.workspace"}}' "$1" 2>/dev/null)
+  fi
+  [[ -n $dc_cfg && -f $dc_cfg ]]
+}
+
+# Sets REPLY to where devcontainer image $1 comes from, as clod image shows it:
+# its config file, with (gone) when that has, from the labels of $1, or else of
+# image $2 built on it.
+dc_label() {
+  dc_source "$1" || { [[ -n ${2:-} ]] && dc_source "$2"; }
+  if [[ -z $dc_cfg ]]; then
+    REPLY='(gone)'
+  else
+    REPLY=$(tildify "$dc_cfg")
+    [[ -f $dc_cfg ]] || REPLY+=' (gone)'
+  fi
+}
+
+# Prints the hash a devcontainer image from config file $1 is labelled with:
+# of the files beside it (in a .devcontainer/NAME folder, the folder's) and the
+# base's. A file the config names from elsewhere, such as a Dockerfile above,
+# isn't in it; image build picks up a change to one.
+dc_hash() {
+  local dir=${1%/*}
+  { case $1 in
+      */.devcontainer.json) $sum < "$1" ;;
+      */.devcontainer/devcontainer.json)
+        (cd "$dir" && find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 "$sum") ;;
+      *) files_hash "$dir" ;;
+    esac
+    base_hash; } | $sum | cut -d' ' -f1
+}
+
+# Builds devcontainer image $1 from dc_cfg and dc_ws (dc_source), labelled with
+# hash $2, unless it already is: the devcontainer CLI builds the devcontainer,
+# as $1:devcontainer, then clod's base Dockerfile goes on top, given its
+# metadata. For image rebuild it always builds, without the layer cache.
+build_devcontainer() {
+  local src=$1:devcontainer no_cache=() out meta
+  if [[ $verb == rebuild ]]; then
+    no_cache=(--no-cache)
+  else
+    [[ $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$1" 2>/dev/null) == "$2" ]] && return
+  fi
+  if ! command -v devcontainer >/dev/null; then
+    echo "clod: devcontainer images need the devcontainer CLI on the host: npm install -g @devcontainers/cli" >&2
+    exit 1
+  fi
+  if [[ -z $base_dir ]]; then
+    echo "clod: building a devcontainer image needs clod's Dockerfile, which isn't beside $script" >&2
+    exit 1
+  fi
+  image_name "$1"
+  echo "clod: building $REPLY from $(tildify "$dc_cfg")..." >&2
+  if ! out=$(devcontainer build --workspace-folder "$dc_ws" --config "$dc_cfg" --image-name "$src" \
+      ${no_cache[@]+"${no_cache[@]}"}); then
+    echo "clod: the devcontainer CLI couldn't build $(tildify "$dc_cfg")${out:+: $out}" >&2
+    exit 1
+  fi
+  meta=$(docker image inspect -f '{{index .Config.Labels "devcontainer.metadata"}}' "$src")
+  docker build -t "$1" --label "clod.hash=$2" \
+    --label "clod.devcontainer.config=$dc_cfg" --label "clod.devcontainer.workspace=$dc_ws" \
+    --build-arg "BASE=$src" --build-arg "DEVCONTAINER_METADATA=$meta" \
+    ${base_args[@]+"${base_args[@]}"} ${no_cache[@]+"${no_cache[@]}"} "$base_dir" || exit 1
+  docker rmi "$src" >/dev/null
+  built=1
+}
+
 files_hash() {
   (cd "$1" && find . -type f ! -name '.*' -print0 | sort -z | xargs -0 "$sum") | $sum | cut -d' ' -f1
 }
@@ -674,12 +819,18 @@ takes_base() {
 # nothing if it isn't a variant's, and variant_base to the image a combination's
 # last variant is built on (clod-a.b for clod-a.b.c), or to nothing. Of the
 # variants its name lists, variant_missing is the first that doesn't exist, and
-# variant_fixed the first after the first that doesn't take ARG BASE.
+# variant_fixed the first after the first that doesn't take ARG BASE. A chain
+# can start with a devcontainer image, whose Docker name goes in variant_dc.
 tag_variant() {
   local parts part i=0
-  REPLY='' variant_base='' variant_missing='' variant_fixed=''
+  REPLY='' variant_base='' variant_missing='' variant_fixed='' variant_dc=''
   IFS=. read -ra parts <<< "${1#clod-}"
   for part in ${parts[@]+"${parts[@]}"}; do
+    if (( i == 0 )) && [[ $part =~ $dc_re ]]; then
+      variant_dc=clod-$part
+      i=1
+      continue
+    fi
     find_variant "$part"
     [[ -n $REPLY ]] || { variant_missing=$part; return 0; }
     (( i++ )) && [[ -z $variant_fixed ]] && ! takes_base "$REPLY" && variant_fixed=$part
@@ -694,9 +845,21 @@ tag_variant() {
 # to nothing when $1 is neither, so names a local docker image. Exits with an
 # error when $1 is a combination clod can't build: a name with + in it whose
 # parts aren't all variants, or one whose variants after the first don't take
-# ARG BASE.
+# ARG BASE. devcontainer and devcontainer:NAME, first in a combination or
+# alone, are the workspace's devcontainer image (devcontainer_tag), and an error
+# when it has none.
 resolve_variant() {
-  local name=${1//+/.}
+  local name=${1//+/.} first=${1%%+*}
+  case +$1+ in
+    *+devcontainer[+:]*)
+      if [[ $first != devcontainer && $first != devcontainer:* ]]; then
+        echo "clod: a devcontainer goes first in a combination, as devcontainer+${first#clod-}" >&2
+        exit 1
+      fi
+      devcontainer_tag "$first" || { echo "$dc_error" >&2; exit 1; }
+      name=$REPLY${name#"${first//+/.}"}
+      ;;
+  esac
   if [[ $1 == *+* ]]; then
     case ${name#clod-} in
       .*|*.|*..*)
@@ -714,7 +877,7 @@ resolve_variant() {
     echo "clod: no variant named '$variant_missing' (clod image lists them)" >&2
     exit 1
   fi
-  if [[ -n $REPLY ]]; then
+  if [[ -n $REPLY || -n $variant_dc ]]; then
     REPLY=clod-${name#clod-}
   elif [[ $name == clod-* ]]; then
     # a variant named clod-NAME
@@ -725,11 +888,16 @@ resolve_variant() {
 }
 
 # Sets REPLY to the name clod shows for image $1, the one -i takes: A+B for
-# clod-A.B, NAME for clod-NAME, and any other image as it is.
+# clod-A.B, NAME for clod-NAME, devcontainer or devcontainer:NAME for a
+# devcontainer image, and any other image as it is.
 image_name() {
+  local first
   REPLY=$1
   [[ $1 =~ ^clod-[A-Za-z0-9_.-]+$ ]] || return 0
   REPLY=${1#clod-}
+  first=${REPLY%%.*}
+  [[ $first =~ $dc_re ]] &&
+    REPLY=devcontainer${BASH_REMATCH[2]:+:${BASH_REMATCH[2]}}${REPLY#"$first"}
   REPLY=${REPLY//./+}
 }
 
@@ -755,7 +923,8 @@ build_if_changed() {
 # those of them clod has files for, bases first, wherever they changed. With $2
 # state, it sets REPLY to the state of $1: - when it isn't built, stale when its
 # next run rebuilds it (its files or an image it is FROM changed), or else
-# built. An image clod has no files for is built or -.
+# built. An image clod has no files for is built or -. A devcontainer image is
+# built from its config file, this run's or the one it was built from.
 walking=() walked=()
 walk_image() {
   local tag=$1 mode=$2 label dir base hash parent parents=() build_args=() stale='' t
@@ -782,6 +951,23 @@ walk_image() {
     dir=$base_dir hash=$(base_hash)
     build_args=(${base_args[@]+"${base_args[@]}"})
     [[ $verb == rebuild ]] && build_args+=(--pull)
+  elif [[ ${tag#clod-} =~ $dc_re ]]; then
+    # A devcontainer image, at the root of its chain. One whose config file has
+    # gone is stale, and can't be built.
+    if ! dc_source "$tag"; then
+      if [[ $mode == build ]]; then
+        image_name "$tag"
+        echo "clod: can't build $REPLY: its devcontainer config${dc_cfg:+ $(tildify "$dc_cfg")} has gone" >&2
+        exit 1
+      fi
+      REPLY=stale
+      return 0
+    fi
+    hash=$(dc_hash "$dc_cfg")
+    if [[ $mode == build ]]; then
+      build_devcontainer "$tag" "$hash"
+      return 0
+    fi
   else
     tag_variant "$tag"
     dir=$REPLY base=$variant_base
@@ -1020,6 +1206,9 @@ load_settings() {
       default_setting "$line" || vars+=("$line")
     done <<< "$out"
   fi
+  # An image chosen by now (-i, the shell, the envrc) wins over
+  # CLOD_DEVCONTAINER=auto; one from ~/.clod/config doesn't.
+  image_chosen=${CLOD_IMAGE+1}
   # ~/.clod/config holds launcher settings as NAME=value lines, defaults for both
   # the shell's and the envrc's.
   if [[ -f $config ]]; then
@@ -1052,12 +1241,35 @@ setup_home() {
 # Sets tag to the image to run, image to its name, and variant_dir to the
 # directory of the variant it is built from (the last, for a combination), or
 # to nothing. A variant NAME is built as clod-NAME, and a combination A+B, B
-# built on A, as clod-A.B; image becomes NAME or A+B.
+# built on A, as clod-A.B; image becomes NAME or A+B. image_dc is the
+# devcontainer image at the root of its chain, if there is one; a devcontainer
+# the workspace doesn't have is an error only for what needs the image
+# (need_image), so other commands still work.
 setup_image() {
-  image=${CLOD_IMAGE:-clod}
+  image=${CLOD_IMAGE:-clod} image_dc='' image_error='' dc_note=''
+  case ${CLOD_DEVCONTAINER:-off} in
+    off) ;;
+    auto)
+      if [[ -z $image_chosen && -z $scratch && -n $workspace && $workspace != vol:* ]]; then
+        find_devcontainer "$workspace" ''
+        if [[ -z $REPLY ]]; then
+          :
+        elif command -v devcontainer >/dev/null; then
+          image=devcontainer
+        else
+          dc_note="clod: CLOD_DEVCONTAINER is auto, but this runs $image: the devcontainer CLI isn't installed (npm install -g @devcontainers/cli)"
+        fi
+      fi
+      ;;
+    *) echo "clod: CLOD_DEVCONTAINER is '$CLOD_DEVCONTAINER'; it must be auto or off" >&2; exit 1 ;;
+  esac
   if [[ $image == *[[:space:]]* ]]; then
     echo "clod: invalid CLOD_IMAGE '$image'" >&2
     exit 1
+  fi
+  if [[ $image == devcontainer || $image == devcontainer[:+]* ]] && ! devcontainer_tag "${image%%+*}"; then
+    image_error=$dc_error tag='' variant_dir=''
+    return 0
   fi
   resolve_variant "$image"
   if [[ -n $REPLY ]]; then
@@ -1065,10 +1277,18 @@ setup_image() {
     image_name "$tag"
     image=$REPLY
     tag_variant "$tag"
-    variant_dir=$REPLY
+    variant_dir=$REPLY image_dc=$variant_dc
   else
     tag=$image variant_dir=''
   fi
+}
+
+# Exits with the reason when this run's image is a devcontainer the workspace
+# doesn't have.
+need_image() {
+  [[ -z $image_error ]] && return 0
+  echo "$image_error" >&2
+  exit 1
 }
 
 # Sets shared_dir to the shared config to mount, port_args and container_ports
@@ -1335,11 +1555,12 @@ volume_names() {
   return 0
 }
 
-# Offers image names: clod (unless $1 is "variants") and the variants, or after
-# a + the variants that can go on top and aren't in the combination yet. Reads
-# $cur and $variants from cmd_complete.
+# Offers image names: clod and the current directory's devcontainers (unless
+# $1 is "variants") and the variants, or after a + the variants that can go on
+# top and aren't in the combination yet. Reads $cur and $variants from
+# cmd_complete.
 offer_images() {
-  local v below on_top=()
+  local v below on_top=() dcs=()
   if [[ $cur == *+* ]]; then
     below=${cur%+*}
     for v in $variants; do
@@ -1349,7 +1570,14 @@ offer_images() {
     done
     offer ${on_top[@]+"${on_top[@]}"}
   else
-    [[ $1 == variants ]] || offer clod
+    if [[ $1 != variants ]]; then
+      find_devcontainer "$PWD" ''
+      [[ -n $REPLY ]] && dcs+=(devcontainer)
+      for v in $dc_names; do
+        [[ $v =~ $variant_re ]] && dcs+=("devcontainer:$v")
+      done
+      offer clod ${dcs[@]+"${dcs[@]}"}
+    fi
     # shellcheck disable=SC2086 # variant names don't contain spaces or globs
     offer $variants
   fi
@@ -1505,10 +1733,18 @@ cmd_complete() {
           [[ -d $word ]] && offer "$(basename "$word")"
         done
         ;;
-      # The images clod built, named as clod image lists them.
+      # The images clod built, named as clod image lists them; of the
+      # devcontainer images, the current directory's.
       image:clean)
         offer $(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
-          sed -n 's/^clod-//p; /^clod$/p' | tr . + | sort -u)
+          sed -n 's/^clod-//p; /^clod$/p' | grep -v '^devcontainer-' | tr . + | sort -u)
+        workspace=$PWD scratch=''
+        find_devcontainer "$PWD" ''
+        for word in '' $dc_names; do
+          word=devcontainer${word:+:$word}
+          devcontainer_tag "$word" &&
+            docker image inspect "$REPLY" >/dev/null 2>&1 && offer "$word"
+        done
         ;;
       image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
       shared:edit) (( ${#cmd_args[@]} )) || offer_files "$clod_dir/shared" ;;
@@ -1697,6 +1933,11 @@ image_chain() {
     dir=$base_dir
     src=$([[ -n $dir ]] && tildify "$dir/Dockerfile" || echo 'local image')
     src+=' (base)'
+  elif [[ ${tag#clod-} =~ $dc_re ]]; then
+    dir=''
+    dc_label "$tag"
+    src=$REPLY
+    [[ $src == *'(gone)' ]] || src+=', then the base'
   else
     tag_variant "$tag"
     dir=$REPLY base=$variant_base
@@ -1748,7 +1989,7 @@ cmd_image_show() {
 # Lists the base image, the variants and the images clod built, with their
 # states.
 cmd_image() {
-  local n src t i names tags srcs states=() state_width=5 mark
+  local n src t i names tags srcs states=() state_width=5 mark any_dc='' rest
   any_stale='' any_used=''
   names=(clod) tags=(clod)
   srcs=("$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)")
@@ -1764,13 +2005,20 @@ cmd_image() {
   # Combinations that are built, the one that runs here, and images clod built
   # whose variant has gone.
   for t in $({ docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null
-              [[ $tag == clod-*.* ]] && echo "$tag"; } | grep '^clod-' | sort -u); do
+              [[ $tag == clod-*.* || -n $image_dc ]] && echo "$tag"; } | grep '^clod-' | sort -u); do
     is_one_of "$t" "${tags[*]}" && continue
     image_name "$t"
     n=$REPLY
     tag_variant "$t"
     src=${n//+/ + }
     [[ -n $variant_missing ]] && src="$src (no Dockerfile)"
+    if [[ -n $variant_dc ]]; then
+      any_dc=1
+      dc_label "$variant_dc" "$t"
+      src=$REPLY
+      rest=${n#*+}
+      [[ $n == *+* ]] && src+=" + ${rest//+/ + }"
+    fi
     names+=("$n") tags+=("$t") srcs+=("$src")
   done
   name_width=4
@@ -1783,13 +2031,17 @@ cmd_image() {
   printf "  %-${name_width}s  %-${state_width}s  %s\n" NAME STATE SOURCE
   for (( i = 0; i < ${#names[@]}; i++ )); do
     mark=' '
-    [[ ${names[i]} == "$image" ]] && mark='*'
+    [[ ${tags[i]} == "$tag" ]] && mark='*'
     printf "%s %-${name_width}s  %-${state_width}s  %s\n" "$mark" "${names[i]}" "${states[i]}" "${srcs[i]}"
   done
   echo
   echo "*        runs here by default; clod -i NAME runs another, and clod -i A+B"
   echo "         builds variant B on A"
   echo "bundled  comes with clod, in $(tildify "$script_dir")"
+  if [[ -n $any_dc ]]; then
+    echo "devcontainer  built from a project's devcontainer by the devcontainer CLI, with"
+    echo "              the base on top; clod -i devcontainer runs the workspace's"
+  fi
   [[ -n $any_stale ]] && echo "stale    changed since it was built; its next run rebuilds it"
   [[ -n $any_used ]] && echo "in use   a container, maybe a stopped one, uses it (docker ps -a), so it can't be removed"
   echo "clod image clean NAME removes a built image, clod image prune the stale ones, and"
@@ -1824,7 +2076,7 @@ cmd_image_rm() {
     is_one_of "$name" "${dirs[*]##*/}" && continue
     dir=$clod_dir/images/$name
     if [[ ! $name =~ $name_re || ! -d $dir ]]; then
-      if [[ $name == clod || $name == *+* || -f $script_dir/images/$name/Dockerfile ]]; then
+      if [[ $name == clod || $name == devcontainer* || $name == *+* || -f $script_dir/images/$name/Dockerfile ]]; then
         echo "clod: $name has no variant of yours to delete; clod image clean $name removes its built image" >&2
       else
         echo "clod: no variant of yours named '$name' (clod image lists them)" >&2
@@ -1869,6 +2121,10 @@ cmd_image_clean() {
     n=${name//+/.}
     t=clod-${n#clod-}
     [[ $name == clod ]] && t=clod
+    if [[ $name == devcontainer || $name == devcontainer[:+]* ]]; then
+      resolve_variant "$name"
+      t=$REPLY
+    fi
     if [[ -z $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$t" 2>/dev/null) ]]; then
       echo "clod: no image clod built named '$name' (clod image lists them)" >&2
       exit 1
@@ -2263,6 +2519,12 @@ cmd_image_new() {
   local name=$1 from=$2 target src='' combo='' variants from_lines
   [[ $name =~ $variant_re ]] ||
     usage_error "invalid image name '$name': lowercase letters and digits, joined by - or _"
+  [[ $name == devcontainer || $name == devcontainer-* ]] &&
+    usage_error "devcontainer names the workspace's devcontainer image; choose another name"
+  if [[ $from == devcontainer || $from == devcontainer[:+]* ]]; then
+    echo "clod: a variant can't start from a devcontainer, which differs from one workspace to the next; make a variant FROM \$BASE and run clod -i devcontainer+$name" >&2
+    exit 1
+  fi
   target=$clod_dir/images/$name
   if [[ -e $target ]]; then
     echo "clod: $(tildify "$target") already exists" >&2
@@ -2378,7 +2640,7 @@ check_rel_file() {
 # image -i or CLOD_IMAGE selects, in the editor. Refuses the base image, a
 # bundled variant and a combination, which aren't yours to edit.
 cmd_image_edit() {
-  local name=${1:-} file=${2:-Dockerfile} dir
+  local name=${1:-} file=${2:-Dockerfile} dir combo
   if [[ -z $name ]]; then
     image_name "$image"
     name=$REPLY
@@ -2388,8 +2650,15 @@ cmd_image_edit() {
     echo "clod: the base image is clod's own; build on it with a variant: clod image new NAME" >&2
     exit 1
   fi
+  if [[ $name == devcontainer || $name == devcontainer:* ]]; then
+    devcontainer_tag "$name" || { echo "$dc_error" >&2; exit 1; }
+    echo "clod: the devcontainer image is built from the workspace's devcontainer config; edit that: $(tildify "$dc_config")" >&2
+    exit 1
+  fi
   if [[ $name == *+* || $name == *.* ]]; then
-    echo "clod: $name is a combination; edit each variant in it: clod image edit ${name%%[+.]*}" >&2
+    combo=$name
+    [[ $name == devcontainer* ]] && name=${name#*+}
+    echo "clod: $combo is a combination; edit each variant in it: clod image edit ${name%%[+.]*}" >&2
     exit 1
   fi
   dir=$clod_dir/images/$name
@@ -2410,7 +2679,7 @@ cmd_image_edit() {
 }
 
 # Prints a line of clod env: field $1 with value $2.
-field() { printf '%-11s%s\n' "$1:" "$2"; }
+field() { printf '%-14s%s\n' "$1:" "$2"; }
 
 cmd_env() {
   local home_path parts p from shown
@@ -2422,17 +2691,39 @@ cmd_env() {
   else
     field home "$home_label ($home_path)"
   fi
-  if [[ $tag == clod-*.* ]]; then
+  if [[ -n $image_error ]]; then
+    field image "$image (${image_error#clod: })"
+  elif [[ $tag == clod-*.* || -n $image_dc ]]; then
     IFS=+ read -ra parts <<< "$image"
     from=''
     for p in "${parts[@]}"; do
-      find_variant "$p"
+      if [[ $p == devcontainer* ]]; then
+        REPLY=$dc_config
+      else
+        find_variant "$p"
+      fi
       from+="${from:+ + }$(tildify "$REPLY")"
     done
     field image "$image ($from)"
   else
     field image "$image${variant_dir:+ ($(tildify "$variant_dir"))}"
   fi
+  # A devcontainer the run doesn't use.
+  if [[ -z $image_dc && -z $image_error && -z $scratch && $workspace != vol:* ]]; then
+    find_devcontainer "$workspace" ''
+    if [[ -n $REPLY ]]; then
+      shown="$(tildify "$REPLY") (clod -i devcontainer runs it)"
+    elif [[ -n $dc_names ]]; then
+      shown="devcontainer:${dc_names// /, devcontainer:} (clod -i devcontainer:NAME runs one)"
+    else
+      shown=''
+    fi
+    if [[ -n $shown ]]; then
+      command -v devcontainer >/dev/null || shown+="; the devcontainer CLI isn't installed"
+      field devcontainer "$shown"
+    fi
+  fi
+  [[ -n $dc_note ]] && echo "$dc_note" >&2
   field command "${CLOD_COMMAND:-claude} (what a bare clod runs)"
   if [[ -n $scratch ]]; then
     field scratch "an empty /workspace, discarded on exit"
@@ -2637,11 +2928,13 @@ start_clipboard() {
 
 cmd_run() {
   local run_args variants endpoint sock mount probe sock_stat
+  need_image
   need_home
+  [[ -n $dc_note ]] && echo "$dc_note" >&2
 
   if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
     echo "clod: running $image as built" >&2
-  elif [[ $tag == clod || -n $variant_dir ]]; then
+  elif [[ $tag == clod || -n $variant_dir || -n $image_dc ]]; then
     walk_image "$tag" build
   elif ! docker image inspect "$tag" >/dev/null 2>&1; then
     variants=$(variant_names | tr '\n' ' ')
