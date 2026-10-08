@@ -181,9 +181,10 @@ images clod built, marking those that are stale or in use. The image
 devcontainer is the workspace's devcontainer (.devcontainer/devcontainer.json
 or .devcontainer.json; devcontainer:NAME for .devcontainer/NAME), which the
 devcontainer CLI on the host builds, with the base on top; devcontainer:PATH,
-with a / in it, is another project's, or a config folder or file. It goes first in a
-combination, as devcontainer+sudo, and rebuilds when a file beside its config
-changes. clod default devcontainer auto runs it wherever there is one.
+with a / in it, is another project's, or a config folder or file. It goes
+first in a combination, as devcontainer+sudo, and rebuilds when a file beside
+its config changes. clod default devcontainer auto runs it wherever there is
+one.
 @image show
 Shows how image NAME is built: each image in its chain, its state (built,
 stale), the images it is FROM and where its files are.
