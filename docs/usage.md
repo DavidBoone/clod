@@ -243,9 +243,10 @@ document, so a Claude Code update can stop the pictures from showing.
 ## Updating and rebuilding
 
 To update clod, `clod update` pulls its checkout in `~/.clod/src` and lists
-what changed, one line per change. The next `clod` rebuilds the image if it
-changed; `clod image build` builds it straight away instead, without starting
-a container. Only a change to the base `Dockerfile` rebuilds the base:
+what changed, one line per change. When the checkout is on another branch,
+it asks first whether to switch to `master`; without a terminal it pulls the
+branch it's on. The next `clod` rebuilds the image if it changed; `clod image
+build` builds it straight away instead, without starting a container. Only a change to the base `Dockerfile` rebuilds the base:
 `entrypoint.sh`, `container.md` (what Claude is told about the container) and
 `clipboard.sh` (the `xclip` and `wl-paste` behind `--clipboard`) are mounted
 from the checkout on every run, so changes to them apply without a build. An

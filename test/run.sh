@@ -31,7 +31,7 @@ lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy clipboard show-image docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune devcontainer-names
-  completion install'
+  completion update install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -1351,6 +1351,37 @@ exec $bash --norc --noprofile -c "\$2"
 EOF
   chmod +x fake/zsh fake/bash
   export PATH=$PWD/fake:$PATH
+}
+
+# update pulls clod's checkout, asking first to switch to master when it's on
+# another branch, and staying there without a terminal. Needs no Docker.
+test_update() {
+  export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
+  export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
+  git init -q -b master origin
+  cp "$repo/clod" origin/
+  git -C origin add clod
+  git -C origin commit -qm one
+  git clone -q origin src
+  src/clod update | has -x 'clod .* is up to date'
+  git -C src checkout -q -b feature
+  git -C origin commit -q --allow-empty -m two
+  # no terminal: stays on the branch, whose pull fails without an upstream
+  exits 1 src/clod update < /dev/null 2> out
+  has 'is on branch feature, not master' < out
+  has -x 'clod: staying on branch feature' < out
+  test "$(git -C src branch --show-current)" = feature
+  printf 'n\n' | script -qec 'src/clod update' /dev/null > out || true
+  has 'Switch to master before pulling' < out
+  test "$(git -C src branch --show-current)" = feature
+  printf 'y\n' | script -qec 'src/clod update' /dev/null > out
+  has 'clod updated to .*, 1 change:' < out
+  test "$(git -C src branch --show-current)" = master
+  # a detached HEAD
+  git -C src checkout -q --detach
+  printf 'y\n' | script -qec 'src/clod update' /dev/null > out
+  has 'is at a detached HEAD, not master' < out
+  test "$(git -C src branch --show-current)" = master
 }
 
 # install and uninstall, in a HOME of their own, with PATH holding only the
