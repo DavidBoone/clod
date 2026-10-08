@@ -180,7 +180,8 @@ Lists the base image, the bundled variants, yours in ~/.clod/images and the
 images clod built, marking those that are stale or in use. The image
 devcontainer is the workspace's devcontainer (.devcontainer/devcontainer.json
 or .devcontainer.json; devcontainer:NAME for .devcontainer/NAME), which the
-devcontainer CLI on the host builds, with the base on top. It goes first in a
+devcontainer CLI on the host builds, with the base on top; devcontainer:PATH,
+with a / in it, is another project's, or a config folder or file. It goes first in a
 combination, as devcontainer+sudo, and rebuilds when a file beside its config
 changes. clod default devcontainer auto runs it wherever there is one.
 @image show
@@ -649,20 +650,57 @@ find_devcontainer() {
   return 0
 }
 
-# Sets REPLY to the Docker name of devcontainer image $1 (devcontainer or
-# devcontainer:NAME) in this run's workspace, and dc_tag, dc_config and
-# dc_workspace to that name, its config file and the workspace. Fails with the
-# reason in dc_error when there isn't one.
+# Sets REPLY to the Docker name of devcontainer image $1, and dc_tag,
+# dc_config and dc_workspace to that name, its config file and the project
+# folder the devcontainer CLI builds it in. devcontainer and devcontainer:NAME
+# are this run's workspace's; devcontainer:PATH, with a / in PATH (or starting
+# with . or ~), is a project folder, a config folder or a config file anywhere,
+# relative to the current directory. Fails with the reason in dc_error when
+# there isn't one.
 devcontainer_tag() {
-  local name='' hash
+  local name='' path='' hash f
   dc_error=''
   [[ $1 == devcontainer:* ]] && name=${1#devcontainer:}
-  if [[ $1 == devcontainer: || -n $name && ! $name =~ $variant_re ]]; then
-    dc_error="clod: invalid devcontainer name '$name': clod takes .devcontainer/NAME folders named in lowercase letters and digits, joined by - or _"
+  if [[ $name == */* || $name == .* || $name == '~'* ]]; then
+    path=$name name=''
+    [[ $path == \~ || $path == \~/* ]] && path=$HOME${path#\~}
+    abspath "$path"
+    path=$REPLY
+    if [[ -f $path ]]; then
+      REPLY=$path
+    elif [[ -f $path/devcontainer.json ]]; then
+      REPLY=$path/devcontainer.json
+    elif [[ -d $path ]]; then
+      find_devcontainer "$path" ''
+      f=${1#devcontainer:}
+      f=${f%/}
+      if [[ -z $REPLY && -n $dc_names ]]; then
+        dc_error="clod: $(tildify "$path") has several devcontainers; choose one: devcontainer:$f/.devcontainer/${dc_names// /, devcontainer:$f/.devcontainer/}"
+      elif [[ -z $REPLY ]]; then
+        dc_error="clod: no devcontainer in $(tildify "$path") (looked for .devcontainer/devcontainer.json and .devcontainer.json)"
+      fi
+    else
+      dc_error="clod: no devcontainer at $(tildify "$path"): no such file or folder"
+    fi
+    [[ -z $dc_error ]] || return 1
+    dc_config=$REPLY
+    # The project folder is the one holding .devcontainer, or else the config's.
+    case $dc_config in
+      */.devcontainer/*) dc_workspace=${dc_config%%/.devcontainer/*} ;;
+      *) dc_workspace=${dc_config%/*} ;;
+    esac
+    # A named config's image is the one devcontainer:NAME builds in the project.
+    if [[ $dc_config == "$dc_workspace"/.devcontainer/*/devcontainer.json ]]; then
+      f=${dc_config#"$dc_workspace"/.devcontainer/}
+      f=${f%/devcontainer.json}
+      [[ $f =~ $variant_re ]] && name=$f
+    fi
+  elif [[ $1 == devcontainer: || -n $name && ! $name =~ $variant_re ]]; then
+    dc_error="clod: invalid devcontainer name '$name': clod takes .devcontainer/NAME folders named in lowercase letters and digits, joined by - or _, or a path with a /"
   elif [[ -n $scratch ]]; then
-    dc_error="clod: a scratch workspace has no devcontainer"
+    dc_error="clod: a scratch workspace has no devcontainer; name one by its path, as devcontainer:PATH"
   elif [[ $workspace == vol:* ]]; then
-    dc_error="clod: a volume workspace has no devcontainer"
+    dc_error="clod: a volume workspace has no devcontainer; name one by its path, as devcontainer:PATH"
   else
     find_devcontainer "$workspace" "$name"
     if [[ -z $REPLY && -n $name ]]; then
@@ -670,14 +708,14 @@ devcontainer_tag() {
     elif [[ -z $REPLY && -n $dc_names ]]; then
       dc_error="clod: $workspace_label has several devcontainers; choose one: devcontainer:${dc_names// /, devcontainer:}"
     elif [[ -z $REPLY ]]; then
-      dc_error="clod: no devcontainer in $workspace_label (looked for .devcontainer/devcontainer.json and .devcontainer.json)"
+      dc_error="clod: no devcontainer in $workspace_label (looked for .devcontainer/devcontainer.json and .devcontainer.json; one elsewhere is devcontainer:PATH)"
     fi
+    dc_config=$REPLY dc_workspace=$workspace
   fi
   [[ -z $dc_error ]] || return 1
-  dc_config=$REPLY dc_workspace=$workspace
-  # The same project through a symlink is the same image.
-  realdir "$workspace"
-  hash=$(printf '%s' "$REPLY${dc_config#"$workspace"}" | $sum | cut -c1-12)
+  # The same project through a symlink, or named by its path, is the same image.
+  realdir "$dc_workspace"
+  hash=$(printf '%s' "$REPLY${dc_config#"$dc_workspace"}" | $sum | cut -c1-12)
   dc_tag=clod-devcontainer-${name:+$name-}$hash
   REPLY=$dc_tag
 }
@@ -709,16 +747,16 @@ dc_label() {
 }
 
 # Prints the hash a devcontainer image from config file $1 is labelled with:
-# of the files beside it (in a .devcontainer/NAME folder, the folder's) and the
-# base's. A file the config names from elsewhere, such as a Dockerfile above,
-# isn't in it; image build picks up a change to one.
+# of the files beside it (a .devcontainer/NAME folder's, subfolders included;
+# a .devcontainer.json's alone) and the base's. A file the config names from
+# elsewhere, such as a Dockerfile above, isn't in it; image build picks up a
+# change to one.
 dc_hash() {
   local dir=${1%/*}
   { case $1 in
       */.devcontainer.json) $sum < "$1" ;;
-      */.devcontainer/devcontainer.json)
-        (cd "$dir" && find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 "$sum") ;;
-      *) files_hash "$dir" ;;
+      */.devcontainer/*/devcontainer.json) files_hash "$dir" ;;
+      *) (cd "$dir" && find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 "$sum") ;;
     esac
     base_hash; } | $sum | cut -d' ' -f1
 }
@@ -1246,6 +1284,7 @@ setup_home() {
 # the workspace doesn't have is an error only for what needs the image
 # (need_image), so other commands still work.
 setup_image() {
+  local spec
   image=${CLOD_IMAGE:-clod} image_dc='' image_error='' dc_note=''
   case ${CLOD_DEVCONTAINER:-off} in
     off) ;;
@@ -1274,8 +1313,12 @@ setup_image() {
   resolve_variant "$image"
   if [[ -n $REPLY ]]; then
     tag=$REPLY
+    spec=$image
     image_name "$tag"
     image=$REPLY
+    # A devcontainer named by its path keeps that name, which its Docker name
+    # can't carry.
+    [[ ${spec%%+*} == devcontainer:*/* || ${spec%%+*} == devcontainer:[.~]* ]] && image=$spec
     tag_variant "$tag"
     variant_dir=$REPLY image_dc=$variant_dc
   else
@@ -2761,8 +2804,9 @@ cmd_env() {
 # that are stale or, for rebuild, all of them. Each image is built once, however
 # many of the named ones are built on it.
 cmd_image_build() {
-  local name tags=() t
+  local name names=("$@") tags=() t i
   (( $# )) || set -- "$image"
+  (( ${#names[@]} )) || names=("$image")
   for name; do
     if [[ $name == clod ]]; then
       t=clod
@@ -2782,8 +2826,11 @@ cmd_image_build() {
   if [[ -n $built ]]; then
     docker image prune -f --filter label=clod.hash >/dev/null
   else
-    for t in "${tags[@]}"; do
-      image_name "$t"
+    for (( i = 0; i < ${#tags[@]}; i++ )); do
+      image_name "${tags[i]}"
+      # a devcontainer named by its path, as it was named
+      name=${names[i]}
+      [[ ${name%%+*} == devcontainer:*/* || ${name%%+*} == devcontainer:[.~]* ]] && REPLY=$name
       echo "clod: $REPLY is up to date"
     done
   fi

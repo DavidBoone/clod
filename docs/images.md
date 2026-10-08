@@ -136,11 +136,19 @@ does.
 clod -i devcontainer               # .devcontainer/devcontainer.json, or .devcontainer.json
 clod -i devcontainer:python        # .devcontainer/python/devcontainer.json
 clod -i devcontainer+sudo          # a variant on top, as in any combination
+clod -i devcontainer:app/          # app/'s, from the folder above it
 clod default devcontainer auto     # run a project's devcontainer whenever it has one
 ```
 
-`devcontainer` always means the workspace's, found in the directory clod
-mounts as `/workspace` (`-w`), not above it. It goes first in a combination,
+`devcontainer` means the workspace's, found in the directory clod mounts as
+`/workspace` (`-w`), not above it. To run one from somewhere else, such as a
+folder holding several projects, name it by its path, relative to the current
+directory: anything with a `/` (or starting with `.` or `~`) is a path, to a
+project (`devcontainer:app/`), a config folder
+(`devcontainer:app/.devcontainer/python`) or a config file. `/workspace` is
+still the directory clod runs in, and the image is the one `clod -i
+devcontainer` builds in the project. In an `.envrc`, `export
+CLOD_IMAGE=devcontainer:$PWD/app` pins it. It goes first in a combination,
 and a variant can't be built `FROM` it, since it differs from one project to
 the next: make your variant `FROM $BASE` and combine them. `clod env` mentions
 a devcontainer the run doesn't use. With `auto`, a run uses the devcontainer

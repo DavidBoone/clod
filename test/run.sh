@@ -1102,7 +1102,7 @@ EOF
 # The devcontainer image names, their errors, env and completion, which need
 # neither the devcontainer CLI nor a build.
 test_devcontainer_names() {
-  local nocli d
+  local nocli d here
   devcontainer_project proj
   cd proj
   # (with a note when the devcontainer CLI isn't installed, checked below)
@@ -1114,8 +1114,8 @@ test_devcontainer_names() {
   exits 1 clod -i devcontainer:nope bash -c true 2>&1 |
     has -x "clod: no devcontainer named 'nope' in $PWD (it has: py)"
   exits 1 clod -i go+devcontainer env 2>&1 | has -x 'clod: a devcontainer goes first in a combination, as devcontainer+go'
-  exits 1 clod -s -i devcontainer bash -c true 2>&1 | has -x 'clod: a scratch workspace has no devcontainer'
-  exits 1 clod -w vol:dcvol -i devcontainer bash -c true 2>&1 | has -x 'clod: a volume workspace has no devcontainer'
+  exits 1 clod -s -i devcontainer bash -c true 2>&1 | has -x 'clod: a scratch workspace has no devcontainer; name one by its path, as devcontainer:PATH'
+  exits 1 clod -w vol:dcvol -i devcontainer bash -c true 2>&1 | has -x 'clod: a volume workspace has no devcontainer; name one by its path, as devcontainer:PATH'
   # one the workspace hasn't is an error only for what needs it
   (cd .. && clod -i devcontainer env | has '^image: *devcontainer (no devcontainer in ')
   (cd .. && clod -i devcontainer home >/dev/null)
@@ -1124,7 +1124,19 @@ test_devcontainer_names() {
   exits 1 clod -i devcontainer bash -c true 2>&1 |
     has -x "clod: $PWD has several devcontainers; choose one: devcontainer:py"
   clod env | has '^devcontainer: *devcontainer:py (clod -i devcontainer:NAME runs one)'
+  exits 1 clod -i devcontainer:./ bash -c true 2>&1 |
+    has -x "clod: $PWD has several devcontainers; choose one: devcontainer:./.devcontainer/py"
   mv default.json .devcontainer/devcontainer.json
+  # one anywhere, such as below the workspace, by its path: a project, a config
+  # folder or file; any workspace, scratch included, can run it
+  here=$PWD
+  (cd .. && clod -i devcontainer:proj/ env | has "^image: *devcontainer:proj/ ($here/.devcontainer/devcontainer.json)\$")
+  (cd .. && clod -i devcontainer:./proj/.devcontainer/py+sudo env |
+    has "^image: *devcontainer:./proj/.devcontainer/py+sudo ($here/.devcontainer/py/devcontainer.json + .*/images/sudo)\$")
+  (cd .. && clod -s -i devcontainer:proj/.devcontainer/py/devcontainer.json env |
+    has "^image: *devcontainer:proj/.devcontainer/py/devcontainer.json ($here/.devcontainer/py/devcontainer.json)\$")
+  (cd .. && exits 1 clod -i devcontainer:nope/ bash -c true 2>&1 |
+    has -x "clod: no devcontainer at ${here%/*}/nope: no such file or folder")
   # not a variant
   exits 2 clod image new devcontainer
   exits 1 clod image new mine devcontainer 2>&1 | has 'clod -i devcontainer+mine$'
@@ -1453,6 +1465,8 @@ test_devcontainer() {
     git --version; node --version; gh --version | head -1
   '
   clod image build devcontainer | has -x 'clod: devcontainer is up to date'
+  # by its path, from above, it's the same image
+  (cd .. && clod image build devcontainer:proj/ | has -x 'clod: devcontainer:proj/ is up to date')
   clod image | has "^  devcontainer  *built  *$PWD/.devcontainer/devcontainer.json\$"
   clod -i devcontainer:py+sudo bash -c '
     test "$(stat -c %u /opt/tool)" = "$(id -u)" && test "$(sudo -n whoami)" = root &&
