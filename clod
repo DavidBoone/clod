@@ -283,7 +283,9 @@ file.
 Removes the links install made, and only those: clod on your PATH and in
 install's directories, and the completion files. It lists what it leaves.
 @update
-Updates clod: git pull in its checkout, fast-forward only.
+Updates clod: git pull in its checkout, fast-forward only. When the checkout
+isn't on master, it asks whether to switch to master first (without a
+terminal, it stays where it is).
 @completion
 Prints tab completion for bash and zsh, to load from your shell startup file
 with eval "$(clod completion)". install sets it up without that line where it
@@ -1862,12 +1864,38 @@ cmd_complete() {
   return 0
 }
 
+# When clod's checkout isn't on master, asks y/N whether to switch to it, and
+# switches on a yes. Without a terminal the answer is no.
+switch_to_master() {
+  local branch where answer=''
+  branch=$(git -C "$script_dir" symbolic-ref --short -q HEAD) || true
+  [[ $branch == master ]] && return 0
+  if [[ -n $branch ]]; then
+    where="on branch $branch"
+  else
+    where="at a detached HEAD"
+  fi
+  echo "clod: the checkout in $(tildify "$script_dir") is $where, not master" >&2
+  if [[ -t 0 ]]; then
+    read -r -p "Switch to master before pulling? [y/N] " answer
+  fi
+  case $answer in
+    y|Y|yes|YES) ;;
+    *) echo "clod: staying $where" >&2; return 0 ;;
+  esac
+  if ! git -C "$script_dir" checkout --quiet master; then
+    echo "clod: git checkout master failed in $(tildify "$script_dir") (git's message is above); sort it out with git there" >&2
+    exit 1
+  fi
+}
+
 cmd_update() {
   local before after count
   if ! git -C "$script_dir" rev-parse --git-dir >/dev/null 2>&1; then
     echo "clod: $(tildify "$script_dir") isn't a git checkout, so there's nothing to update" >&2
     exit 1
   fi
+  switch_to_master
   before=$(git -C "$script_dir" rev-parse HEAD)
   if ! git -C "$script_dir" pull --ff-only --quiet; then
     echo "clod: git pull failed in $(tildify "$script_dir") (git's message is above); sort it out with git there" >&2
