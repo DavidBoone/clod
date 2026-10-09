@@ -29,7 +29,7 @@ export LC_ALL=C.UTF-8
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
-  port port-busy clipboard show-image docker-socket envrc volume-home home-copy home-new volume-workspace default shared command-line help
+  port port-busy clipboard show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install'
 classic_tests='classic'
@@ -415,6 +415,36 @@ test_envrc() {
   clod bash -c 'test "$FOO" = bar && test -z "${MULTI:-}" && test "$CLOD_HOME" = from-envrc && test "$CLOD_HOME_PATH" = "~/.clod/homes/from-envrc"'
 }
 
+# An .envrc whose path has a ", $, ` or \, which direnv before 2.32.2 (2.33.0
+# for \) can't load: with such a direnv, clod says which one can. Needs no
+# Docker.
+test_envrc_path() {
+  mkdir 'no"envrc' 'a"$`b' 'c\d' plain
+  (cd 'no"envrc' && clod env | has "^workspace: *$PWD\$")
+  for d in 'a"$`b' 'c\d' plain; do
+    echo 'export FOO=bar' > "$d/.envrc"
+    direnv allow "$d"
+  done
+  for d in 'a"$`b:2.32.2' 'c\d:2.33.0'; do
+    if direnv version "${d##*:}" >/dev/null 2>&1; then
+      (cd "${d%:*}" && clod env | has '^FOO=bar$')
+    else
+      (cd "${d%:*}" && exits 1 clod env 2>&1 | has "direnv ${d##*:} and later can$")
+    fi
+  done
+  # a direnv older than both
+  mkdir bin
+  printf '%s\n' '#!/bin/sh' \
+    'if [ "$1" = version ]; then [ $# = 1 ] || exit 1; echo 2.32.1; exit 0; fi' \
+    "exec $(command -v direnv) \"\$@\"" > bin/direnv
+  chmod +x bin/direnv
+  (cd 'a"$`b' && PATH=$PWD/../bin:$PATH exits 1 clod env 2>&1 |
+    has -xF "clod: direnv 2.32.1 can't load an .envrc whose path has a \", as $PWD/.envrc does; direnv 2.32.2 and later can")
+  (cd 'c\d' && PATH=$PWD/../bin:$PATH exits 1 clod env 2>&1 |
+    has -xF "clod: direnv 2.32.1 can't load an .envrc whose path has a \\, as $PWD/.envrc does; direnv 2.33.0 and later can")
+  (cd plain && PATH=$PWD/../bin:$PATH clod env | has '^FOO=bar$')
+}
+
 test_volume_home() {
   docker volume rm -f clod-home-vtest >/dev/null
   clod home new vol:vtest >/dev/null
@@ -605,6 +635,9 @@ test_default() {
   clod default image clod
   clod env | has '^image: *clod$'
   exits 2 clod default ports-busy sometimes
+  exits 2 clod default devcontainer maybe
+  clod default devcontainer auto | has '^devcontainer  *auto .*config'
+  clod default devcontainer --reset
   clod default ports-busy next | has '^ports-busy  *next .*config'
   CLOD_PORTS=8000 clod env | has '^ports: .*(each moved to a free host port if another container has it)$'
   clod -P 8000 env | has '^ports: *127.0.0.1:8000 → 8000$'
@@ -1205,6 +1238,9 @@ test_completion() {
   clod __complete --sk | has -xF -e "$(printf -- '--skip-build\trun the image as built, even if its files changed')"
   clod __complete default '' | has -xF -e "$(printf 'ports\tports to publish on localhost, comma-separated')"
   test "$(completes default ports-busy '')" = "$(printf 'skip\nnext\nerror\n--reset')"
+  test "$(completes default devcontainer '')" = "$(printf 'auto\noff\n--reset')"
+  clod __complete default devcontainer '' |
+    has -xF -e $'auto\trun the workspace\'s devcontainer when it has one'
   clod __complete default command '' | has -xF -e "$(printf -- '--reset\tremove this default')"
   # no descriptions for names
   if clod __complete -i '' | grep -q $'\t'; then false; fi
@@ -1598,7 +1634,7 @@ if [[ $OSTYPE != linux* ]]; then
 fi
 needs_docker=''
 for t in "${selected[@]}"; do
-  [[ $t == lint || $t == completion ]] || needs_docker=1
+  [[ $t == lint || $t == completion || $t == envrc-path ]] || needs_docker=1
 done
 if [[ -n $needs_docker ]]; then
   if [[ -z $CI && -z $yes ]]; then
