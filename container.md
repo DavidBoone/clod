@@ -16,6 +16,8 @@ Running in a disposable Docker container (`docker run --rm`) started by the user
 
 When the home and workspace are virtiofs mounts (`mount` shows it; usual on a macOS host), GNU `sed -i` leaves the file mode 600 (it restores the mode through an ACL, which the mount stores but doesn't apply); edit files with your own tools or `perl -i` instead.
 
+Bypass mode still asks before an `rm` whose path is only known at run time (`rm -f "$dir/x"` with `dir=$(…)`) or one inside a `bash -c "$(…)"` script, and that prompt stalls the session, background agents included. Give `rm` literal paths and keep it out of generated scripts.
+
 Only `/home/claude` and (unless scratch) `/workspace` persist. System packages (apt, `/usr/local`) belong in an image variant's Dockerfile, which the user maintains. `npm install -g` goes to `~/.local` and persists, Python packages go in a venv, and single-file tools can go in `~/.local/bin`.
 
 # Changing the container
