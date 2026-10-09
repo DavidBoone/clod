@@ -18,6 +18,8 @@ When the home and workspace are virtiofs mounts (`mount` shows it; usual on a ma
 
 Bypass mode still asks before an `rm` whose path is only known at run time (`rm -f "$dir/x"` with `dir=$(…)`) or one inside a `bash -c "$(…)"` script, and that prompt stalls the session, background agents included. Give `rm` literal paths and keep it out of generated scripts.
 
+A git worktree made here records its links to the repository as `/workspace/…` paths, which git and git apps on the host can't follow, so they can't open it. Git 2.48 and later (`git version`) can record them as relative paths: when the user wants to use a worktree on the host, suggest `git config --global worktree.useRelativePaths true` (new worktrees, kept in this home) and `git worktree repair --relative-paths` in the repository (existing ones). It adds `extensions.relativeWorktrees` to the repository's config, after which git before 2.48, on the host too, refuses to open the repository.
+
 Only `/home/claude` and (unless scratch) `/workspace` persist. System packages (apt, `/usr/local`) belong in an image variant's Dockerfile, which the user maintains. `npm install -g` goes to `~/.local` and persists, Python packages go in a venv, and single-file tools can go in `~/.local/bin`.
 
 # Changing the container

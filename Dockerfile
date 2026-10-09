@@ -21,7 +21,6 @@ RUN command -v apt-get >/dev/null \
     && apt-get update && apt-get upgrade -y \
     && apt-get install -y \
        curl wget ca-certificates \
-       git \
        locales
 
 # Culture (the clod launcher passes the host's TZ)
@@ -34,12 +33,32 @@ ENV LANG=en_US.UTF-8
 # Language runtimes for agent tooling (MCP servers, scripts, npm-installed CLIs).
 # Pillow converts pictures for the show-image plugin.
 # Node comes from NodeSource; its nodejs package includes npm. The GitHub CLI
-# comes from GitHub's own repository, installed with the CLI tools below. A
-# repository the base already lists (a devcontainer's github-cli feature adds
-# GitHub's) is left as it is, since apt refuses one listed twice with
-# different keys.
+# comes from GitHub's own repository, installed with the CLI tools below. Git
+# comes from the git-core PPA, for relative worktree paths (git 2.48), which
+# keep a worktree's links valid on the host as well as at /workspace: an
+# Ubuntu base uses its own release's build, Debian trixie Ubuntu 24.04's (its
+# dependencies are all in trixie), and a release the PPA lacks keeps its own
+# git. A repository the base already lists (a devcontainer's github-cli
+# feature adds GitHub's) is left as it is, since apt refuses one listed twice
+# with different keys.
 RUN has_source() { grep -rqsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d; } \
     && mkdir -p /etc/apt/keyrings \
+    && . /etc/os-release \
+    && case "$ID:${VERSION_CODENAME:-}" in \
+         ubuntu:?*) git_suite=$VERSION_CODENAME ;; \
+         debian:trixie) git_suite=noble ;; \
+         *) git_suite= ;; \
+       esac \
+    && git_ppa=https://ppa.launchpadcontent.net/git-core/ppa/ubuntu \
+    && if [ -n "$git_suite" ] && ! has_source launchpadcontent.net/git-core \
+          && ! has_source launchpad.net/git-core \
+          && curl -fsSI "$git_ppa/dists/$git_suite/Release" >/dev/null; then \
+         curl -fsSL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF911AB184317630C59970973E363C90F8F1B6217' \
+           -o /etc/apt/keyrings/git-core.asc \
+         && printf '%s\n' 'Types: deb' "URIs: $git_ppa" \
+           "Suites: $git_suite" 'Components: main' 'Signed-By: /etc/apt/keyrings/git-core.asc' \
+           > /etc/apt/sources.list.d/git-core.sources; \
+       fi \
     && if ! has_source deb.nodesource.com/node_26.x; then \
          curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
            -o /etc/apt/keyrings/nodesource.asc \
@@ -56,6 +75,7 @@ RUN has_source() { grep -rqsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d
        fi \
     && apt-get update \
     && apt-get install -y \
+       git \
        python3 python3-venv python3-pil \
        nodejs
 
