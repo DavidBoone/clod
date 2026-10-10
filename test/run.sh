@@ -771,7 +771,7 @@ test_help() {
   has -x 'Images' < out
   has -xE '  image rm NAME\.\.\. +delete your variants and their built images' < out
   has -xE '  image clean \[NAME\.\.\.\] +remove built images, keeping their variants' < out
-  has -xE '  -i, --image NAME +the image or variant to run, or a\+b \(CLOD_IMAGE\)' < out
+  has -xE '  -i, --image NAME +the image or variant to run, a\+b, or \+NAME for NAME' < out
   has -x "'clod COMMAND -h' shows more about COMMAND." < out
   if grep -q '^  shared  *the shared config' out; then false; fi
   clod -h | diff - out
@@ -910,7 +910,8 @@ test_image_add() {
   grep -q 'names first twice' out
   CLOD_IMAGE=+first exits 1 clod env 2>out
   grep -q 'only -i takes a leading +' out
-  for name in + +first+ ++first; do
+  exits 2 clod -i + env
+  for name in +first+ ++first; do
     exits 1 clod -i "$name" env
   done
 }
