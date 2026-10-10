@@ -106,11 +106,11 @@ clod default image --reset      # back to the built-in default
 clod default edit               # open ~/.clod/config in $VISUAL, $EDITOR or vi
 ```
 
-The keys are `image`, `command`, `home`, `ports`, `ports-busy` and `clipboard`. Values are checked when
-you set them, and a home path is stored as an absolute path; `clod default
-edit` checks only that each line is a setting clod reads. Your shell's
-settings and a project's `.envrc` win over these defaults; `clod env` shows
-what a run will actually use.
+The keys are `image`, `command`, `home`, `ports`, `ports-busy`, `clipboard`
+and `devcontainer`. Values are checked when you set them, and a home path is
+stored as an absolute path; `clod default edit` checks only that each line is a
+setting clod reads. Your shell's settings and a project's `.envrc` win over
+these defaults; `clod env` shows what a run will actually use.
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`),
@@ -127,8 +127,11 @@ one `-w` names) for the nearest `.envrc`, loads it
 on the host through your direnv, and passes the variables it exports into the
 container via `--env-file`. Only exported variables count: `FOO=bar` without
 `export` isn't passed in. The file must be approved with `direnv allow`; without
-direnv installed it is ignored. Like direnv, `clod` stops at the first match, so
-parent directories' files only count if the file pulls them in (`source_up`).
+direnv installed it is ignored. direnv before 2.32.2 can't load an `.envrc`
+whose path has a `"`, `$` or `` ` ``, and before 2.33.0 one whose path has a
+`\`; with such a direnv, clod stops with an error naming the version needed.
+Like direnv, `clod` stops at the first match, so parent directories' files only
+count if the file pulls them in (`source_up`).
 Run `clod env` to see which file is used and exactly what would be passed.
 `clod --scratch` reads none (see [A scratch
 workspace](usage.md#a-scratch-workspace)), nor does a volume workspace (`-w vol:NAME`).

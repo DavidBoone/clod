@@ -538,7 +538,7 @@ find_envrc() {
 # variables (PATH, terminal size, direnv's own) are left out, and multi-line
 # ones, which --env-file can't carry, are skipped with a warning.
 envrc_vars() {
-  local clean=(env -i HOME="$HOME" PATH="$PATH" DIRENV_LOG_FORMAT=) base out err status=0
+  local clean=(env -i HOME="$HOME" PATH="$PATH" DIRENV_LOG_FORMAT=) base out err status=0 c need=''
   local dump='BEGIN {
     for (k in ENVIRON) {
       if (k !~ /^[A-Za-z_][A-Za-z0-9_]*$/) continue
@@ -548,6 +548,17 @@ envrc_vars() {
   }'
   command -v direnv >/dev/null ||
     { echo "clod: ignoring $(tildify "$1"): direnv is not installed" >&2; return 0; }
+  # direnv runs the .envrc with its path in a bash command line, which breaks on
+  # a " $ or ` in it before direnv 2.32.2, and hangs on a \ before 2.33.0.
+  for c in "\\" '"' '$' '`'; do
+    [[ $1 == *"$c"* ]] || continue
+    if [[ $c == "\\" ]]; then need=2.33.0; else need=2.32.2; fi
+    break
+  done
+  if [[ -n $need ]] && ! direnv version "$need" >/dev/null 2>&1; then
+    echo "clod: direnv $(direnv version) can't load an .envrc whose path has a $c, as $(tildify "$1") does; direnv $need and later can" >&2
+    return 1
+  fi
   [[ -n $XDG_CONFIG_HOME ]] && clean+=(XDG_CONFIG_HOME="$XDG_CONFIG_HOME")
   [[ -n $XDG_DATA_HOME ]] && clean+=(XDG_DATA_HOME="$XDG_DATA_HOME")
   base=$("${clean[@]}" awk "$dump")
@@ -1782,6 +1793,10 @@ cmd_complete() {
       1:clipboard)
         offer $'on\tpaste the host clipboard\'s image with Ctrl+V' $'off\tno clipboard' "$reset"
         ;;
+      1:devcontainer)
+        offer $'auto\trun the workspace\'s devcontainer when it has one' \
+          $'off\trun the chosen image' "$reset"
+        ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
     if (( ${#cmd_args[@]} == 0 )); then
@@ -1981,6 +1996,9 @@ cmd_default() {
         ;;
       clipboard)
         is_one_of "$value" 'on off' || usage_error "clipboard is on or off"
+        ;;
+      devcontainer)
+        is_one_of "$value" 'auto off' || usage_error "devcontainer is auto or off"
         ;;
     esac
   fi
