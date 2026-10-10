@@ -301,7 +301,7 @@ EOF
 # else a command as named in command_table. An option can have a row per
 # meaning. VALUE is empty for an option that takes none.
 read -r -d '' option_table <<'EOF' || true
-clod,run,env,image build,image rebuild,image clean|-i --image|NAME|the image or variant to run, or a+b (CLOD_IMAGE)
+clod,run,env,image build,image rebuild,image clean|-i --image|NAME|the image or variant to run, a+b, or +NAME for NAME on top of the image without -i (CLOD_IMAGE)
 clod,run,env|-H --home|HOME|the home: a name, a path or vol:NAME (CLOD_HOME)
 clod,run,env|-w --workspace|PATH|the directory to mount as /workspace, instead of the current one, or vol:NAME for a Docker volume
 clod,run,env|-P --port|PORT|publish a port on localhost, as 5173 or 3000:5173 (host:container); repeatable (CLOD_PORTS)
@@ -1077,6 +1077,17 @@ off_limits() {
 # (clod help, -h, --help) and exits.
 # Options set the launcher settings, winning over the environment, the envrc and
 # ~/.clod/config, even with an empty value (-P '' publishes no ports).
+# -i's value: an image for CLOD_IMAGE, or +NAME, variants for image_add to put
+# on top of the image the run would use without -i.
+set_image() {
+  if [[ $1 == +* ]]; then
+    [[ -n ${1#+} ]] || usage_error "-i + needs a variant after the +"
+    image_add=${1#+}
+  else
+    CLOD_IMAGE=$1 image_add=''
+  fi
+}
+
 # Sets the option $1, taking its value from $2 if it has one, and sets REPLY to
 # the number of words it used: 0 when $1 isn't one of clod's options.
 take_option() {
@@ -1085,14 +1096,14 @@ take_option() {
     -i|--image|-H|--home|-w|--workspace|-P|--port)
       [[ $# -ge 2 ]] || usage_error "$1 needs a value"
       case $1 in
-        -i|--image) CLOD_IMAGE=$2 ;;
+        -i|--image) set_image "$2" ;;
         -H|--home) CLOD_HOME=$2 ;;
         -w|--workspace) workspace_opt=$2 ;;
         -P|--port) opt_ports+=("$2") ;;
       esac
       REPLY=2
       ;;
-    --image=*) CLOD_IMAGE=${1#*=} ;;
+    --image=*) set_image "${1#*=}" ;;
     --home=*) CLOD_HOME=${1#*=} ;;
     --workspace=*) workspace_opt=${1#*=} ;;
     --port=*) opt_ports+=("${1#*=}") ;;
@@ -1112,7 +1123,7 @@ take_option() {
 # too, up to --, except after a run command, whose arguments are the program's.
 parse_args() {
   local opt_ports=() dashdash='' arg rest=() unknown=''
-  scratch='' workspace_opt='' force='' skip_build='' build_after='' docker_socket='' ports_opt='' command='' verb='' help=''
+  scratch='' image_add='' workspace_opt='' force='' skip_build='' build_after='' docker_socket='' ports_opt='' command='' verb='' help=''
   while (( $# )); do
     case $1 in
       --) shift; dashdash=1; break ;;
@@ -1290,6 +1301,33 @@ setup_home() {
   [[ $home == vol:* ]] && home_src=clod-home-${home#vol:}
 }
 
+# Puts the variants in image_add (-i +NAME) on top of image, refusing one that
+# is already in its chain.
+add_variants() {
+  local have=$image added=+ part parts
+  [[ $have == clod-* ]] && have=${have//./+}
+  have=+${have#clod-}+
+  IFS=+ read -ra parts <<< "$image_add"
+  for part in "${parts[@]}"; do
+    part=${part#clod-}
+    [[ -n $part ]] || continue
+    if [[ $have == *+"$part"+* ]]; then
+      image_name "$image"
+      echo "clod: $REPLY already has $part" >&2
+      exit 1
+    elif [[ $added == *+"$part"+* ]]; then
+      echo "clod: -i +$image_add names $part twice" >&2
+      exit 1
+    fi
+    added+=$part+
+  done
+  if [[ $image == clod ]]; then
+    image=$image_add
+  else
+    image+=+$image_add
+  fi
+}
+
 # Sets tag to the image to run, image to its name, and variant_dir to the
 # directory of the variant it is built from (the last, for a combination), or
 # to nothing. A variant NAME is built as clod-NAME, and a combination A+B, B
@@ -1316,6 +1354,11 @@ setup_image() {
       ;;
     *) echo "clod: CLOD_DEVCONTAINER is '$CLOD_DEVCONTAINER'; it must be auto or off" >&2; exit 1 ;;
   esac
+  if [[ $image == +* ]]; then
+    echo "clod: invalid CLOD_IMAGE '$image': only -i takes a leading +" >&2
+    exit 1
+  fi
+  [[ -n $image_add ]] && add_variants
   if [[ $image == *[[:space:]]* ]]; then
     echo "clod: invalid CLOD_IMAGE '$image'" >&2
     exit 1
