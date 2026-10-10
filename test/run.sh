@@ -107,6 +107,9 @@ test_run_command() {
     test ! -e /usr/share/man/man1/git.1.gz
     touch /workspace/from-container
     apt-cache policy gh | grep -A1 "^ *\*\*\*" | grep -q cli.github.com
+    apt-cache policy git | grep -A1 "^ *\*\*\*" | grep -q launchpadcontent.net/git-core
+    cd /tmp && git init -q r && git -C r -c user.name=t -c user.email=t commit -q --allow-empty -m x
+    git -C r worktree add -q --relative-paths ../w && test "$(cat w/.git)" = "gitdir: ../r/.git/worktrees/w"
     git --version; gh --version | head -1; node --version; python3 --version; jq --version; fd --version
   '
   test "$(stat -c %u from-container)" = "$(id -u)"
@@ -1546,6 +1549,7 @@ EOF
     test "$(getent passwd ubuntu | cut -d: -f3)" = 1000 && test -O /home/ubuntu
     test "$(head -1 /etc/passwd | cut -d: -f1)" = root
     test -O /workspace && test "$FROM_BASE" = 1
+    apt-cache policy git | grep -A1 "^ *\*\*\*" | grep -q "git-core/ppa/ubuntu noble/"
     git --version; node --version; gh --version | head -1
   '
   docker rmi -f clod-test-on-ubuntu clod-test-ubuntu >/dev/null

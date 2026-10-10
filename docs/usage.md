@@ -146,6 +146,20 @@ gh auth login            # then: gh auth setup-git, so git pushes use it
 Whatever you log into here, the agent can use: give each home only what its
 work needs.
 
+A worktree made in the container (as Claude Code's own are, under
+`.claude/worktrees/`) records its links to the repository as paths under
+`/workspace`, which don't exist on the host, so git and git apps there can't
+open it. The base image's git is 2.48 or later, which can record them as
+relative paths instead, valid in both places:
+
+```bash
+git config --global worktree.useRelativePaths true    # new worktrees, in this home
+git worktree repair --relative-paths                  # existing ones, per repository
+```
+
+This sets `extensions.relativeWorktrees` in the repository's config, and git
+before 2.48 then refuses to open the repository, on the host as well.
+
 ## Codex
 
 Codex CLI installs from the official `@openai/codex` npm package into the home
