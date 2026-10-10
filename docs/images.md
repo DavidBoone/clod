@@ -39,6 +39,12 @@ clod -i browser+dotnet          # .NET with a browser, for testing a web app
 clod default image go+sudo      # Go, with passwordless sudo
 ```
 
+`-i +NAME` puts `NAME` on top of the image the run would use without `-i`,
+the one `CLOD_IMAGE` (shell, `.envrc` or `clod default image`) or
+`CLOD_DEVCONTAINER=auto` picks: with `CLOD_IMAGE=go`, `clod -i +sudo` runs
+`go+sudo`. It is an error when that image already has `NAME`. Only `-i` takes
+a leading `+`; `CLOD_IMAGE` can't.
+
 Every variant after the first must take its base as an argument; the bundled
 ones all do, starting with:
 

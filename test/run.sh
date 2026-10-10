@@ -30,7 +30,7 @@ export LC_ALL=C.UTF-8
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy clipboard show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine live-files rebuild image-edit image-diff image-rm image-clean image-prune devcontainer-names
+  multi-stage combine image-add live-files rebuild image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -856,7 +856,7 @@ test_combine() {
   exits 1 clod -i first+fixed env 2>out
   grep -q "fixed can't go on top" out
   exits 1 clod -i first+nope env
-  for name in first+ +first first++second; do
+  for name in first+ first++second; do
     exits 1 clod -i "$name" env 2>out
     grep -q 'invalid image name' out
   done
@@ -890,6 +890,29 @@ test_combine() {
   clod -i ontop bash -c true 2>&1 | tee out
   grep -q 'building first+second\.\.\.' out
   grep -q 'building ontop\.\.\.' out
+}
+
+# -i +NAME adds NAME to the image the run would use without -i.
+test_image_add() {
+  order_variants
+  mkdir -p ~/.clod/images/third ~/.clod/images/other
+  printf 'ARG BASE=clod\nFROM $BASE\n' | tee ~/.clod/images/third/Dockerfile > ~/.clod/images/other/Dockerfile
+  clod -i +first env | has '^image: *first '
+  CLOD_IMAGE=first clod -i +second env | has '^image: *first+second '
+  CLOD_IMAGE=clod-first.second clod -i +third --image=+other env 2>&1 | has '^image: *first+second+other '
+  clod -i first -i +second env | has '^image: *first+second '
+  clod default image first
+  clod -i +second env | has '^image: *first+second '
+  clod default image --reset
+  CLOD_IMAGE=first+second exits 1 clod -i +second env 2>out
+  grep -q 'first+second already has second' out
+  exits 1 clod -i +first+first env 2>out
+  grep -q 'names first twice' out
+  CLOD_IMAGE=+first exits 1 clod env 2>out
+  grep -q 'only -i takes a leading +' out
+  for name in + +first+ ++first; do
+    exits 1 clod -i "$name" env
+  done
 }
 
 # entrypoint.sh, container.md, clipboard.sh and the plugin are mounted from the
@@ -1239,8 +1262,8 @@ test_completion() {
   # both forms of an option after -, each with the description; long ones
   # only after --
   completes - | has -x -- -i
-  clod __complete - | has -xF -e "$(printf -- '--image\tthe image or variant to run, or a+b (CLOD_IMAGE)')"
-  clod __complete - | has -xF -e "$(printf -- '-i\tthe image or variant to run, or a+b (CLOD_IMAGE)')"
+  clod __complete - | has -xF -e "$(printf -- '--image\tthe image or variant to run, a+b, or +NAME for NAME on top of the image without -i (CLOD_IMAGE)')"
+  clod __complete - | has -xF -e "$(printf -- '-i\tthe image or variant to run, a+b, or +NAME for NAME on top of the image without -i (CLOD_IMAGE)')"
   completes -- | has -x -- --image
   if completes -- | grep -qx -- -i; then false; fi
   # the nouns and their verbs; build and rebuild only after image
@@ -1259,6 +1282,8 @@ test_completion() {
   clod __complete default command '' | has -xF -e "$(printf -- '--reset\tremove this default')"
   # no descriptions for names
   if clod __complete -i '' | grep -q $'\t'; then false; fi
+  clod __complete -i + | has -x '+sudo'
+
   # help takes a command, and a noun's verb
   test "$(completes help im)" = image
   test "$(completes help image pr)" = prune
