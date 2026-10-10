@@ -154,28 +154,60 @@ if [ "$new_call" = 1 ] || [ "$call_out" != "$prev_out" ]; then
 fi
 
 
-# Subagent usage, from their transcripts. A streamed message is written several
-# times with growing output, so only the last entry per message id counts. The
-# sums are cached until a file's size or mtime changes.
+# Subagent usage, from their transcripts, which only ever grow. A streamed
+# message is written several times with growing output, so only the last entry
+# per message id counts. Each transcript's sums are cached with the byte offset
+# they cover and the last message counted, so a refresh reads only what was
+# appended since; a message continued past that offset replaces its earlier
+# count. A line still being written is left for a later refresh, and each
+# transcript's cache line is appended as soon as it's computed (later lines
+# win), so a run cut short keeps its progress.
 sub_in=0
 sub_out=0
 sub_dir="${transcript%.jsonl}/subagents"
 if [ -n "$transcript" ] && [ -d "$sub_dir" ]; then
     sub_cache="$state_file.sub"
-    sig=$(find "$sub_dir" -name '*.jsonl' -printf '%p %s %T@\n' | sort | md5sum | cut -d' ' -f1)
-    cached_sig=""
+    declare -A cached
     if [ -f "$sub_cache" ]; then
-        read -r cached_sig sub_in sub_out < "$sub_cache" || true
+        while read -r f rest; do
+            cached[$f]=$rest
+        done < "$sub_cache"
     fi
-    if [ "$sig" != "$cached_sig" ]; then
-        read -r sub_in sub_out < <(find "$sub_dir" -name '*.jsonl' -exec cat {} + 2>/dev/null \
-            | jq -rn '[inputs | select(.message.usage and .message.id) | {id: .message.id, u: .message.usage}]
-                | group_by(.id) | map(last.u)
-                | "\(map(.input_tokens + (.cache_creation_input_tokens // 0)) | add // 0) \(map(.output_tokens // 0) | add // 0)"' 2>/dev/null \
-            || echo "0 0")
-        echo "$sig $sub_in $sub_out" > "$sub_cache"
-    fi
-    : "${sub_in:=0}" "${sub_out:=0}"
+    new_cache=""
+    while read -r f size; do
+        read -r off f_in f_out lid lin lout <<< "${cached[$f]:-}"
+        if [ -z "$lout" ] || [ "$size" -lt "$off" ]; then
+            off=0 f_in=0 f_out=0 lid=- lin=0 lout=0
+        fi
+        if [ "$size" -gt "$off" ] && [ "$(tail -c +"$size" "$f" | head -c 1 | od -An -tx1)" != " 0a" ]; then
+            size=$(( size - $(tail -c +$((off + 1)) "$f" | head -c $((size - off)) | tail -n 1 | wc -c) ))
+        fi
+        if [ "$size" -gt "$off" ]; then
+            read -r d_in d_out n_lid n_lin n_lout < <(tail -c +$((off + 1)) "$f" | head -c $((size - off)) \
+                | grep -aF '"usage"' \
+                | jq -nrR --arg lid "$lid" --argjson lin "$lin" --argjson lout "$lout" '
+                    reduce (inputs | fromjson? | .message | select(.usage and .id)) as $m
+                        ({ids: {}, last: $lid};
+                         .ids[$m.id] = [$m.usage.input_tokens + ($m.usage.cache_creation_input_tokens // 0),
+                                        $m.usage.output_tokens // 0]
+                         | .last = $m.id)
+                    | (if .ids | has($lid) then [$lin, $lout] else [0, 0] end) as $old
+                    | ([.ids[]] | transpose | map(add)) as $sum
+                    | (.ids[.last] // [$lin, $lout]) as $l
+                    | "\(($sum[0] // 0) - $old[0]) \(($sum[1] // 0) - $old[1]) \(.last) \($l[0]) \($l[1])"' 2>/dev/null)
+            if [ -n "$n_lout" ]; then
+                lid=$n_lid lin=$n_lin lout=$n_lout
+                f_in=$(( f_in + d_in ))
+                f_out=$(( f_out + d_out ))
+                off=$size
+                echo "$f $off $f_in $f_out $lid $lin $lout" >> "$sub_cache"
+            fi
+        fi
+        sub_in=$(( sub_in + f_in ))
+        sub_out=$(( sub_out + f_out ))
+        new_cache+="$f $off $f_in $f_out $lid $lin $lout"$'\n'
+    done < <(find "$sub_dir" -name '*.jsonl' -printf '%p %s\n')
+    printf '%s' "$new_cache" > "$sub_cache.$$" && mv "$sub_cache.$$" "$sub_cache"
 fi
 
 
@@ -185,7 +217,7 @@ fmt_k() {
         echo "0"
         return
     fi
-    awk -v n="$n" 'BEGIN { if (n >= 1000) printf "%.1fk", n/1000; else print n }'
+    awk -v n="$n" 'BEGIN { if (n >= 999950) printf "%.1fM", n/1000000; else if (n >= 1000) printf "%.1fk", n/1000; else print n }'
 }
 
 # Ten-cell meter for percentage $1; filled cells shade green → yellow → red by

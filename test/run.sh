@@ -269,8 +269,20 @@ test_statusline() {
     echo '{"message":{"id":"m2","usage":{"input_tokens":3,"cache_creation_input_tokens":800,"cache_read_input_tokens":5000,"output_tokens":725}}}'
   } > s/subagents/agent-a.jsonl
   sed -i 's|"session_id":"ci"|"session_id":"sub","transcript_path":"/workspace/s.jsonl"|' input.json
-  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod bash -c 'TMPDIR=/workspace bash /etc/claude-code/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g' | tail -1 | has '↑5.8k  *↓1.0k '
+  # appended entries are read on later refreshes, from the cache TMPDIR keeps
+  # between runs: a message continued past what was read replaces its count,
+  # and a line still being written waits
+  test -s claude-statusline/sub.sub
+  { echo '{"message":{"id":"m2","usage":{"input_tokens":3,"cache_creation_input_tokens":800,"output_tokens":2725}}}'
+    printf '{"message":{"id":"m3","usage":{"input_tokens":200,'
+  } >> s/subagents/agent-a.jsonl
+  clod bash -c 'TMPDIR=/workspace bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+    sed 's/\x1b\[[0-9;]*m//g' | tail -1 | has '↑5.8k  *↓3.0k '
+  echo '"output_tokens":1000}}}' >> s/subagents/agent-a.jsonl
+  clod bash -c 'TMPDIR=/workspace bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+    sed 's/\x1b\[[0-9;]*m//g' | tail -1 | has '↑6.0k  *↓4.0k '
   # inside .git, where git status fails, it still shows both lines
   sed -i 's|"/workspace"|"/workspace/.git"|' input.json
   clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' > out
