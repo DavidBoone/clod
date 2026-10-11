@@ -7,12 +7,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Exercise the host launcher with Apple's Bash and BSD utilities, without
+  # needing a Docker daemon on the macOS runner.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash test/host.sh
+
   # test/run.sh holds the tests; each job runs some of them. Each job builds the
   # base image before its tests, so the quick variants share one.
   lint-classic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: /bin/bash test/host.sh
       - run: test/run.sh lint classic
 
   base:

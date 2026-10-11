@@ -2421,7 +2421,7 @@ cmd_image_prune() {
     [[ $REPLY == stale ]] || continue
     if in_use "$t"; then used+=("$t"); else stale+=("$t"); fi
   done < <(docker image ls --filter label=clod.hash --format '{{.Repository}}:{{.Tag}}' |
-    sed 's/:latest$//' | grep -E "^clod(-[^:]*|)$|^$full_tag$" | sort -u |
+    sed 's/:latest$//' | grep -E "^clod(-[^:]*)?$|^$full_tag$" | sort -u |
     awk '{ n = $0 ~ /^clod(:|$)/ ? -1 : gsub(/\./, "."); print n "\t" $0 }' | sort -rn | cut -f2)
   for t in ${stale[@]+"${stale[@]}"}; do
     remove_tag "$t"
