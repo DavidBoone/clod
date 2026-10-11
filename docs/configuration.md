@@ -77,6 +77,7 @@ A setting given empty still wins and means its default, so `clod -P ''` or
 |--------------|--------|-----------|---------|
 | `CLOD_HOME`  | `-H`   | `default` | Container home. A name means `~/.clod/homes/<name>`; anything with a `/` is a host path, relative to the current directory; `vol:NAME` is the Docker volume `clod-home-NAME` (see [Volume homes](#volume-homes)). |
 | `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod image` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`, or `devcontainer` for the project's devcontainer (see [Devcontainers](images.md#devcontainers)). Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
+| `CLOD_BASE` | none | `slim` | The Debian image the base image is built on: `slim` is `debian:trixie-slim`, built as `clod`; `full` is `debian:trixie`, whose packages keep their docs and man pages, built as `clod:full` beside it (see [The base](images.md#the-base)). |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `bash` or `zsh`. |
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 | `CLOD_PORTS_BUSY` | none | `skip` | What a run does with a `CLOD_PORTS` host port another running container publishes: `skip` leaves it out, `next` publishes the next free host port, `error` stops. A taken port given with `-P` always stops the run (see [Publishing ports](usage.md#publishing-ports)). |
@@ -95,6 +96,7 @@ gitignore it.
 ```bash
 clod default                    # show them all: yours, or built in
 clod default image go           # CLOD_IMAGE=go
+clod default base full          # CLOD_BASE=full
 clod default command codex      # a bare clod runs Codex
 clod default home work          # CLOD_HOME=work
 clod default ports 5173         # CLOD_PORTS=5173
@@ -106,8 +108,8 @@ clod default image --reset      # back to the built-in default
 clod default edit               # open ~/.clod/config in $VISUAL, $EDITOR or vi
 ```
 
-The keys are `image`, `command`, `home`, `ports`, `ports-busy`, `clipboard`
-and `devcontainer`. Values are checked when you set them, and a home path is
+The keys are `image`, `base`, `command`, `home`, `ports`, `ports-busy`,
+`clipboard` and `devcontainer`. Values are checked when you set them, and a home path is
 stored as an absolute path; `clod default edit` checks only that each line is a
 setting clod reads. Your shell's settings and a project's `.envrc` win over
 these defaults; `clod env` shows what a run will actually use.
