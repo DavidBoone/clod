@@ -7,8 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Exercise the host launcher with Apple's Bash and BSD utilities, without
-  # needing a Docker daemon on the macOS runner.
+  # test/host.sh on macOS's bash 3.2 and BSD tools; it needs no Docker.
   macos:
     runs-on: macos-latest
     steps:
