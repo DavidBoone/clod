@@ -35,7 +35,7 @@ this list: see [Letting the agent run containers](docker-socket.md).
 
 Claude Code installs on first run with
 `curl -fsSL https://claude.ai/install.sh | bash`, and Codex and OpenCode from npm
-(`@openai/codex` and `opencode-ai`). The base
+(`@openai/codex` and `@opencode/cli@2`). The base
 image's packages come from Debian, except Node, from NodeSource's apt
 repository, the GitHub CLI, from GitHub's, and git, from the git-core PPA on
 Launchpad (its Ubuntu 24.04 build).

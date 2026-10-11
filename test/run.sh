@@ -267,7 +267,7 @@ test_opencode() {
     test ! -e ~/.local/bin/opencode
   '
   clod -H opencode-existing opencode --version | tee out
-  has -E '[0-9]+\.[0-9]+\.[0-9]+' out
+  has -E '^(opencode v)?2\.[0-9]+\.[0-9]+$' out
   clod -H opencode-existing bash -c '
     set -e
     test "$(cat ~/.config/existing-settings)" = keep
@@ -276,22 +276,51 @@ test_opencode() {
   '
   clod -H opencode-existing opencode --version > out 2> err
   exits 1 grep -q 'installing OpenCode' err
+  # A home from the V1 integration must replace the old npm package, whose
+  # binary has the same name, without deleting configuration or credentials.
+  clod -H opencode-existing bash -c '
+    set -e
+    npm uninstall --global @opencode/cli
+    npm install --global opencode-ai@1
+    mkdir -p ~/.local/share/opencode
+    echo "{}" > ~/.local/share/opencode/auth.json
+  '
+  clod -H opencode-existing opencode --version > out 2> err
+  has -E '^(opencode v)?2\.[0-9]+\.[0-9]+$' out
+  has 'upgrading OpenCode to v2' err
+  clod -H opencode-existing bash -c '
+    set -e
+    test "$(cat ~/.config/existing-settings)" = keep
+    test "$(cat ~/.local/share/opencode/auth.json)" = "{}"
+    test ! -d ~/.local/lib/node_modules/opencode-ai
+    test -d ~/.local/lib/node_modules/@opencode/cli
+  '
+  clod -H opencode-existing opencode --version > out 2> err
+  exits 1 grep -q 'upgrading OpenCode' err
+  # Check V2's actual normalized policy, not just the exported environment.
+  clod -H opencode-existing opencode debug config > out
+  jq -e 'any(.[]; .info.permissions? == [{"action":"*","resource":"*","effect":"allow"}])' out
   # Check dispatch, permission policy and argument boundaries without a model.
   mkdir -p ~/.clod/homes/opencode-args/.local/bin
   cat > ~/.clod/homes/opencode-args/.local/bin/opencode <<'EOF'
 #!/bin/sh
-printf '%s\n' "$OPENCODE_PERMISSION" "$@"
+if [ "$1" = --version ]; then echo 'opencode v2.0.0'; exit; fi
+printf '%s\n' "$OPENCODE_CONFIG_CONTENT" "$@"
 EOF
   chmod +x ~/.clod/homes/opencode-args/.local/bin/opencode
   mkdir -p ~/.clod/homes/opencode-args/.local/share/opencode
   echo '{"provider":{"type":"api","key":"test"}}' > ~/.clod/homes/opencode-args/.local/share/opencode/auth.json
   clod home | has -E 'opencode-args +[-] +[-] +yes$'
   clod -H opencode-args opencode run 'a prompt' --model provider/model > out
-  test "$(cat out)" = "$(printf '%s\n' '{"*":"allow"}' run 'a prompt' --model provider/model)"
+  test "$(cat out)" = "$(printf '%s\n' '{"permission":{"*":"allow"}}' run 'a prompt' --model provider/model)"
   echo 'export OPENCODE_PERMISSION='"'"'{"*":"ask"}'"'" > .envrc
   direnv allow
   clod -H opencode-args opencode run 'a prompt' > out
-  test "$(head -1 out)" = '{"*":"ask"}'
+  test "$(head -1 out)" = '{"permission":{"*":"ask"}}'
+  echo 'export OPENCODE_CONFIG_CONTENT='"'"'{"model":"provider/model","permissions":[{"action":"shell","resource":"*","effect":"deny"}]}'"'" >> .envrc
+  direnv allow
+  clod -H opencode-args opencode run 'a prompt' > out
+  head -1 out | jq -e '.model == "provider/model" and .permissions[0].effect == "deny" and .permission == {"*":"ask"}'
 }
 
 test_statusline() {

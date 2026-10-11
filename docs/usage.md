@@ -182,8 +182,11 @@ resumed sessions.
 
 ## OpenCode
 
-`clod opencode` installs the official `opencode-ai` npm package into the home
-on first run. Settings, provider logins and sessions persist in that home.
+`clod opencode` installs OpenCode v2 from the official `@opencode/cli@2` npm
+package into the home on first run. Homes with v1 are upgraded automatically
+by replacing the `opencode-ai` npm package. Settings, provider logins and
+sessions stay in that home. V1 plugins need updating for v2; see the
+[migration guide](https://opencode.ai/v2/docs/migrate-v1/).
 
 ```bash
 clod opencode auth login         # connect a provider
@@ -195,7 +198,10 @@ clod default command opencode    # make it the default agent
 Arguments go to OpenCode unchanged. clod sets `OPENCODE_PERMISSION` to
 `{"*":"allow"}` by default, so tools run without permission prompts inside
 the container. Set `OPENCODE_PERMISSION` in the project's `.envrc` to choose
-a stricter policy. See the [OpenCode CLI documentation](https://opencode.ai/docs/cli/).
+a stricter policy. clod passes this setting through `OPENCODE_CONFIG_CONTENT`,
+preserving its other fields. Native v2 `permissions` in that inline config take
+precedence over the legacy policy. See the
+[OpenCode CLI documentation](https://opencode.ai/v2/docs/cli/).
 
 ## Publishing ports
 
