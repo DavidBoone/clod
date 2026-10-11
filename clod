@@ -3023,7 +3023,6 @@ settle_ports() {
   (( ${#port_args[@]} )) || return 0
   [[ -n $ports_opt ]] && mode=error
   taken_ports
-  [[ -n $taken ]] || return 0
   # port_args is -p ADDRESS:HOST:CONTAINER[/PROTO] pairs.
   for (( i = 1; i < ${#port_args[@]}; i += 2 )); do
     spec=${port_args[i]}

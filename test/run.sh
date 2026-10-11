@@ -323,6 +323,12 @@ test_port() {
 # CLOD_PORTS_BUSY=next moves it.
 test_port_busy() {
   docker rm -f clod-test-ports >/dev/null 2>&1 || true
+  # Reserve this run's ports even before another container publishes any.
+  CLOD_PORTS=18091:8080,18091:8081 CLOD_PORTS_BUSY=next clod bash -c 'test "$CLOD_PORTS" = 8080,8081' 2>&1 | tee out
+  has -x 'clod: publishing 127.0.0.1:18092 → 8081, since this run'"'"'s 8080 has 127.0.0.1:18091' < out
+  CLOD_PORTS=18091:8080,18091:8081 CLOD_PORTS_BUSY=skip clod bash -c 'test "$CLOD_PORTS" = 8080'
+  CLOD_PORTS=18091:8080,18091:8081 CLOD_PORTS_BUSY=error exits 1 clod bash -c true 2>&1 |
+    has "can't publish 127.0.0.1:18091: this run's 8080 has it"
   docker run -d --rm --name clod-test-ports -p 127.0.0.1:18090:80 -p 0.0.0.0:18092:80 \
     --entrypoint sleep clod 300 >/dev/null
   trap 'docker rm -f clod-test-ports >/dev/null 2>&1' EXIT
