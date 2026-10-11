@@ -1,4 +1,4 @@
-# Generic base for running Claude Code and Codex, with everyday CLI tools.
+# Generic base for Claude Code, Codex and OpenCode, with everyday CLI tools.
 # Languages, compilers and browsers go in variants built FROM clod (see
 # docs/images.md). BASE can instead name another Debian or Ubuntu image, such
 # as one with a project's toolchain, to add clod's layer to: its PATH and other

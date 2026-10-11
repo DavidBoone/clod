@@ -28,7 +28,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 export LC_ALL=C.UTF-8
 
 lint_tests='lint'
-base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
+base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode statusline
   port port-busy clipboard show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install'
@@ -254,6 +254,44 @@ test_claude_args() {
 test_codex() {
   clod codex --version | tee out
   grep -qi codex out
+}
+
+test_opencode() {
+  # Upgrade an existing home: installation must preserve its contents and
+  # remain available on later runs (including an ordinary shell).
+  mkdir -p ~/.clod/homes/opencode-existing
+  clod -H opencode-existing bash -c '
+    set -e
+    mkdir -p ~/.config
+    echo keep > ~/.config/existing-settings
+    test ! -e ~/.local/bin/opencode
+  '
+  clod -H opencode-existing opencode --version | tee out
+  has -E '[0-9]+\.[0-9]+\.[0-9]+' out
+  clod -H opencode-existing bash -c '
+    set -e
+    test "$(cat ~/.config/existing-settings)" = keep
+    test -x ~/.local/bin/opencode
+    opencode --version
+  '
+  clod -H opencode-existing opencode --version > out 2> err
+  exits 1 grep -q 'installing OpenCode' err
+  # Check dispatch, permission policy and argument boundaries without a model.
+  mkdir -p ~/.clod/homes/opencode-args/.local/bin
+  cat > ~/.clod/homes/opencode-args/.local/bin/opencode <<'EOF'
+#!/bin/sh
+printf '%s\n' "$OPENCODE_PERMISSION" "$@"
+EOF
+  chmod +x ~/.clod/homes/opencode-args/.local/bin/opencode
+  mkdir -p ~/.clod/homes/opencode-args/.local/share/opencode
+  echo '{"provider":{"type":"api","key":"test"}}' > ~/.clod/homes/opencode-args/.local/share/opencode/auth.json
+  clod home | has -E 'opencode-args +[-] +[-] +yes$'
+  clod -H opencode-args opencode run 'a prompt' --model provider/model > out
+  test "$(cat out)" = "$(printf '%s\n' '{"*":"allow"}' run 'a prompt' --model provider/model)"
+  echo 'export OPENCODE_PERMISSION='"'"'{"*":"ask"}'"'" > .envrc
+  direnv allow
+  clod -H opencode-args opencode run 'a prompt' > out
+  test "$(head -1 out)" = '{"*":"ask"}'
 }
 
 test_statusline() {
@@ -1356,7 +1394,7 @@ test_completion() {
   test "$(completes i)" = "$(printf 'image\ninstall')"
   test "$(completes u)" = "$(printf 'uninstall\nupdate')"
   # in command_table's order, with its descriptions
-  test "$(completes '' | head -5)" = "$(printf 'claude\ncodex\nbash\nzsh\nimage')"
+  test "$(completes '' | head -6)" = "$(printf 'claude\ncodex\nopencode\nbash\nzsh\nimage')"
   clod __complete '' | has -xF -e "$(printf 'claude\tClaude Code')"
   clod __complete image '' | has -xF -e "$(printf 'rm\tdelete your variants and their built images')"
   clod __complete --sk | has -xF -e "$(printf -- '--skip-build\trun the image as built, even if its files changed')"
@@ -1402,6 +1440,7 @@ test_completion() {
   completes -P 3000 : 5173 '' | has -x claude
   test "$(completes default co)" = command
   completes default command '' | has -x codex
+  completes default command '' | has -x opencode
   completes image new mine '' | has -x go
   if completes image new mine '' | grep -qx clod; then false; fi
   test -z "$(completes image new mine go '')"

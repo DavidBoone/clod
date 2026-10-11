@@ -6,6 +6,7 @@
 clod                 # Claude Code
 clod claude --resume # Claude Code with its own arguments
 clod codex [args]    # Codex
+clod opencode [args] # OpenCode
 clod bash | zsh      # a shell in the container
 clod -i go           # the go image variant (see Image variants)
 clod -H work         # the "work" home (see Homes)
@@ -32,7 +33,7 @@ starting with `-` is an argument.
 `clod help` lists the commands and options. A command's page, with its usage,
 what it does and the options that apply to it, is `clod help COMMAND`, or `-h`
 or `--help` anywhere after the command: `clod home rm -h`. A noun's page lists
-its verbs. The run commands (`claude`, `codex`, `bash`, `zsh`) are the
+its verbs. The run commands (`claude`, `codex`, `opencode`, `bash`, `zsh`) are the
 exception: their arguments go to the program they run, so clod's options go
 before them, `clod claude --help` is Claude Code's help, and `clod help claude`
 is clod's page for it. A usage error names the page to read.
@@ -178,6 +179,23 @@ See [OpenAI's authentication documentation](https://learn.chatgpt.com/docs/auth)
 Codex runs with `--dangerously-bypass-approvals-and-sandbox`, which turns off
 its own sandbox and approval prompts inside the container, including for
 resumed sessions.
+
+## OpenCode
+
+`clod opencode` installs the official `opencode-ai` npm package into the home
+on first run. Settings, provider logins and sessions persist in that home.
+
+```bash
+clod opencode auth login         # connect a provider
+clod opencode                    # start OpenCode
+clod opencode run "explain this project"
+clod default command opencode    # make it the default agent
+```
+
+Arguments go to OpenCode unchanged. clod sets `OPENCODE_PERMISSION` to
+`{"*":"allow"}` by default, so tools run without permission prompts inside
+the container. Set `OPENCODE_PERMISSION` in the project's `.envrc` to choose
+a stricter policy. See the [OpenCode CLI documentation](https://opencode.ai/docs/cli/).
 
 ## Publishing ports
 

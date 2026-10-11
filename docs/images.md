@@ -1,6 +1,7 @@
 # Image variants
 
-The `clod` image is a generic base: Claude Code, Codex, git, the GitHub CLI,
+The `clod` image is a generic base: Claude Code, Codex, OpenCode, git,
+the GitHub CLI,
 Python, Node 26, vim and everyday CLI tools. A variant puts a language,
 compiler or browser on top. clod comes with these, in [`images/`](../images):
 
