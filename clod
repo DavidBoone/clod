@@ -1,6 +1,7 @@
 #!/bin/bash
 # clod: run Claude Code, Codex, OpenCode or a shell in a throwaway Docker
-# container on the current directory. `clod help` describes the commands and options.
+# container on the current directory. `clod help` describes the commands and
+# options.
 #
 # clod refuses to mount your home directory, a directory above it, ~/.clod or
 # anything under ~/.clod/homes as /workspace, since the agent could then read
