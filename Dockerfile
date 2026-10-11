@@ -146,6 +146,7 @@ RUN mkdir -p /workspace && chown claude:claude /workspace
 # serve runs without clod. A separate chmod rather than COPY --chmod, which
 # needs BuildKit; Homebrew's docker on macOS has no buildx, so it builds with
 # the classic builder.
+# The entrypoint installs missing agents into new or existing mounted homes.
 COPY entrypoint.sh /usr/local/bin/clod-entrypoint
 RUN chmod 755 /usr/local/bin/clod-entrypoint
 

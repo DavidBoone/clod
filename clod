@@ -1,5 +1,5 @@
 #!/bin/bash
-# clod: run Claude Code, Codex or a shell in a throwaway Docker container on the
+# clod: run Claude Code, Codex, OpenCode or a shell in a throwaway Docker container on the
 # current directory. `clod help` describes the commands and options.
 #
 # clod refuses to mount your home directory, a directory above it, ~/.clod or
@@ -22,7 +22,7 @@
 #               docs and man pages, built as clod:full); variants that take
 #               ARG BASE are built on the one it names
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
-#               (default), codex, bash or zsh
+#               (default), codex, opencode, bash or zsh
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
 #               space-separated: 8080 (the same on both sides), host:container,
 #               or address:host:container to publish on another address
@@ -121,6 +121,7 @@ read -r -d '' command_table <<'EOF' || true
 Run in the container
 claude|[ARGS...]|Claude Code
 codex|[ARGS...]|Codex
+opencode|[ARGS...]|OpenCode
 bash|[ARGS...]|a bash shell
 zsh|[ARGS...]|a zsh shell
 Images
@@ -173,6 +174,10 @@ to that default command.
 Runs Codex in a throwaway container on the current directory, which is
 mounted as /workspace, with --dangerously-bypass-approvals-and-sandbox. ARGS
 go to Codex unchanged. Codex installs into the home on first run.
+@opencode
+Runs OpenCode in a throwaway container on the current directory, which is
+mounted as /workspace, with all permissions allowed. ARGS go to OpenCode
+unchanged. OpenCode installs into the home on first run.
 @bash
 Runs bash in a throwaway container on the current directory, which is mounted
 as /workspace. ARGS go to bash unchanged: clod bash -c 'make test'.
@@ -329,7 +334,7 @@ EOF
 read -r -d '' settings_table <<'EOF' || true
 image|CLOD_IMAGE|clod|the image or variant a run uses
 base|CLOD_BASE|slim|the Debian image clod's image is built on: slim (debian:trixie-slim) or full (debian:trixie, with docs and man pages)
-command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, bash or zsh
+command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, opencode, bash or zsh
 home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
 ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
@@ -339,7 +344,7 @@ EOF
 
 # The commands that run in the container, the commands (each noun once) and the
 # nouns, whose verbs noun_verbs lists, all from command_table.
-run_commands='claude codex bash zsh'
+run_commands='claude codex opencode bash zsh'
 commands='' nouns=''
 while IFS= read -r row; do
   [[ $row == *'|'* ]] || continue
@@ -416,7 +421,7 @@ help_summary() {
   local row name args summary
   echo 'usage: clod [OPTIONS] [COMMAND [ARGS...]]'
   echo
-  echo 'Runs Claude Code, Codex or a shell in a throwaway container on the current'
+  echo 'Runs Claude Code, Codex, OpenCode or a shell in a throwaway container on the current'
   echo 'directory. With no COMMAND it runs the default command: claude, unless'
   echo 'CLOD_COMMAND or clod default command says otherwise.'
   while IFS= read -r row; do
@@ -427,7 +432,7 @@ help_summary() {
     IFS='|' read -r name args summary <<<"$row"
     [[ $args == - ]] || help_row "$name${args:+ ${args%%;*}}" "$summary"
   done <<<"$command_table"
-  printf '\nOptions, anywhere up to --, but before claude, codex, bash or zsh\n'
+  printf '\nOptions, anywhere up to --, but before claude, codex, opencode, bash or zsh\n'
   help_options clod
   # shellcheck disable=SC2016 # printed as is
   printf "\n'clod COMMAND -h' shows more about COMMAND.\n"

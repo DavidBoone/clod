@@ -1,6 +1,6 @@
 # clod
 
-Run Claude Code or Codex with no permission prompts, safely. `clod` starts the
+Run Claude Code, Codex or OpenCode with no permission prompts, safely. `clod` starts the
 agent in a throwaway Docker container that sees only the directory you run it
 from and a home of its own. Inside, it works without stopping to ask: it
 browses the web, runs whatever tools it needs and installs packages into its
@@ -72,7 +72,7 @@ reach](docs/security.md) goes through this in full.
 
 Everything below is optional; plain `clod` is all most work needs.
 
-- [Using clod](docs/usage.md): the command line, Codex, shells, publishing
+- [Using clod](docs/usage.md): the command line, Codex, OpenCode, shells, publishing
   ports, pasting images, git and GitHub logins, updating and rebuilding
 - [Image variants](docs/images.md): the bundled Go, Rust, Python, .NET, LAMP,
   browser and Docker images, combining them, and writing your own
