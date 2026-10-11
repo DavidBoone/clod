@@ -498,21 +498,38 @@ tildify() {
   esac
 }
 
-# Sets REPLY to path $1 made absolute against $PWD, with . and .. resolved but
-# symlinks kept; the path need not exist.
+# Sets REPLY to path $1 made absolute against $PWD, with . and .. resolved as
+# the filesystem does, so a .. after a symlink leaves the directory it points
+# to; other symlinks are kept, and the path need not exist.
 abspath() {
-  local p=$1 part out=() parts
+  local p=$1 part out=() parts tparts target i=0 links=0
   [[ $p == /* ]] || p=$PWD/$p
   IFS=/ read -ra parts <<< "$p"
-  for part in "${parts[@]}"; do
+  while (( i < ${#parts[@]} )); do
+    part=${parts[i]}
+    i=$(( i + 1 ))
     case $part in
       ''|.) ;;
-      ..) (( ${#out[@]} )) && unset "out[$(( ${#out[@]} - 1 ))]" ;;
+      ..)
+        REPLY=
+        for target in ${out[@]+"${out[@]}"}; do REPLY+=/$target; done
+        if [[ -L $REPLY ]] && (( links++ < 40 )); then
+          # Replace the symlink with its target, then take the .. again.
+          target=$(readlink "$REPLY")
+          unset "out[$(( ${#out[@]} - 1 ))]"
+          [[ $target == /* ]] && out=()
+          IFS=/ read -ra tparts <<< "$target"
+          parts=(${tparts[@]+"${tparts[@]}"} .. "${parts[@]:i}")
+          i=0
+        elif (( ${#out[@]} )); then
+          unset "out[$(( ${#out[@]} - 1 ))]"
+        fi
+        ;;
       *) out+=("$part") ;;
     esac
   done
   REPLY=
-  for part in "${out[@]}"; do REPLY+=/$part; done
+  for part in ${out[@]+"${out[@]}"}; do REPLY+=/$part; done
   [[ -n $REPLY ]] || REPLY=/
 }
 

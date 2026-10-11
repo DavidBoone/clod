@@ -193,6 +193,10 @@ test_workspace() {
   exits 1 clod -w ~ bash -c true 2>&1 | has 'refusing to mount'
   mkdir -p ~/.clod/homes/x
   exits 1 clod -w ~/.clod/homes/x bash -c true 2>&1 | has 'refusing to mount'
+  # .. after a symlink is the parent of where it points
+  mkdir -p elsewhere/sub
+  ln -s "$here/elsewhere/sub" proj/link
+  clod -w proj/link/.. env | has "^workspace: *$here/elsewhere\$"
   cd ~
   clod -w "$here/proj" bash -c 'test "$(cat /workspace/file)" = from-proj && test "$FOO" = proj'
   # a volume workspace is claude's, kept between runs, and reads no .envrc
@@ -594,6 +598,12 @@ test_home_new() {
   exits 2 clod home new
   exits 2 clod home new a b
   clod --force home rm vol:ntest >/dev/null
+  # .. after a symlink is the parent of where it points
+  mkdir -p elsewhere/sub
+  ln -s "$PWD/elsewhere/sub" link
+  clod home new ./link/../linked >/dev/null
+  test -d elsewhere/linked
+  test ! -e linked
 }
 
 test_volume_workspace() {
