@@ -1,4 +1,4 @@
-# Generic base for running Claude Code and Codex, with everyday CLI tools.
+# Generic base for Claude Code, Codex and OpenCode, with everyday CLI tools.
 # Languages, compilers and browsers go in variants built FROM clod (see
 # docs/images.md). BASE can instead name another Debian or Ubuntu image, such
 # as one with a project's toolchain, to add clod's layer to: its PATH and other
@@ -146,7 +146,6 @@ RUN mkdir -p /workspace && chown claude:claude /workspace
 # serve runs without clod. A separate chmod rather than COPY --chmod, which
 # needs BuildKit; Homebrew's docker on macOS has no buildx, so it builds with
 # the classic builder.
-# The entrypoint installs missing agents into new or existing mounted homes.
 COPY entrypoint.sh /usr/local/bin/clod-entrypoint
 RUN chmod 755 /usr/local/bin/clod-entrypoint
 

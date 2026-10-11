@@ -51,7 +51,7 @@ Where it runs:
 
 The container defines what the agent can reach; within it, the agent runs unrestricted:
 
-- Claude Code runs with `--dangerously-skip-permissions` unless its arguments choose a permission mode, Codex with `--dangerously-bypass-approvals-and-sandbox`, and OpenCode with `OPENCODE_PERMISSION='{"*":"allow"}'`
+- Claude Code runs with `--dangerously-skip-permissions` unless its arguments choose a permission mode, Codex with `--dangerously-bypass-approvals-and-sandbox`, and OpenCode with `OPENCODE_PERMISSION='{"*":"allow"}'` unless the environment sets it
 - The workspace and the whole container home (`~/.clod/homes/<name>`, not the user's own home) are mounted read-write. A new home starts empty and holds only what the user gives it (logins made in the container, copied keys), and all of that is visible to the agent; so are the variables passed in from the `.envrc`
 - The container has normal outbound network access and can reach host services via `host.docker.internal`
 - With `--clipboard`, the agent can read the host clipboard's image whenever it likes during the run

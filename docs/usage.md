@@ -180,6 +180,23 @@ Codex runs with `--dangerously-bypass-approvals-and-sandbox`, which turns off
 its own sandbox and approval prompts inside the container, including for
 resumed sessions.
 
+## OpenCode
+
+`clod opencode` installs the official `opencode-ai` npm package into the home
+on first run. Settings, provider logins and sessions persist in that home.
+
+```bash
+clod opencode auth login         # connect a provider
+clod opencode                    # start OpenCode
+clod opencode run "explain this project"
+clod default command opencode    # make it the default agent
+```
+
+Arguments go to OpenCode unchanged. clod sets `OPENCODE_PERMISSION` to
+`{"*":"allow"}` by default, so tools run without permission prompts inside
+the container. Set `OPENCODE_PERMISSION` in the project's `.envrc` to choose
+a stricter policy. See the [OpenCode CLI documentation](https://opencode.ai/docs/cli/).
+
 ## Publishing ports
 
 To reach a server the agent starts, such as a dev server on port 5173, publish
@@ -295,23 +312,3 @@ Everything clod keeps is under `~/.clod`:
   images/<name>/      your image variants
   shared/             your shared config, mounted read-only as /etc/claude-code
 ```
-
-## OpenCode
-
-`clod opencode` installs the official `opencode-ai` npm package into the home
-on first run. This works with existing homes too: `clod -H work opencode`
-adds OpenCode to the `work` home while keeping its files and other agent logins.
-The installer is part of the image's entrypoint; the launcher also mounts the
-current entrypoint on each run, so an existing image can use it immediately.
-Settings, provider logins and sessions persist in that home.
-
-```bash
-clod opencode auth login         # connect a provider
-clod opencode                    # start OpenCode
-clod opencode run "explain this project"
-clod default command opencode    # make it the default agent
-```
-
-Arguments go to OpenCode unchanged. clod sets `OPENCODE_PERMISSION` to
-`{"*":"allow"}` for the run, so tools run without permission prompts inside
-the container. See the [OpenCode CLI documentation](https://opencode.ai/docs/cli/).

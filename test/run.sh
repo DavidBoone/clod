@@ -261,6 +261,7 @@ test_opencode() {
   # remain available on later runs (including an ordinary shell).
   mkdir -p ~/.clod/homes/opencode-existing
   clod -H opencode-existing bash -c '
+    set -e
     mkdir -p ~/.config
     echo keep > ~/.config/existing-settings
     test ! -e ~/.local/bin/opencode
@@ -268,6 +269,7 @@ test_opencode() {
   clod -H opencode-existing opencode --version | tee out
   has -E '[0-9]+\.[0-9]+\.[0-9]+' out
   clod -H opencode-existing bash -c '
+    set -e
     test "$(cat ~/.config/existing-settings)" = keep
     test -x ~/.local/bin/opencode
     opencode --version
@@ -281,8 +283,15 @@ test_opencode() {
 printf '%s\n' "$OPENCODE_PERMISSION" "$@"
 EOF
   chmod +x ~/.clod/homes/opencode-args/.local/bin/opencode
+  mkdir -p ~/.clod/homes/opencode-args/.local/share/opencode
+  echo '{"provider":{"type":"api","key":"test"}}' > ~/.clod/homes/opencode-args/.local/share/opencode/auth.json
+  clod home | has -E 'opencode-args +[-] +[-] +yes$'
   clod -H opencode-args opencode run 'a prompt' --model provider/model > out
   test "$(cat out)" = "$(printf '%s\n' '{"*":"allow"}' run 'a prompt' --model provider/model)"
+  echo 'export OPENCODE_PERMISSION='"'"'{"*":"ask"}'"'" > .envrc
+  direnv allow
+  clod -H opencode-args opencode run 'a prompt' > out
+  test "$(head -1 out)" = '{"*":"ask"}'
 }
 
 test_statusline() {

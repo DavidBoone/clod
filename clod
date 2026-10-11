@@ -1,6 +1,6 @@
 #!/bin/bash
-# clod: run Claude Code, Codex, OpenCode or a shell in a throwaway Docker container on the
-# current directory. `clod help` describes the commands and options.
+# clod: run Claude Code, Codex, OpenCode or a shell in a throwaway Docker
+# container on the current directory. `clod help` describes the commands and options.
 #
 # clod refuses to mount your home directory, a directory above it, ~/.clod or
 # anything under ~/.clod/homes as /workspace, since the agent could then read
@@ -176,8 +176,8 @@ mounted as /workspace, with --dangerously-bypass-approvals-and-sandbox. ARGS
 go to Codex unchanged. Codex installs into the home on first run.
 @opencode
 Runs OpenCode in a throwaway container on the current directory, which is
-mounted as /workspace, with all permissions allowed. ARGS go to OpenCode
-unchanged. OpenCode installs into the home on first run.
+mounted as /workspace, with all permissions allowed unless OPENCODE_PERMISSION
+is set. ARGS go to OpenCode unchanged. OpenCode installs into the home on first run.
 @bash
 Runs bash in a throwaway container on the current directory, which is mounted
 as /workspace. ARGS go to bash unchanged: clod bash -c 'make test'.
@@ -421,8 +421,8 @@ help_summary() {
   local row name args summary
   echo 'usage: clod [OPTIONS] [COMMAND [ARGS...]]'
   echo
-  echo 'Runs Claude Code, Codex, OpenCode or a shell in a throwaway container on the current'
-  echo 'directory. With no COMMAND it runs the default command: claude, unless'
+  echo 'Runs Claude Code, Codex, OpenCode or a shell in a throwaway container on'
+  echo 'the current directory. With no COMMAND it runs claude, unless'
   echo 'CLOD_COMMAND or clod default command says otherwise.'
   while IFS= read -r row; do
     if [[ $row != *'|'* ]]; then
@@ -2435,20 +2435,21 @@ cmd_image_prune() {
 # Prints a row for home $1 (a directory or vol:NAME), labelled $2. A volume's
 # logins aren't on the host, so they show as ?.
 home_row() {
-  local mark=' ' claude=- codex=-
+  local mark=' ' claude=- codex=- opencode=-
   [[ $1 == "$home" ]] && mark='*'
   if [[ $1 == vol:* ]]; then
-    claude='?' codex='?'
+    claude='?' codex='?' opencode='?'
   else
     [[ -s $1/.claude/.credentials.json ]] && claude=yes
     [[ -s $1/.codex/auth.json ]] && codex=yes
+    [[ -s $1/.local/share/opencode/auth.json ]] && opencode=yes
   fi
-  printf '%s %-20s %-7s %s\n' "$mark" "$2" "$claude" "$codex"
+  printf '%s %-20s %-7s %-7s %s\n' "$mark" "$2" "$claude" "$codex" "$opencode"
 }
 
 cmd_home() {
   local d v listed=''
-  printf '  %-20s %-7s %s\n' HOME CLAUDE CODEX
+  printf '  %-20s %-7s %-7s %s\n' HOME CLAUDE CODEX OPENCODE
   for d in "$clod_dir"/homes/*; do
     [[ -d $d ]] || continue
     home_row "$d" "$(basename "$d")"
