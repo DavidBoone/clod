@@ -26,6 +26,17 @@ case "${1:-}" in
         }
         exec codex --dangerously-bypass-approvals-and-sandbox "$@"
         ;;
+    opencode)
+        shift
+        # Installed into the mounted home so OpenCode and its login persist.
+        command -v opencode >/dev/null || {
+            echo "clod: installing OpenCode into this home..." >&2
+            npm install --global opencode-ai
+        }
+        OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-'{"*":"allow"}'}
+        export OPENCODE_PERMISSION
+        exec opencode "$@"
+        ;;
     bash|zsh)
         shell=$1
         shift
