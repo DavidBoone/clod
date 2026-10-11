@@ -30,7 +30,7 @@ export LC_ALL=C.UTF-8
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex statusline
   port port-busy clipboard show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
-  multi-stage combine image-add live-files rebuild image-edit image-diff image-rm image-clean image-prune devcontainer-names
+  multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
@@ -1004,6 +1004,65 @@ test_rebuild() {
     "$(printf 'clod: first is up to date\nclod: first+second is up to date')"
   # the build alias, with its note on stderr only
   test "$(clod build first 2>/dev/null)" = 'clod: first is up to date'
+}
+
+# CLOD_BASE picks the Debian image the base is built on: slim by default, as
+# clod, or full, as clod:full, beside it; variants whose ARG BASE
+# defaults to clod follow it, and those built on them.
+test_base_full() {
+  local slim full
+  clod env | has '^base: *slim '
+  CLOD_BASE=full clod env | has '^base: *full (debian:trixie, as clod:full)$'
+  CLOD_BASE=full clod env | has '^image: *clod:full$'
+  exits 1 env CLOD_BASE=huge clod env
+  exits 2 clod default base huge
+  clod default base full | has '^base  *full .*config'
+  clod env | has '^base: *full '
+  clod default base --reset
+  test "$(completes default base '' | grep -v -- --reset | tr '\n' ' ')" = 'slim full '
+  mkdir standin
+  cp "$repo/clod" "$repo/entrypoint.sh" "$repo/container.md" "$repo/clipboard.sh" standin/
+  cp -R "$repo/plugins" standin/
+  printf 'ARG BASE=debian:trixie-slim\nFROM $BASE\nARG BASE\nRUN echo "$BASE" > /from\n' > standin/Dockerfile
+  standin/clod image build
+  CLOD_BASE=full standin/clod image build 2>&1 | tee out
+  has 'building clod:full\.\.\.' < out
+  test "$(docker run --rm clod cat /from)" = debian:trixie-slim
+  test "$(docker run --rm clod:full cat /from)" = debian:trixie
+  docker run --rm clod test -e /etc/dpkg/dpkg.cfg.d/docker
+  exits 1 docker run --rm clod:full test -e /etc/dpkg/dpkg.cfg.d/docker
+  # each base keeps its own hash, so switching rebuilds neither
+  slim=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' clod)
+  full=$(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' clod:full)
+  [[ -n $slim && -n $full && $slim != "$full" ]]
+  test "$(standin/clod image build 2>&1)" = 'clod: clod is up to date'
+  test "$(CLOD_BASE=full standin/clod image build 2>&1)" = 'clod: clod:full is up to date'
+  standin/clod image | has '^\* clod  *built'
+  CLOD_BASE=full standin/clod image | has '^\* clod:full  *built  *bundled (base, for CLOD_BASE=full)$'
+  # a variant that takes ARG BASE is built on the base CLOD_BASE picks
+  mkdir -p ~/.clod/images/onbase
+  printf 'ARG BASE=clod\nFROM $BASE\n' > ~/.clod/images/onbase/Dockerfile
+  CLOD_BASE=full standin/clod -i onbase image build
+  test "$(docker run --rm clod-onbase cat /from)" = debian:trixie
+  CLOD_BASE=full standin/clod image show onbase | has '^onbase  *built  *clod:full  '
+  CLOD_BASE=full standin/clod image show onbase | has '^clod:full  *built  *debian:trixie  '
+  standin/clod image show onbase | has '^onbase  *stale  *clod  '
+  standin/clod -i onbase image build
+  test "$(docker run --rm clod-onbase cat /from)" = debian:trixie-slim
+  # a variant on another variant gets the base through it, and one FROM clod
+  # or another default stays where it says
+  mkdir -p ~/.clod/images/ononbase ~/.clod/images/fixed ~/.clod/images/other
+  printf 'ARG BASE=clod-onbase\nFROM $BASE\n' > ~/.clod/images/ononbase/Dockerfile
+  printf 'FROM clod\n' > ~/.clod/images/fixed/Dockerfile
+  printf 'ARG BASE=debian:trixie\nFROM $BASE\n' > ~/.clod/images/other/Dockerfile
+  CLOD_BASE=full standin/clod image show ononbase | has '^ononbase  *[^ ]*  *onbase  '
+  CLOD_BASE=full standin/clod image show ononbase | has '^onbase  *[^ ]*  *clod:full  '
+  CLOD_BASE=full standin/clod -i ononbase env | has '^base: *full '
+  CLOD_BASE=full standin/clod -i fixed env | has '^base: *slim '
+  CLOD_BASE=full standin/clod image show other | has '^other  *[^ ]*  *debian:trixie  '
+  if CLOD_BASE=full standin/clod -i other env | has '^base:'; then false; fi
+  standin/clod image clean onbase clod:full
+  rm -r ~/.clod/images/onbase ~/.clod/images/ononbase ~/.clod/images/fixed ~/.clod/images/other
 }
 
 # image rm deletes your variants and the images built from them, asking first

@@ -17,6 +17,10 @@
 #               clod-<name>; variants combined as a+b, b built on a (as the
 #               Docker image clod-a.b);
 #               or any local docker image
+#   CLOD_BASE   the Debian image the clod image is built on: slim (default,
+#               debian:trixie-slim, built as clod) or full (debian:trixie, with
+#               docs and man pages, built as clod:full); variants that take
+#               ARG BASE are built on the one it names
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
 #               (default), codex, bash or zsh
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
@@ -324,6 +328,7 @@ EOF
 # the order clod default lists them.
 read -r -d '' settings_table <<'EOF' || true
 image|CLOD_IMAGE|clod|the image or variant a run uses
+base|CLOD_BASE|slim|the Debian image clod's image is built on: slim (debian:trixie-slim) or full (debian:trixie, with docs and man pages)
 command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, bash or zsh
 home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
@@ -834,10 +839,66 @@ files_hash() {
 # Prints the hash the clod image is labelled with when built from its files.
 # entrypoint.sh, container.md, clipboard.sh and plugins are left out: runs
 # mount them from the checkout, so a change to any of them needs no build,
-# which would also rebuild every variant on top.
+# which would also rebuild every variant on top. Further build arguments, $@,
+# are folded in after base_args.
 base_hash() {
   { cat "$base_dir/Dockerfile"
-    printf '%s\n' "${base_args[*]}"; } | $sum | cut -d' ' -f1
+    printf '%s\n' "${base_args[*]}"
+    if (( $# )); then printf '%s\n' "$*"; fi; } | $sum | cut -d' ' -f1
+}
+
+# The base image built on debian:trixie, for CLOD_BASE=full; the slim one,
+# from the Dockerfile's default BASE, is clod. base_tag is the one CLOD_BASE
+# selects.
+full_tag=clod:full full_from=debian:trixie base_tag=clod
+
+# True when $1 is a base image, clod or clod:full. Sets base_build to the
+# build arguments it takes beyond base_args.
+is_base() {
+  base_build=()
+  case $1 in
+    clod) ;;
+    "$full_tag") base_build=(--build-arg "BASE=$full_from") ;;
+    *) return 1 ;;
+  esac
+}
+
+# Sets REPLY to the image variant directory $1 is built on when first in its
+# chain: base_tag when that isn't clod and the Dockerfile's ARG BASE defaults
+# to clod, else nothing, leaving its own FROM as it is.
+root_base() {
+  REPLY=''
+  [[ $base_tag != clod ]] || return 0
+  awk 'toupper($1) == "FROM" { exit } toupper($1) == "ARG" && $2 ~ /^BASE=/ { v = substr($2, 6); gsub(/^"|"$/, "", v) }
+    END { exit v != "clod" }' "$1/Dockerfile" && REPLY=$base_tag
+  return 0
+}
+
+# Sets REPLY to the base image, clod or clod:full, image $1 is built on, or to
+# nothing when it is on neither. $2 counts the images above it.
+chain_base() {
+  local dir base parent parents=() depth=${2:-0}
+  REPLY=''
+  if is_base "$1"; then
+    REPLY=$1
+    return 0
+  fi
+  (( depth < 20 )) || return 0
+  [[ ${1#clod-} =~ $dc_re ]] && return 0
+  tag_variant "$1"
+  dir=$REPLY base=$variant_base
+  REPLY=''
+  [[ -n $dir ]] || return 0
+  [[ -n $base ]] || { root_base "$dir"; base=$REPLY; }
+  while IFS= read -r parent; do
+    parents+=("$parent")
+  done < <(variant_parents "$dir" "$base")
+  for parent in ${parents[@]+"${parents[@]}"}; do
+    [[ $parent == clod || $parent == "$full_tag" || $parent == clod-* ]] || continue
+    chain_base "$parent" $(( depth + 1 ))
+    [[ -n $REPLY ]] && return 0
+  done
+  REPLY=''
 }
 
 # Prints the hash a variant from directory $1, FROM images $2..., is labelled
@@ -1015,10 +1076,10 @@ walk_image() {
     done
     walked+=("$tag")
   fi
-  if [[ $tag == clod ]]; then
+  if is_base "$tag"; then
     [[ -n $base_dir ]] || return 0
-    dir=$base_dir hash=$(base_hash)
-    build_args=(${base_args[@]+"${base_args[@]}"})
+    dir=$base_dir hash=$(base_hash ${base_build[@]+"${base_build[@]}"})
+    build_args=(${base_args[@]+"${base_args[@]}"} ${base_build[@]+"${base_build[@]}"})
     [[ $verb == rebuild ]] && build_args+=(--pull)
   elif [[ ${tag#clod-} =~ $dc_re ]]; then
     # A devcontainer image, at the root of its chain. One whose config file has
@@ -1042,13 +1103,14 @@ walk_image() {
     dir=$REPLY base=$variant_base
     REPLY=built
     [[ -n $dir ]] || return 0
+    [[ -n $base ]] || { root_base "$dir"; base=$REPLY; }
     [[ -n $base ]] && build_args=(--build-arg "BASE=$base")
     while IFS= read -r parent; do
       parents+=("$parent")
     done < <(variant_parents "$dir" "$base")
     walking+=("$tag")
     for parent in ${parents[@]+"${parents[@]}"}; do
-      [[ $parent == clod || $parent == clod-* ]] || continue
+      [[ $parent == clod || $parent == "$full_tag" || $parent == clod-* ]] || continue
       walk_image "$parent" "$mode"
       [[ $REPLY == built ]] || stale=1
     done
@@ -1338,7 +1400,7 @@ add_variants() {
     fi
     added+=$part+
   done
-  if [[ $image == clod ]]; then
+  if is_base "$image"; then
     image=$image_add
   else
     image+=+$image_add
@@ -1348,13 +1410,19 @@ add_variants() {
 # Sets tag to the image to run, image to its name, and variant_dir to the
 # directory of the variant it is built from (the last, for a combination), or
 # to nothing. A variant NAME is built as clod-NAME, and a combination A+B, B
-# built on A, as clod-A.B; image becomes NAME or A+B. image_dc is the
+# built on A, as clod-A.B; image becomes NAME or A+B. The base image is clod,
+# or clod:full with CLOD_BASE=full (base_tag). image_dc is the
 # devcontainer image at the root of its chain, if there is one; a devcontainer
 # the workspace doesn't have is an error only for what needs the image
 # (need_image), so other commands still work.
 setup_image() {
   local spec
   image=${CLOD_IMAGE:-clod} image_dc='' image_error='' dc_note=''
+  case ${CLOD_BASE:-slim} in
+    slim) base_tag=clod ;;
+    full) base_tag=$full_tag ;;
+    *) echo "clod: CLOD_BASE is '$CLOD_BASE'; it must be slim or full" >&2; exit 1 ;;
+  esac
   case ${CLOD_DEVCONTAINER:-off} in
     off) ;;
     auto)
@@ -1397,6 +1465,8 @@ setup_image() {
     variant_dir=$REPLY image_dc=$variant_dc
   else
     tag=$image variant_dir=''
+    # The base image is the one CLOD_BASE selects, shown as its Docker name.
+    [[ $tag == clod ]] && tag=$base_tag image=$base_tag
   fi
 }
 
@@ -1843,6 +1913,10 @@ cmd_complete() {
     case ${#cmd_args[@]}:${cmd_args[0]} in
       0:*) table_items settings; offer "${items[@]}" $'edit\topen ~/.clod/config in your editor' ;;
       1:image) offer_images; offer "$reset" ;;
+      1:base)
+        offer $'slim\tdebian:trixie-slim, without docs or man pages' \
+          $'full\tdebian:trixie, with docs and man pages' "$reset"
+        ;;
       1:command) table_items run; offer "${items[@]}" "$reset" ;;
       1:home) [[ -n $path_like ]] && return 1; offer $homes "$reset" ;;
       1:ports) offer "$reset" ;;
@@ -1884,8 +1958,8 @@ cmd_complete() {
       # The images clod built, named as clod image lists them; of the
       # devcontainer images, the current directory's.
       image:clean)
-        offer $(docker image ls --filter label=clod.hash --format '{{.Repository}}' 2>/dev/null |
-          sed -n 's/^clod-//p; /^clod$/p' | grep -v '^devcontainer-' | tr . + | sort -u)
+        offer $(docker image ls --filter label=clod.hash --format '{{.Repository}}:{{.Tag}}' 2>/dev/null |
+          sed -n "s/:latest\$//; s/^clod-//p; /^clod\$/p; /^$full_tag\$/p" | grep -v '^devcontainer-' | tr . + | sort -u)
         workspace=$PWD scratch=''
         find_devcontainer "$PWD" ''
         for word in '' $dc_names; do
@@ -2054,6 +2128,9 @@ cmd_default() {
       ports-busy)
         is_one_of "$value" 'skip next error' || usage_error "ports-busy is one of skip, next, error"
         ;;
+      base)
+        is_one_of "$value" 'slim full' || usage_error "base is slim or full"
+        ;;
       clipboard)
         is_one_of "$value" 'on off' || usage_error "clipboard is on or off"
         ;;
@@ -2106,10 +2183,11 @@ image_chain() {
     [[ $t == "$tag" ]] && return 0
   done
   chain_seen+=("$tag")
-  if [[ $tag == clod ]]; then
+  if is_base "$tag"; then
     dir=$base_dir
     src=$([[ -n $dir ]] && tildify "$dir/Dockerfile" || echo 'local image')
     src+=' (base)'
+    [[ $tag == "$full_tag" ]] && base=$full_from
   elif [[ ${tag#clod-} =~ $dc_re ]]; then
     dir=''
     dc_label "$tag"
@@ -2119,6 +2197,7 @@ image_chain() {
     tag_variant "$tag"
     dir=$REPLY base=$variant_base
     src=$([[ -n $dir ]] && tildify "$dir/Dockerfile" || echo 'local image')
+    [[ -n $dir && -z $base ]] && root_base "$dir" && base=$REPLY
   fi
   if [[ -n $dir ]]; then
     while IFS= read -r parent; do
@@ -2132,7 +2211,7 @@ image_chain() {
   image_name "$tag"
   chain_rows+=("$REPLY" "$state" "${from:--}" "$src")
   for parent in ${parents[@]+"${parents[@]}"}; do
-    [[ $parent == clod || $parent == clod-* ]] && image_chain "$parent"
+    [[ $parent == clod || $parent == "$full_tag" || $parent == clod-* ]] && image_chain "$parent"
   done
   return 0
 }
@@ -2142,7 +2221,9 @@ image_chain() {
 cmd_image_show() {
   local tag i w=(4 5 4)
   if [[ $1 == clod ]]; then
-    tag=clod
+    tag=$base_tag
+  elif [[ $1 == "$full_tag" ]]; then
+    tag=$1
   else
     resolve_variant "$1"
     tag=$REPLY
@@ -2170,6 +2251,9 @@ cmd_image() {
   any_stale='' any_used=''
   names=(clod) tags=(clod)
   srcs=("$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)")
+  if [[ -n $base_dir ]]; then
+    names+=("$full_tag") tags+=("$full_tag") srcs+=("bundled (base, for CLOD_BASE=full)")
+  fi
   for n in $(variant_names); do
     if [[ -f $clod_dir/images/$n/Dockerfile ]]; then
       src=$(tildify "$clod_dir/images/$n")
@@ -2253,7 +2337,7 @@ cmd_image_rm() {
     is_one_of "$name" "${dirs[*]##*/}" && continue
     dir=$clod_dir/images/$name
     if [[ ! $name =~ $name_re || ! -d $dir ]]; then
-      if [[ $name == clod || $name == devcontainer* || $name == *+* || -f $script_dir/images/$name/Dockerfile ]]; then
+      if [[ $name == clod || $name == "$full_tag" || $name == devcontainer* || $name == *+* || -f $script_dir/images/$name/Dockerfile ]]; then
         echo "clod: $name has no variant of yours to delete; clod image clean $name removes its built image" >&2
       else
         echo "clod: no variant of yours named '$name' (clod image lists them)" >&2
@@ -2297,7 +2381,8 @@ cmd_image_clean() {
   for name; do
     n=${name//+/.}
     t=clod-${n#clod-}
-    [[ $name == clod ]] && t=clod
+    [[ $name == clod ]] && t=$base_tag
+    [[ $name == "$full_tag" ]] && t=$name
     if [[ $name == devcontainer || $name == devcontainer[:+]* ]]; then
       resolve_variant "$name"
       t=$REPLY
@@ -2328,9 +2413,9 @@ cmd_image_prune() {
     walk_image "$t" state
     [[ $REPLY == stale ]] || continue
     if in_use "$t"; then used+=("$t"); else stale+=("$t"); fi
-  done < <(docker image ls --filter label=clod.hash --format '{{.Repository}}' |
-    grep -E '^clod(-|$)' | sort -u |
-    awk '{ n = $0 == "clod" ? -1 : gsub(/\./, "."); print n "\t" $0 }' | sort -rn | cut -f2)
+  done < <(docker image ls --filter label=clod.hash --format '{{.Repository}}:{{.Tag}}' |
+    sed 's/:latest$//' | grep -E "^clod(-[^:]*|)$|^$full_tag$" | sort -u |
+    awk '{ n = $0 ~ /^clod(:|$)/ ? -1 : gsub(/\./, "."); print n "\t" $0 }' | sort -rn | cut -f2)
   for t in ${stale[@]+"${stale[@]}"}; do
     remove_tag "$t"
   done
@@ -2823,7 +2908,7 @@ cmd_image_edit() {
     name=$REPLY
   fi
   name=${name#clod-}
-  if [[ $name == clod ]]; then
+  if is_base "$name"; then
     echo "clod: the base image is clod's own; build on it with a variant: clod image new NAME" >&2
     exit 1
   fi
@@ -2885,6 +2970,13 @@ cmd_env() {
   else
     field image "$image${variant_dir:+ ($(tildify "$variant_dir"))}"
   fi
+  if [[ -z $image_error && -z $image_dc ]] && { is_base "$tag" || [[ -n $variant_dir ]]; }; then
+    chain_base "$tag"
+    case $REPLY in
+      clod) field base "slim (debian:trixie-slim, as clod)" ;;
+      "$full_tag") field base "full ($full_from, as $full_tag)" ;;
+    esac
+  fi
   # A devcontainer the run doesn't use.
   if [[ -z $image_dc && -z $image_error && -z $scratch && $workspace != vol:* ]]; then
     find_devcontainer "$workspace" ''
@@ -2943,7 +3035,9 @@ cmd_image_build() {
   (( ${#names[@]} )) || names=("$image")
   for name; do
     if [[ $name == clod ]]; then
-      t=clod
+      t=$base_tag
+    elif [[ $name == "$full_tag" ]]; then
+      t=$name
     else
       resolve_variant "$name"
       t=$REPLY
@@ -3118,7 +3212,7 @@ cmd_run() {
 
   if [[ -n $skip_build ]] && docker image inspect "$tag" >/dev/null 2>&1; then
     echo "clod: running $image as built" >&2
-  elif [[ $tag == clod || -n $variant_dir || -n $image_dc ]]; then
+  elif is_base "$tag" || [[ -n $variant_dir || -n $image_dc ]]; then
     walk_image "$tag" build
   elif ! docker image inspect "$tag" >/dev/null 2>&1; then
     variants=$(variant_names | tr '\n' ' ')
