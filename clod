@@ -177,7 +177,8 @@ go to Codex unchanged. Codex installs into the home on first run.
 @opencode
 Runs OpenCode in a throwaway container on the current directory, which is
 mounted as /workspace, with all permissions allowed unless OPENCODE_PERMISSION
-is set. ARGS go to OpenCode unchanged. OpenCode installs into the home on first run.
+is set. ARGS go to OpenCode unchanged. OpenCode installs into the home on
+first run.
 @bash
 Runs bash in a throwaway container on the current directory, which is mounted
 as /workspace. ARGS go to bash unchanged: clod bash -c 'make test'.
