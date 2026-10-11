@@ -847,12 +847,41 @@ is_base() {
 }
 
 # Sets REPLY to the image variant directory $1 is built on when first in its
-# chain: base_tag when that isn't clod and the Dockerfile takes ARG BASE, else
-# nothing, leaving its own FROM as it is.
+# chain: base_tag when that isn't clod and the Dockerfile's ARG BASE defaults
+# to clod, else nothing, leaving its own FROM as it is.
 root_base() {
   REPLY=''
-  [[ $base_tag != clod ]] && takes_base "$1" && REPLY=$base_tag
+  [[ $base_tag != clod ]] || return 0
+  awk 'toupper($1) == "FROM" { exit } toupper($1) == "ARG" && $2 ~ /^BASE=/ { v = substr($2, 6); gsub(/^"|"$/, "", v) }
+    END { exit v != "clod" }' "$1/Dockerfile" && REPLY=$base_tag
   return 0
+}
+
+# Sets REPLY to the base image, clod or clod:full, image $1 is built on, or to
+# nothing when it is on neither. $2 counts the images above it.
+chain_base() {
+  local dir base parent parents=() depth=${2:-0}
+  REPLY=''
+  if is_base "$1"; then
+    REPLY=$1
+    return 0
+  fi
+  (( depth < 20 )) || return 0
+  [[ ${1#clod-} =~ $dc_re ]] && return 0
+  tag_variant "$1"
+  dir=$REPLY base=$variant_base
+  REPLY=''
+  [[ -n $dir ]] || return 0
+  [[ -n $base ]] || { root_base "$dir"; base=$REPLY; }
+  while IFS= read -r parent; do
+    parents+=("$parent")
+  done < <(variant_parents "$dir" "$base")
+  for parent in ${parents[@]+"${parents[@]}"}; do
+    [[ $parent == clod || $parent == "$full_tag" || $parent == clod-* ]] || continue
+    chain_base "$parent" $(( depth + 1 ))
+    [[ -n $REPLY ]] && return 0
+  done
+  REPLY=''
 }
 
 # Prints the hash a variant from directory $1, FROM images $2..., is labelled
@@ -2925,11 +2954,11 @@ cmd_env() {
     field image "$image${variant_dir:+ ($(tildify "$variant_dir"))}"
   fi
   if [[ -z $image_error && -z $image_dc ]] && { is_base "$tag" || [[ -n $variant_dir ]]; }; then
-    if [[ $tag == clod || $tag != "$full_tag" && $base_tag == clod ]]; then
-      field base "slim (debian:trixie-slim, as clod)"
-    else
-      field base "full ($full_from, as $full_tag)"
-    fi
+    chain_base "$tag"
+    case $REPLY in
+      clod) field base "slim (debian:trixie-slim, as clod)" ;;
+      "$full_tag") field base "full ($full_from, as $full_tag)" ;;
+    esac
   fi
   # A devcontainer the run doesn't use.
   if [[ -z $image_dc && -z $image_error && -z $scratch && $workspace != vol:* ]]; then

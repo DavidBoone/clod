@@ -142,10 +142,12 @@ clod default base slim    # debian:trixie-slim, built as clod (the default)
 keeps them (the `man` command itself isn't installed). The two are separate
 images, `clod` and `clod:full`, so switching between them builds each only
 once. `clod image` lists both, `clod env` shows which a
-run uses, and `-i clod` names whichever `CLOD_BASE` picks. Variants that take
-`ARG BASE`, the bundled ones and those `clod image new` starts, are built on
-it, keeping their names (`clod-go`), so switching rebuilds them on their next
-run. A variant whose `Dockerfile` says `FROM clod` stays on the slim base.
+run uses, and `-i clod` names whichever `CLOD_BASE` picks. Variants whose
+`ARG BASE` defaults to `clod`, the bundled ones and those `clod image new`
+starts, are built on it, keeping their names (`clod-go`), so switching rebuilds
+them on their next run; a variant built on another variant gets it through
+that one. A variant whose `Dockerfile` says `FROM clod` stays on the slim base,
+and one whose `ARG BASE` defaults to another image stays on that.
 `CLOD_BASE` doesn't apply to a devcontainer, which is its own base.
 
 ## Devcontainers
