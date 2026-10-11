@@ -86,7 +86,7 @@ exits() {
 test_lint() {
   cd "$repo"
   shellcheck clod completions/clod.bash entrypoint.sh clipboard.sh shared/statusline.sh docs/statusline-svg.sh \
-    test/run.sh test/incus.sh test/docker.sh
+    test/run.sh test/incus.sh test/docker.sh test/host.sh
 }
 
 test_env() {
