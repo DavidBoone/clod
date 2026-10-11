@@ -373,7 +373,7 @@ command -v shasum >/dev/null && sum=shasum || sum=sha1sum
 # host user's ids there.
 base_args=()
 [[ $OSTYPE == linux* ]] &&
-  base_args=(--build-arg "CLOD_UID=$(id -u)" --build-arg "CLOD_GID=$(id -g)")
+  base_args=(--build-arg "CLOD_UID=$(id -u)" --build-arg "CLOD_GID=$(id -g "$(id -un)")")
 
 # Prints clod's version: its checkout's commit, or a tag when there is one.
 clod_version() {
@@ -2911,7 +2911,7 @@ cmd_env() {
   fi
   field tz "${tz:-UTC}"
   [[ -n $envrc ]] && field envrc "$(tildify "$envrc")"
-  [[ $OSTYPE == linux* ]] && field user "claude as $(id -u):$(id -g)"
+  [[ $OSTYPE == linux* ]] && field user "claude as $(id -u):$(id -g "$(id -un)")"
   [[ -n $shared_dir ]] && field shared "$(tildify "$shared_dir")"
   if (( ${#port_args[@]} )); then
     shown=''

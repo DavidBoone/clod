@@ -91,6 +91,11 @@ test_lint() {
 
 test_env() {
   clod env
+  # claude takes the login group, not the one newgrp or sg gives the shell
+  mkdir fakeid
+  printf '#!/bin/sh\n[ "$*" = -g ] && { echo 4242; exit; }\nexec /usr/bin/id "$@"\n' > fakeid/id
+  chmod +x fakeid/id
+  PATH=$PWD/fakeid:$PATH clod env | has -x "user: *claude as $(id -u):$(id -g "$(id -un)")"
 }
 
 test_run_command() {
