@@ -29,12 +29,25 @@ case "${1:-}" in
     opencode)
         shift
         # Installed into the mounted home so OpenCode and its login persist.
-        command -v opencode >/dev/null || {
+        if command -v opencode >/dev/null; then
+            case "$(opencode --version)" in
+                1.*|opencode\ v1.*)
+                    echo "clod: upgrading OpenCode to v2 in this home..." >&2
+                    npm uninstall --global opencode-ai
+                    npm install --global @opencode/cli@2
+                    ;;
+            esac
+        else
             echo "clod: installing OpenCode into this home..." >&2
-            npm install --global opencode-ai
-        }
+            npm install --global @opencode/cli@2
+        fi
         OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-'{"*":"allow"}'}
-        export OPENCODE_PERMISSION
+        # V2 reads inline config rather than OPENCODE_PERMISSION. Its V1
+        # config compatibility keeps existing permission overrides working.
+        OPENCODE_CONFIG_CONTENT=${OPENCODE_CONFIG_CONTENT:-'{}'}
+        OPENCODE_CONFIG_CONTENT=$(printf '%s\n' "$OPENCODE_CONFIG_CONTENT" |
+            jq -c --argjson permission "$OPENCODE_PERMISSION" '.permission = $permission')
+        export OPENCODE_PERMISSION OPENCODE_CONFIG_CONTENT
         exec opencode "$@"
         ;;
     bash|zsh)
