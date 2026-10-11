@@ -22,7 +22,7 @@ it writes to the workspace and home belong to you:
 
 ```bash
 docker build -t clod \
-  --build-arg CLOD_UID=$(id -u) --build-arg CLOD_GID=$(id -g) ~/.clod/src
+  --build-arg CLOD_UID=$(id -u) --build-arg CLOD_GID=$(id -g "$(id -un)") ~/.clod/src
 ```
 
 On macOS, Docker Desktop and Colima map ownership on their own, so the default
