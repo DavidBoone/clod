@@ -33,7 +33,8 @@ case "${1:-}" in
             echo "clod: installing OpenCode into this home..." >&2
             npm install --global opencode-ai
         }
-        export OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-'{"*":"allow"}'}
+        OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-'{"*":"allow"}'}
+        export OPENCODE_PERMISSION
         exec opencode "$@"
         ;;
     bash|zsh)
