@@ -3000,7 +3000,8 @@ taken_ports() {
 }
 
 # True when host port $2, protocol $3, on address $1 is in taken; sets REPLY to
-# the container that has it. A wildcard address on either side overlaps any.
+# what has it: a container, or =PORT for this run's container port PORT. A
+# wildcard address on either side overlaps any.
 port_taken() {
   local addr port cport name
   while read -r addr port cport name; do
@@ -3015,7 +3016,8 @@ port_taken() {
 # Checks port_args' host ports against those other running containers publish,
 # and for each one taken, stops when -P gave it or CLOD_PORTS_BUSY is error,
 # leaves it out of port_args and container_ports when it is skip, and publishes
-# the next free host port instead when it is next.
+# the next free host port instead when it is next. Each port it publishes is
+# taken for the ports after it.
 settle_ports() {
   local i spec addr ip host first cont proto holder args=() conts=() mode=${CLOD_PORTS_BUSY:-skip}
   (( ${#port_args[@]} )) || return 0
@@ -3031,14 +3033,15 @@ settle_ports() {
     proto=tcp
     [[ $cont == */* ]] && proto=${cont#*/}
     if port_taken "$ip" "$host" "$proto"; then
-      holder=$REPLY first=$host
+      holder="container $REPLY" first=$host
+      [[ $REPLY == =* ]] && holder="this run's ${REPLY#=}"
       case $mode in
         error)
-          echo "clod: can't publish $addr:$host: container $holder has it" >&2
+          echo "clod: can't publish $addr:$host: $holder has it" >&2
           exit 1
           ;;
         skip)
-          echo "clod: not publishing $addr:$host → $cont: container $holder has it" >&2
+          echo "clod: not publishing $addr:$host → $cont: $holder has it" >&2
           continue
           ;;
         next)
@@ -3049,12 +3052,13 @@ settle_ports() {
             fi
             host=$(( host + 1 ))
           done
-          echo "clod: publishing $addr:$host → $cont, since container $holder has $addr:$first" >&2
+          echo "clod: publishing $addr:$host → $cont, since $holder has $addr:$first" >&2
           ;;
       esac
     fi
     args+=(-p "$addr:$host:$cont")
     conts+=("$cont")
+    taken+=$'\n'"$ip $host ${cont%/*}/$proto =$cont"
   done
   port_args=(${args[@]+"${args[@]}"}) container_ports=(${conts[@]+"${conts[@]}"})
 }

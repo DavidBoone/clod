@@ -336,6 +336,11 @@ test_port_busy() {
   has -x 'clod: not publishing 127.0.0.1:18090 → 18090: container clod-test-ports has it' < out
   CLOD_PORTS=18090 CLOD_PORTS_BUSY=next clod bash -c 'test "$CLOD_PORTS" = 18090' 2>&1 | tee out
   has -x 'clod: publishing 127.0.0.1:18091 → 18090, since container clod-test-ports has 127.0.0.1:18090' < out
+  # a port moved to the next one takes it from the ports after it
+  CLOD_PORTS=18090:8080,18091:8081 CLOD_PORTS_BUSY=next clod bash -c 'test "$CLOD_PORTS" = 8080,8081' 2>&1 | tee out
+  has -x 'clod: publishing 127.0.0.1:18093 → 8081, since this run'"'"'s 8080 has 127.0.0.1:18091' < out
+  CLOD_PORTS=18091:8080,18091:8081 CLOD_PORTS_BUSY=error exits 1 clod bash -c true 2>&1 |
+    has "can't publish 127.0.0.1:18091: this run's 8080 has it"
   # 18093 is the first free one after 18092
   CLOD_PORTS=18092 CLOD_PORTS_BUSY=next clod bash -c true 2>&1 | has 'publishing 127.0.0.1:18093 → 18092'
   CLOD_PORTS_BUSY=error exits 1 clod bash -c true 2>&1 | has "can't publish 127.0.0.1:18090"
