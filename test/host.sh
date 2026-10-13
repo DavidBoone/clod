@@ -86,6 +86,11 @@ for command in help env default install uninstall update completion claude codex
 done
 check 0 --version
 has '^clod '
+check 0 -h
+has '^Options go before the command, or after it up to --, except after$'
+has "^claude, codex, opencode, bash or zsh, whose arguments are the program's$"
+has '  env +show the home, workspace, image, ports and variables$'
+test -z "$(awk 'length > 80' actual)"
 check 2 --nope
 check 2 image prune extra
 check 2 image new
@@ -94,6 +99,7 @@ check 2 image nope
 check 2 home new a b
 check 2 workspace rm
 check 2 shared
+grep -q 'shared takes a command: new, diff or edit' errors
 echo 'PASS help and arguments'
 
 # Settings persist, options override them, and resetting restores defaults.
