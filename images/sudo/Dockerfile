@@ -8,5 +8,5 @@ USER root
 RUN apt-get install -y sudo \
     && echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude \
     && chmod 440 /etc/sudoers.d/claude
-COPY CLAUDE.md /etc/clod/.claude/rules/sudo.md
+COPY AGENTS.md /etc/clod/AGENTS.d/sudo.md
 USER claude

@@ -2,10 +2,16 @@
 
 ![The clod statusline in five columns over two lines: the model over its effort, context use over token counts, the idle time, the home over the image and ports, and the git branch over lines changed, with the 5-hour and 7-day rate limits at the right](statusline.svg)
 
-Claude Code reads managed settings and a managed `CLAUDE.md` from
-`/etc/claude-code`, for every home, and the entrypoint passes its
-`settings.json` to Claude Code as `--settings`. Until `~/.clod/shared` exists,
-clod mounts this repo's [`shared/`](../shared) there, which updates with `git pull`:
+Claude Code reads managed settings from `/etc/claude-code`, for every home,
+and the entrypoint passes its `settings.json` to Claude Code as `--settings`.
+The instructions for every agent come from there too: the entrypoint composes
+the shared config's `AGENTS.md` (or a `CLAUDE.md` kept from before it) with the
+image's own into the `AGENTS.md` each agent reads globally — Codex's
+`$CODEX_HOME/AGENTS.md` and OpenCode's `~/.config/opencode/AGENTS.md` written
+in the home, and, for Claude Code, `/etc/clod/CLAUDE.md` (a `CLAUDE.md` in the
+shared config Claude Code still reads itself, as it always has). Until
+`~/.clod/shared` exists, clod mounts this repo's [`shared/`](../shared) there,
+which updates with `git pull`:
 
 - `statusline.sh` is the statusline, in five columns over two lines: the
   model (`✨`) over its effort (`⚡`); context use over the session's input
@@ -27,7 +33,7 @@ To customise them, make your own copy and edit that:
 ```bash
 clod shared new       # copies the starter to ~/.clod/shared
 clod shared diff      # shows how yours differs from the starter
-clod shared edit      # opens its CLAUDE.md in $VISUAL, $EDITOR or vi
+clod shared edit      # opens its AGENTS.md in $VISUAL, $EDITOR or vi
 clod shared edit settings.json  # or another file there
 ```
 
@@ -36,8 +42,8 @@ everything you want from it there. Updates to the repo's `shared/` reach you
 only when you merge them in. `clod shared new` on an existing one lists the
 starter's files yours lacks or differs on; `clod shared diff` shows the
 differences. `clod shared new --force` replaces yours with the starter,
-keeping yours as a backup. Put your own instructions for Claude in a
-`CLAUDE.md` there, and settings for every home in `settings.json`.
+keeping yours as a backup. Put your own instructions in an `AGENTS.md` there,
+which every agent reads, and settings for every home in `settings.json`.
 
 `settings.json` isn't a managed source: Claude Code doesn't read it itself.
 Passed as `--settings`, it takes precedence over a home's own settings, so keep
@@ -58,9 +64,9 @@ A `~/.clod/shared` from before `settings.json` has `statusLine` in
 new` points this out), and delete `managed-settings.json` if nothing else is
 left in it.
 
-What Claude is told about the container (the mounts, what persists, the
+What the agents are told about the container (the mounts, what persists, the
 `CLOD_*` variables) comes with the image, from [`container.md`](../container.md),
-so your `CLAUDE.md` only needs your own additions.
+so your `AGENTS.md` only needs your own additions.
 
 Changes to `statusline.sh` show up on its next refresh. To turn it off, remove
 `statusLine` from `settings.json`; homes can then set their own in

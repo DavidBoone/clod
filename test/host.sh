@@ -140,8 +140,44 @@ check 1 shared diff
 check 0 shared new
 test -f "$HOME/.clod/shared/settings.json"
 check 0 shared diff
+# with no instructions file there yet, shared edit opens AGENTS.md
+check 0 shared edit
+has '/shared/AGENTS.md$'
+# a CLAUDE.md kept from before AGENTS.md opens while it is all the
+# instructions there, AGENTS.md takes over once it exists, and naming a file
+# still opens that one
+echo '# legacy' > "$HOME/.clod/shared/CLAUDE.md"
+check 0 shared edit
+has '/shared/CLAUDE.md$'
+echo '# mine' > "$HOME/.clod/shared/AGENTS.md"
+check 0 shared edit
+has '/shared/AGENTS.md$'
+check 0 shared edit CLAUDE.md
+has '/shared/CLAUDE.md$'
 check 0 shared edit settings.json
 has '/shared/settings.json$'
+# shared new names either name of instructions file that describes the
+# container; the warnings go to stdout with the report
+cat >> "$HOME/.clod/shared/CLAUDE.md" <<'MARK'
+Started by running in a disposable container (`docker run --rm`) started by the user's `clod` launcher
+MARK
+out=$(clod shared new)
+[[ $out == *'shared/CLAUDE.md describes the container'* ]] || {
+  echo "missing CLAUDE.md warning: $out" >&2
+  exit 1
+}
+[[ $out != *'shared/AGENTS.md describes the container'* ]] || {
+  echo "unexpected AGENTS.md warning: $out" >&2
+  exit 1
+}
+cat >> "$HOME/.clod/shared/AGENTS.md" <<'MARK'
+Started by running in a disposable container (`docker run --rm`) started by the user's `clod` launcher
+MARK
+out=$(clod shared new)
+[[ $out == *'shared/AGENTS.md describes the container'* ]] || {
+  echo "missing AGENTS.md warning: $out" >&2
+  exit 1
+}
 check 2 shared edit ../config
 echo '# changed' >> "$HOME/.clod/shared/settings.json"
 check 1 shared diff

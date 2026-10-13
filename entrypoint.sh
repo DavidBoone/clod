@@ -15,6 +15,42 @@ if [ -r "$env_file" ]; then
 fi
 unset env_file
 
+# Composes the instructions agents share into the file $1: the image's
+# /etc/clod/AGENTS.md, then anything its variants added under
+# /etc/clod/AGENTS.d/, then the shared config's own AGENTS.md, or, when there
+# is none, a CLAUDE.md kept from before clod shipped AGENTS.md. With $2 set,
+# that CLAUDE.md is left out: Claude Code reads it itself from /etc/claude-code,
+# and reading it here too would repeat it.
+compose_agents_md() {
+    # /etc/clod comes with the image, so on one from before this composition
+    # it isn't the container user's to write. Say so and go on: the agent then
+    # runs without the composed instructions rather than not at all.
+    # 2>/dev/null goes first, or the failed redirect's own error would print;
+    # and cat, not :, whose failed redirect dash treats as fatal however it is
+    # guarded
+    if ! cat /dev/null 2>/dev/null > "$1"; then
+        echo "clod: can't write the instructions to $1; they are left out" >&2
+        return 0
+    fi
+    # A blank line between sources, so one without a trailing newline doesn't
+    # run its last line into the next file's first.
+    first=1
+    for src in /etc/clod/AGENTS.md /etc/clod/AGENTS.d/*.md; do
+        if [ -r "$src" ]; then
+            [ "$first" = 1 ] || printf '\n' >> "$1"
+            first=0
+            cat "$src" >> "$1"
+        fi
+    done
+    if [ -r /etc/claude-code/AGENTS.md ]; then
+        [ "$first" = 1 ] || printf '\n' >> "$1"
+        cat /etc/claude-code/AGENTS.md >> "$1"
+    elif [ -z "${2:-}" ] && [ -r /etc/claude-code/CLAUDE.md ]; then
+        [ "$first" = 1 ] || printf '\n' >> "$1"
+        cat /etc/claude-code/CLAUDE.md >> "$1"
+    fi
+}
+
 case "${1:-}" in
     codex)
         shift
@@ -24,6 +60,9 @@ case "${1:-}" in
             echo "clod: installing Codex into this home..." >&2
             npm install --global @openai/codex
         }
+        # The container's and the shared config's instructions, as Codex's
+        # global AGENTS.md. Written every run, so changes apply on the next one.
+        compose_agents_md "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
         exec codex --dangerously-bypass-approvals-and-sandbox "$@"
         ;;
     opencode)
@@ -48,6 +87,11 @@ case "${1:-}" in
         OPENCODE_CONFIG_CONTENT=$(printf '%s\n' "$OPENCODE_CONFIG_CONTENT" |
             jq -c --argjson permission "$OPENCODE_PERMISSION" '.permission = $permission')
         export OPENCODE_PERMISSION OPENCODE_CONFIG_CONTENT
+        # The container's and the shared config's instructions, as OpenCode's
+        # global AGENTS.md, the only instructions file it reads from outside
+        # the workspace. Written every run, so changes apply on the next one.
+        mkdir -p "$HOME/.config/opencode"
+        compose_agents_md "$HOME/.config/opencode/AGENTS.md"
         exec opencode "$@"
         ;;
     bash|zsh)
@@ -80,14 +124,20 @@ done
 if [ -n "$skip" ]; then
     set -- "$skip" "$@"
 fi
-# Instructions an image adds under /etc/clod (a CLAUDE.md, or files in
-# .claude/rules/) load through --add-dir. The = form keeps the option, which
-# takes several directories, from taking a subcommand or prompt as one.
+# Instructions an image adds under /etc/clod (its AGENTS.md and any files its
+# variants put in AGENTS.d/) compose with the shared config's into one file,
+# which the agents each get as their global instructions: Codex's
+# $CODEX_HOME/AGENTS.md and OpenCode's ~/.config/opencode/AGENTS.md, and, here,
+# /etc/clod/CLAUDE.md, which loads through --add-dir. The = form keeps the
+# option, which takes several directories, from taking a subcommand or prompt
+# as one.
 if [ -d /etc/clod ]; then
-    # Claude Code skips a file it can't read without a word. COPY keeps the
-    # source file's mode, so a source saved as 600 gives an unreadable one.
+    # The agents skip a file they can't read without a word, and compose
+    # leaves one out. COPY keeps the source file's mode, so a source saved as
+    # 600 gives an unreadable one.
     find /etc/clod ! -readable -printf \
-        "clod: Claude can't read %p; chmod 644 the file it was copied from and rebuild\n" >&2 || true
+        "clod: the agents can't read %p; chmod 644 the file it was copied from and rebuild\n" >&2 || true
+    compose_agents_md /etc/clod/CLAUDE.md claude
     set -- --add-dir=/etc/clod "$@"
     export CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
 fi

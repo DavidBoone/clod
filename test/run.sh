@@ -107,7 +107,7 @@ test_run_command() {
     test "$USER" = claude && test "$TMPDIR" = /tmp && test "$EDITOR" = vim && test "$PAGER" = less
     test "$(cat /workspace/from-host)" = hello
     test -f /etc/claude-code/settings.json
-    test -r /etc/clod/.claude/rules/clod.md
+    test -r /etc/clod/AGENTS.md
     test "$(find /usr/share/doc/git -type f)" = /usr/share/doc/git/copyright
     test ! -e /usr/share/man/man1/git.1.gz
     touch /workspace/from-container
@@ -235,11 +235,14 @@ test_claude() {
 }
 
 test_claude_args() {
-  # a stand-in claude in its own home shows what the entrypoint passes
+  # a stand-in claude in its own home shows what the entrypoint passes, after
+  # the instructions it composes into /etc/clod/CLAUDE.md
   mkdir -p ~/.clod/homes/args/.local/bin
-  printf '#!/bin/sh\nprintf "%%s\\n" "$@"\n' > ~/.clod/homes/args/.local/bin/claude
+  printf '#!/bin/sh\ncat /etc/clod/CLAUDE.md\nprintf "%%s\\n" "$@"\n' > ~/.clod/homes/args/.local/bin/claude
   chmod +x ~/.clod/homes/args/.local/bin/claude
   clod -H args -- -p hi | tee out
+  has 'disposable Docker container' out
+  has -e '^--add-dir=/etc/clod$' out
   has -e '^--settings=/etc/claude-code/settings.json$' out
   has -e '^--dangerously-skip-permissions$' out
   has -e '^--plugin-dir=/etc/clod/plugins/show-image$' out
@@ -254,6 +257,9 @@ test_claude_args() {
 test_codex() {
   clod codex --version | tee out
   grep -qi codex out
+  # the entrypoint composes the container's instructions into Codex's global
+  # AGENTS.md, which stays in the home
+  clod bash -c 'grep -q "disposable Docker container" ~/.codex/AGENTS.md'
 }
 
 test_opencode() {
@@ -268,6 +274,9 @@ test_opencode() {
   '
   clod -H opencode-existing opencode --version | tee out
   has -E '^(opencode v)?2\.[0-9]+\.[0-9]+$' out
+  # the entrypoint composes the container's instructions into OpenCode's
+  # global AGENTS.md, its only instructions file from outside the workspace
+  clod -H opencode-existing bash -c 'grep -q "disposable Docker container" ~/.config/opencode/AGENTS.md'
   clod -H opencode-existing bash -c '
     set -e
     test "$(cat ~/.config/existing-settings)" = keep
@@ -482,7 +491,7 @@ test_docker_socket() {
     set -e
     test "$(id -un)" = claude
     docker compose version && docker buildx version
-    test -r /etc/clod/.claude/rules/docker.md
+    test -r /etc/clod/AGENTS.d/docker.md
     docker ps
     test "$(docker run --rm --entrypoint cat -v "$CLOD_HOST_WORKSPACE:/w" clod /w/from-host)" = sibling
   ' 2>&1 | tee out
@@ -789,13 +798,35 @@ test_shared() {
   clod shared new | has 'describes the container'
   echo '{"statusLine": {}}' > ~/.clod/shared/managed-settings.json
   clod shared new | has 'sets statusLine'
-  # shared edit opens its CLAUDE.md, or a file named
+  # shared edit opens its CLAUDE.md while that is all the instructions there,
+  # or a file named
   test "$(EDITOR='echo' clod shared edit)" = "$HOME/.clod/shared/CLAUDE.md"
   test "$(EDITOR='echo' clod shared edit settings.json)" = "$HOME/.clod/shared/settings.json"
   exits 2 clod shared edit ../config 2>&1 | has "isn't a file in"
   exits 2 clod shared edit a b
   completes shared edit '' | has -x settings.json
   test -z "$(completes shared edit settings.json '')"
+  # The shared instructions reach the other agents too: Codex's global
+  # AGENTS.md gets the CLAUDE.md kept from before AGENTS.md, then an AGENTS.md
+  # takes its place; Claude's composed /etc/clod/CLAUDE.md gets the AGENTS.md,
+  # leaving the CLAUDE.md, which Claude reads itself, out.
+  clod codex --version >/dev/null
+  # the image's container.md and the shared copy of it both compose in, so the
+  # marker twice: the CLAUDE.md is what put the second one there
+  clod bash -c 'test "$(grep -c "disposable Docker container" ~/.codex/AGENTS.md)" = 2'
+  echo '# my instructions' > ~/.clod/shared/AGENTS.md
+  clod codex --version >/dev/null
+  # the AGENTS.md took the CLAUDE.md's place: the copy is gone, the marker once
+  clod bash -c 'test "$(grep -c "disposable Docker container" ~/.codex/AGENTS.md)" = 1'
+  clod bash -c 'test "$(tail -1 ~/.codex/AGENTS.md)" = "# my instructions"'
+  mkdir -p ~/.clod/homes/agents-md/.local/bin
+  printf '#!/bin/sh\ncat /etc/clod/CLAUDE.md\n' > ~/.clod/homes/agents-md/.local/bin/claude
+  chmod +x ~/.clod/homes/agents-md/.local/bin/claude
+  clod -H agents-md claude > out
+  has 'disposable Docker container' out
+  has '# my instructions' out
+  test "$(grep -c 'disposable Docker container' out)" = 1
+  rm ~/.clod/shared/AGENTS.md
   clod --force shared new
   test -f ~/.clod/shared/statusline.sh
   ls -d ~/.clod/shared.bak-*
@@ -1023,13 +1054,13 @@ test_live_files() {
   sed -i '2a echo live entrypoint >&2' standin/entrypoint.sh
   perl -pi -e 'print "echo live clipboard; exit 0\n" if $. == 2' standin/clipboard.sh
   echo '# live plugin' >> standin/plugins/show-image/convert.py
-  standin/clod bash -c 'cat /etc/clod/.claude/rules/clod.md; test -x /usr/local/bin/clod-clipboard && xclip -version
+  standin/clod bash -c 'cat /etc/clod/AGENTS.md; test -x /usr/local/bin/clod-clipboard && xclip -version
     tail -1 /etc/clod/plugins/show-image/convert.py' > out 2> err
   if grep -q 'building' err; then false; fi
   has -x 'live entrypoint' err
   test "$(tail -3 out)" = "$(printf 'live description\nlive clipboard\n# live plugin')"
   # the image's own copies serve docker run without clod
-  docker run --rm --pull=never clod bash -c 'cat /etc/clod/.claude/rules/clod.md; xclip -version
+  docker run --rm --pull=never clod bash -c 'cat /etc/clod/AGENTS.md; xclip -version
     cat /etc/clod/plugins/show-image/convert.py; true' 2>&1 |
     if grep -q live; then false; fi
 }
@@ -1158,7 +1189,7 @@ test_image_edit() {
   exits 1 clod image edit go+editme 2>&1 | has 'is a combination'
   exits 1 clod image edit nope 2>&1 | has "no variant of yours named 'nope'"
   # another file beside the Dockerfile, but nothing outside the directory
-  test "$(EDITOR='echo' clod image edit editme CLAUDE.md)" = "$HOME/.clod/images/editme/CLAUDE.md"
+  test "$(EDITOR='echo' clod image edit editme AGENTS.md)" = "$HOME/.clod/images/editme/AGENTS.md"
   for bad in ../x /etc/passwd sub/../../x ./Dockerfile; do
     exits 2 clod image edit editme "$bad" 2>&1 | has "isn't a file in"
   done
@@ -1788,12 +1819,12 @@ test_variant() {
     browser)
       check='echo "<h1>clod</h1>" > /tmp/page.html &&
         chromium --headless --screenshot=/tmp/shot.png --window-size=800,600 file:///tmp/page.html &&
-        test -s /tmp/shot.png && test -r /etc/clod/.claude/rules/browser.md' ;;
+        test -s /tmp/shot.png && test -r /etc/clod/AGENTS.d/browser.md' ;;
     dotnet) check='dotnet --version' ;;
     lamp) check='php -v && composer --version && apache2 -v && mariadb --version' ;;
     python) check='test "$UV_LINK_MODE" = copy && uv --version && gcc --version | head -1 && python3-config --includes' ;;
     rust) check='cargo new -q /tmp/hello && cd /tmp/hello && cargo run -q' ;;
-    go+sudo) check='go version && test "$(sudo -n whoami)" = root && test -r /etc/clod/.claude/rules/sudo.md' ;;
+    go+sudo) check='go version && test "$(sudo -n whoami)" = root && test -r /etc/clod/AGENTS.d/sudo.md' ;;
   esac
   clod -i "$1" bash -c "set -e; $check"
 }

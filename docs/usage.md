@@ -178,7 +178,9 @@ See [OpenAI's authentication documentation](https://learn.chatgpt.com/docs/auth)
 
 Codex runs with `--dangerously-bypass-approvals-and-sandbox`, which turns off
 its own sandbox and approval prompts inside the container, including for
-resumed sessions.
+resumed sessions. The container's and your shared instructions reach it as its
+global `AGENTS.md`, which the entrypoint writes into the home on every run
+(`~/.codex/AGENTS.override.md` of your own would take its place).
 
 ## OpenCode
 
@@ -200,8 +202,12 @@ Arguments go to OpenCode unchanged. clod sets `OPENCODE_PERMISSION` to
 the container. Set `OPENCODE_PERMISSION` in the project's `.envrc` to choose
 a stricter policy. clod passes this setting through `OPENCODE_CONFIG_CONTENT`,
 preserving its other fields. Native v2 `permissions` in that inline config take
-precedence over the legacy policy. See the
-[OpenCode CLI documentation](https://opencode.ai/v2/docs/cli/).
+precedence over the legacy policy. The container's and your shared
+instructions reach it as its global `~/.config/opencode/AGENTS.md`, which the
+entrypoint writes on every run — OpenCode reads no other instructions file
+from outside the workspace, and one you write there yourself would not
+survive the next run, so your own go in the shared config's `AGENTS.md`. See
+the [OpenCode CLI documentation](https://opencode.ai/v2/docs/cli/).
 
 ## Publishing ports
 
@@ -285,7 +291,7 @@ what changed, one line per change. When the checkout is on another branch,
 it asks first whether to switch to `master`; without a terminal it pulls the
 branch it's on. The next `clod` rebuilds the image if it changed; `clod image
 build` builds it straight away instead, without starting a container. Only a change to the base `Dockerfile` rebuilds the base:
-`entrypoint.sh`, `container.md` (what Claude is told about the container) and
+`entrypoint.sh`, `container.md` (what the agents are told about the container) and
 `clipboard.sh` (the `xclip` and `wl-paste` behind `--clipboard`) are mounted
 from the checkout on every run, so changes to them apply without a build. An
 update that changes the base image leaves every variant you've built stale;
