@@ -65,10 +65,21 @@ check() {
   fi
   if [[ $want == 0 && -s errors ]]; then cat errors >&2; exit 1; fi
 }
+# has PATTERN [FILE]: FILE (default actual) has a line matching PATTERN.
 has() {
-  if ! grep -E "$1" actual > /dev/null; then
+  if ! grep -E "$1" "${2:-actual}" > /dev/null; then
     echo "missing output matching: $1" >&2
-    cat actual >&2
+    cat "${2:-actual}" >&2
+    exit 1
+  fi
+}
+# Fails on any line of actual wider than 80 columns, naming them.
+fits() {
+  local wide
+  wide=$(awk 'length > 80' actual)
+  if [[ -n $wide ]]; then
+    echo "lines over 80 columns:" >&2
+    echo "$wide" >&2
     exit 1
   fi
 }
@@ -86,6 +97,11 @@ for command in help env default install uninstall update completion claude codex
 done
 check 0 --version
 has '^clod '
+check 0 -h
+has '^Options go before the command, or after it up to --, except after$'
+has "^claude, codex, opencode, bash or zsh, whose arguments are the program's$"
+has '  env +show the home, workspace, image, ports and variables$'
+fits
 check 2 --nope
 check 2 image prune extra
 check 2 image new
@@ -94,6 +110,7 @@ check 2 image nope
 check 2 home new a b
 check 2 workspace rm
 check 2 shared
+has 'shared takes a command: new, diff or edit' errors
 echo 'PASS help and arguments'
 
 # Settings persist, options override them, and resetting restores defaults.
