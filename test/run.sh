@@ -306,6 +306,11 @@ test_codex() {
   clod codex --version >/dev/null 2> err
   has 'without its clod:end line, so it is left as it is' err
   clod bash -c 'set -e; cmp ~/agents-before ~/.codex/AGENTS.md; rm ~/agents-before ~/.codex/AGENTS.md'
+  # a symlink there is left as it is, with a warning
+  clod bash -c 'set -e; echo "# kept elsewhere" > ~/my-agents.md; ln -s ../my-agents.md ~/.codex/AGENTS.md'
+  clod codex --version >/dev/null 2> err
+  has 'AGENTS.md is a symlink, so it is left as it is' err
+  clod bash -c 'set -e; test -L ~/.codex/AGENTS.md; test "$(cat ~/my-agents.md)" = "# kept elsewhere"; rm ~/.codex/AGENTS.md ~/my-agents.md'
   # a variant from before AGENTS.d/ reaches Codex too, from .claude/rules/
   # (subdirectories and symlinks included) or its own /etc/clod/CLAUDE.md
   mkdir -p ~/.clod/images/oldstyle

@@ -43,6 +43,13 @@ compose_agents_md() {
         echo "clod: can't read $1, so it is left as it is, without the container's and shared instructions" >&2
         return 0
     fi
+    # Nor can a symlink there: the rename would replace the link with a file,
+    # and writing through it would put clod's block in a file the user keeps
+    # elsewhere.
+    if [ -z "${2:-}" ] && [ -L "$1" ]; then
+        echo "clod: $1 is a symlink, so it is left as it is, without the container's and shared instructions" >&2
+        return 0
+    fi
     # The user's own instructions: what a home's file has outside an earlier
     # block, without the blank lines that set it apart. A clod:begin line with
     # no clod:end after it (deleted, or mangled by an editor) leaves no way to
