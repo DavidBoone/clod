@@ -178,9 +178,11 @@ See [OpenAI's authentication documentation](https://learn.chatgpt.com/docs/auth)
 
 Codex runs with `--dangerously-bypass-approvals-and-sandbox`, which turns off
 its own sandbox and approval prompts inside the container, including for
-resumed sessions. The container's and your shared instructions reach it as its
-global `AGENTS.md`, which the entrypoint writes into the home on every run
-(`~/.codex/AGENTS.override.md` of your own would take its place).
+resumed sessions. The container's and your shared instructions reach it in its
+global `AGENTS.md`, in a block between `<!-- clod:begin` and `<!-- clod:end -->`
+lines that the entrypoint rewrites in the home on every run; anything of your
+own outside the block stays (`~/.codex/AGENTS.override.md` of your own would
+take the whole file's place).
 
 ## OpenCode
 
@@ -203,10 +205,10 @@ the container. Set `OPENCODE_PERMISSION` in the project's `.envrc` to choose
 a stricter policy. clod passes this setting through `OPENCODE_CONFIG_CONTENT`,
 preserving its other fields. Native v2 `permissions` in that inline config take
 precedence over the legacy policy. The container's and your shared
-instructions reach it as its global `~/.config/opencode/AGENTS.md`, which the
-entrypoint writes on every run — OpenCode reads no other instructions file
-from outside the workspace, and one you write there yourself would not
-survive the next run, so your own go in the shared config's `AGENTS.md`. See
+instructions reach it in its global `~/.config/opencode/AGENTS.md`, the only
+instructions file OpenCode reads from outside the workspace, in a block the
+entrypoint rewrites on every run, as for Codex; what you write there outside
+the block stays, for that home. See
 the [OpenCode CLI documentation](https://opencode.ai/v2/docs/cli/).
 
 ## Publishing ports

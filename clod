@@ -2728,7 +2728,7 @@ cmd_workspace_rm() {
 }
 
 cmd_shared_new() {
-  local target=$clod_dir/shared starter=$script_dir/shared report backup
+  local target=$clod_dir/shared starter=$script_dir/shared report backup f
   if [[ ! -d $starter ]]; then
     echo "clod: there's no starter shared config in $(tildify "$script_dir")" >&2
     exit 1
@@ -2741,6 +2741,12 @@ cmd_shared_new() {
         echo "clod: $(tildify "$target/$f") describes the container, which the image already does; remove that section"
       fi
     done
+    # Claude Code reads a shared CLAUDE.md itself and gets AGENTS.md composed
+    # in too (unless the two are the same), so both load; the other agents
+    # read only AGENTS.md.
+    if [[ -f $target/AGENTS.md && -f $target/CLAUDE.md ]]; then
+      echo "clod: $(tildify "$target") has both AGENTS.md and CLAUDE.md: Claude Code reads both, the other agents only AGENTS.md; keep only Claude-specific instructions in CLAUDE.md, or remove it"
+    fi
     # The statusline moved from managed-settings.json to settings.json.
     if grep -qs '"statusLine"' "$target/managed-settings.json"; then
       echo "clod: $(tildify "$target/managed-settings.json") sets statusLine, which now goes in settings.json; move it there"

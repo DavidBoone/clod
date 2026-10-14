@@ -15,39 +15,90 @@ if [ -r "$env_file" ]; then
 fi
 unset env_file
 
-# Composes the instructions agents share into the file $1: the image's
-# /etc/clod/AGENTS.md, then anything its variants added under
+# Composes the instructions agents share into the file $1, in order: the
+# image's /etc/clod/AGENTS.md, anything its variants added under
 # /etc/clod/AGENTS.d/, then the shared config's own AGENTS.md, or, when there
-# is none, a CLAUDE.md kept from before clod shipped AGENTS.md. With $2 set,
-# that CLAUDE.md is left out: Claude Code reads it itself from /etc/claude-code,
-# and reading it here too would repeat it.
+# is none, a CLAUDE.md kept from before clod shipped AGENTS.md.
+#
+# With $2 set ($1 is then Claude's /etc/clod/CLAUDE.md, new in each container),
+# a CLAUDE.md already there came with the image, from a variant made before
+# AGENTS.d/, so it composes in after AGENTS.d/; the shared CLAUDE.md is left
+# out, as Claude Code reads it itself from /etc/claude-code, and so is a shared
+# AGENTS.md that is the same file. Without $2 ($1 is Codex's or OpenCode's
+# global AGENTS.md, in the home), the variants' files in the old
+# .claude/rules/, which Claude loads itself, compose in after AGENTS.d/; and
+# the composition goes between the markers below, keeping whatever else the
+# file has, which is the user's own.
+#
+# Written to a temporary file then renamed over $1, so an agent another run
+# starts at the same moment on the same home reads one whole version.
 compose_agents_md() {
-    # /etc/clod comes with the image, so on one from before this composition
-    # it isn't the container user's to write. Say so and go on: the agent then
-    # runs without the composed instructions rather than not at all.
-    # 2>/dev/null goes first, or the failed redirect's own error would print;
-    # and cat, not :, whose failed redirect dash treats as fatal however it is
-    # guarded
-    if ! cat /dev/null 2>/dev/null > "$1"; then
+    begin='<!-- clod:begin: written by clod on every run, from the container'\''s and ~/.clod/shared'\''s instructions; edit outside this block -->'
+    end='<!-- clod:end -->'
+    # The image's /etc/clod isn't the container user's to write on an image
+    # from before this composition. Say so and go on: the agent then runs
+    # without the composed instructions rather than not at all. 2>/dev/null
+    # goes first, or the failed redirect's own error would print; and cat, not
+    # :, whose failed redirect dash treats as fatal however it is guarded.
+    tmp=$1.clod-tmp.$$
+    if ! cat /dev/null 2>/dev/null > "$tmp"; then
         echo "clod: can't write the instructions to $1; they are left out" >&2
         return 0
     fi
-    # A blank line between sources, so one without a trailing newline doesn't
-    # run its last line into the next file's first.
-    first=1
-    for src in /etc/clod/AGENTS.md /etc/clod/AGENTS.d/*.md; do
-        if [ -r "$src" ]; then
-            [ "$first" = 1 ] || printf '\n' >> "$1"
-            first=0
-            cat "$src" >> "$1"
-        fi
-    done
+    set --  "$1" "${2:-}" /etc/clod/AGENTS.md /etc/clod/AGENTS.d/*.md
+    if [ -n "$2" ]; then
+        [ ! -f "$1" ] || set -- "$@" "$1"
+    else
+        for src in /etc/clod/.claude/rules/*.md; do
+            # clod.md is the container.md an image from before AGENTS.md has,
+            # which /etc/clod/AGENTS.md already gives.
+            [ "${src##*/}" = clod.md ] || set -- "$@" "$src"
+        done
+    fi
     if [ -r /etc/claude-code/AGENTS.md ]; then
-        [ "$first" = 1 ] || printf '\n' >> "$1"
-        cat /etc/claude-code/AGENTS.md >> "$1"
-    elif [ -z "${2:-}" ] && [ -r /etc/claude-code/CLAUDE.md ]; then
-        [ "$first" = 1 ] || printf '\n' >> "$1"
-        cat /etc/claude-code/CLAUDE.md >> "$1"
+        if [ -z "$2" ] || [ ! -r /etc/claude-code/CLAUDE.md ] ||
+            ! cmp -s /etc/claude-code/AGENTS.md /etc/claude-code/CLAUDE.md; then
+            set -- "$@" /etc/claude-code/AGENTS.md
+        fi
+    elif [ -z "$2" ]; then
+        set -- "$@" /etc/claude-code/CLAUDE.md
+    fi
+    dest=$1 claude=$2
+    shift 2
+    {
+        [ -n "$claude" ] || printf '%s\n' "$begin"
+        # A blank line between sources, so one without a trailing newline
+        # doesn't run its last line into the next file's first.
+        first=1
+        for src; do
+            if [ -r "$src" ]; then
+                [ "$first" = 1 ] || printf '\n'
+                first=0
+                cat "$src"
+            fi
+        done
+        if [ -z "$claude" ]; then
+            printf '\n%s\n' "$end"
+            # The user's own instructions: what the file has outside an
+            # earlier block, without the blank lines that set it apart.
+            if [ -f "$dest" ]; then
+                awk -v e="$end" '
+                    index($0, "<!-- clod:begin") == 1 { skip = 1; next }
+                    skip && $0 == e { skip = 0; next }
+                    skip { next }
+                    !seen && $0 == "" { next }
+                    { seen = 1; print }' "$dest" | {
+                    if IFS= read -r line; then
+                        printf '\n%s\n' "$line"
+                        cat
+                    fi
+                }
+            fi
+        fi
+    } >> "$tmp"
+    if ! mv -f "$tmp" "$dest" 2>/dev/null; then
+        rm -f "$tmp"
+        echo "clod: can't write the instructions to $dest; they are left out" >&2
     fi
 }
 

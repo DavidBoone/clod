@@ -43,7 +43,11 @@ only when you merge them in. `clod shared new` on an existing one lists the
 starter's files yours lacks or differs on; `clod shared diff` shows the
 differences. `clod shared new --force` replaces yours with the starter,
 keeping yours as a backup. Put your own instructions in an `AGENTS.md` there,
-which every agent reads, and settings for every home in `settings.json`.
+which every agent reads, and settings for every home in `settings.json`. A
+`CLAUDE.md` from before `AGENTS.md` still reaches every agent while it is the
+only one; once you add an `AGENTS.md`, rename the `CLAUDE.md` to it, or keep
+only Claude-specific instructions in it, since Claude Code reads both (`clod
+shared new` points this out; an identical copy is read once).
 
 `settings.json` isn't a managed source: Claude Code doesn't read it itself.
 Passed as `--settings`, it takes precedence over a home's own settings, so keep

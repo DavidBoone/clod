@@ -260,6 +260,19 @@ test_codex() {
   # the entrypoint composes the container's instructions into Codex's global
   # AGENTS.md, which stays in the home
   clod bash -c 'grep -q "disposable Docker container" ~/.codex/AGENTS.md'
+  # a global AGENTS.md of the user's own keeps its instructions: the
+  # composition goes in a block of its own, rewritten in place on each run
+  clod bash -c 'printf "# my codex rules\nkeep me\n" > ~/.codex/AGENTS.md'
+  clod codex --version >/dev/null
+  clod codex --version >/dev/null
+  clod bash -c '
+    set -e
+    f=~/.codex/AGENTS.md
+    test "$(grep -c "^<!-- clod:begin" $f)" = 1 && test "$(grep -c "^<!-- clod:end -->$" $f)" = 1
+    test "$(grep -c "disposable Docker container" $f)" = 1
+    test "$(grep -c "^# my codex rules$" $f)" = 1 && test "$(tail -1 $f)" = "keep me"
+    test -z "$(find ~/.codex -name "AGENTS.md.clod-tmp.*")"
+  '
 }
 
 test_opencode() {
@@ -277,6 +290,15 @@ test_opencode() {
   # the entrypoint composes the container's instructions into OpenCode's
   # global AGENTS.md, its only instructions file from outside the workspace
   clod -H opencode-existing bash -c 'grep -q "disposable Docker container" ~/.config/opencode/AGENTS.md'
+  # and keeps one of the user's own there, outside clod's block
+  clod -H opencode-existing bash -c 'echo "# my opencode rules" >> ~/.config/opencode/AGENTS.md'
+  clod -H opencode-existing opencode --version >/dev/null
+  clod -H opencode-existing bash -c '
+    set -e
+    f=~/.config/opencode/AGENTS.md
+    test "$(grep -c "disposable Docker container" $f)" = 1
+    test "$(tail -1 $f)" = "# my opencode rules"
+  '
   clod -H opencode-existing bash -c '
     set -e
     test "$(cat ~/.config/existing-settings)" = keep
@@ -818,7 +840,8 @@ test_shared() {
   clod codex --version >/dev/null
   # the AGENTS.md took the CLAUDE.md's place: the copy is gone, the marker once
   clod bash -c 'test "$(grep -c "disposable Docker container" ~/.codex/AGENTS.md)" = 1'
-  clod bash -c 'test "$(tail -1 ~/.codex/AGENTS.md)" = "# my instructions"'
+  clod bash -c 'grep -qx "# my instructions" ~/.codex/AGENTS.md'
+  clod shared new | has 'has both AGENTS.md and CLAUDE.md'
   mkdir -p ~/.clod/homes/agents-md/.local/bin
   printf '#!/bin/sh\ncat /etc/clod/CLAUDE.md\n' > ~/.clod/homes/agents-md/.local/bin/claude
   chmod +x ~/.clod/homes/agents-md/.local/bin/claude
@@ -826,6 +849,13 @@ test_shared() {
   has 'disposable Docker container' out
   has '# my instructions' out
   test "$(grep -c 'disposable Docker container' out)" = 1
+  # a shared AGENTS.md that is the same as the CLAUDE.md, which Claude reads
+  # itself, isn't composed in again
+  echo '# same' > ~/.clod/shared/AGENTS.md
+  echo '# same' > ~/.clod/shared/CLAUDE.md
+  clod -H agents-md claude > out
+  has 'disposable Docker container' out
+  if grep -q '# same' out; then false; fi
   rm ~/.clod/shared/AGENTS.md
   clod --force shared new
   test -f ~/.clod/shared/statusline.sh
