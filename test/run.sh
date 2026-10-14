@@ -273,6 +273,29 @@ test_codex() {
     test "$(grep -c "^# my codex rules$" $f)" = 1 && test "$(tail -1 $f)" = "keep me"
     test -z "$(find ~/.codex -name "AGENTS.md.clod-tmp.*")"
   '
+  # runs starting together on one home each write a whole file: the
+  # entrypoint's shell has the same PID in every container, so the temporary
+  # file's name can't come from it
+  for i in 1 2 3 4; do clod codex --version >/dev/null & done
+  wait
+  clod bash -c '
+    set -e
+    f=~/.codex/AGENTS.md
+    test "$(grep -c "^<!-- clod:begin" $f)" = 1 && test "$(grep -c "^<!-- clod:end -->$" $f)" = 1
+    test "$(grep -c "disposable Docker container" $f)" = 1 && test "$(tail -1 $f)" = "keep me"
+    test -z "$(find ~/.codex -name "AGENTS.md.clod-tmp.*")"
+  '
+  # a variant from before AGENTS.d/ reaches Codex too, from .claude/rules/ or
+  # its own /etc/clod/CLAUDE.md
+  mkdir -p ~/.clod/images/oldstyle
+  echo '# old-style rule' > ~/.clod/images/oldstyle/rule.md
+  echo '# old-style claude-md' > ~/.clod/images/oldstyle/CLAUDE.md
+  printf '%s\n' 'ARG BASE=clod' 'FROM $BASE' 'USER root' \
+    'COPY rule.md /etc/clod/.claude/rules/rule.md' 'COPY CLAUDE.md /etc/clod/CLAUDE.md' \
+    'USER claude' > ~/.clod/images/oldstyle/Dockerfile
+  clod -i oldstyle codex --version >/dev/null
+  clod bash -c 'grep -qx "# old-style rule" ~/.codex/AGENTS.md && grep -qx "# old-style claude-md" ~/.codex/AGENTS.md'
+  clod --force image rm oldstyle
 }
 
 test_opencode() {

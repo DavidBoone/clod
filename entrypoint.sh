@@ -26,25 +26,26 @@ unset env_file
 # out, as Claude Code reads it itself from /etc/claude-code, and so is a shared
 # AGENTS.md that is the same file. Without $2 ($1 is Codex's or OpenCode's
 # global AGENTS.md, in the home), the variants' files in the old
-# .claude/rules/, which Claude loads itself, compose in after AGENTS.d/; and
+# .claude/rules/, which Claude loads itself, and an image's own
+# /etc/clod/CLAUDE.md compose in after AGENTS.d/; and
 # the composition goes between the markers below, keeping whatever else the
 # file has, which is the user's own.
 #
 # Written to a temporary file then renamed over $1, so an agent another run
-# starts at the same moment on the same home reads one whole version.
+# starts at the same moment on the same home reads one whole version. mktemp
+# names it: $$ is the same in every container (the shell is tini's child).
 compose_agents_md() {
     begin='<!-- clod:begin: written by clod on every run, from the container'\''s and ~/.clod/shared'\''s instructions; edit outside this block -->'
     end='<!-- clod:end -->'
     # The image's /etc/clod isn't the container user's to write on an image
     # from before this composition. Say so and go on: the agent then runs
-    # without the composed instructions rather than not at all. 2>/dev/null
-    # goes first, or the failed redirect's own error would print; and cat, not
-    # :, whose failed redirect dash treats as fatal however it is guarded.
-    tmp=$1.clod-tmp.$$
-    if ! cat /dev/null 2>/dev/null > "$tmp"; then
+    # without the composed instructions rather than not at all.
+    if ! tmp=$(mktemp "$1.clod-tmp.XXXXXX" 2>/dev/null); then
         echo "clod: can't write the instructions to $1; they are left out" >&2
         return 0
     fi
+    # mktemp's 600 would make the instructions the container user's alone.
+    chmod 644 "$tmp"
     set --  "$1" "${2:-}" /etc/clod/AGENTS.md /etc/clod/AGENTS.d/*.md
     if [ -n "$2" ]; then
         [ ! -f "$1" ] || set -- "$@" "$1"
@@ -54,6 +55,7 @@ compose_agents_md() {
             # which /etc/clod/AGENTS.md already gives.
             [ "${src##*/}" = clod.md ] || set -- "$@" "$src"
         done
+        set -- "$@" /etc/clod/CLAUDE.md
     fi
     if [ -r /etc/claude-code/AGENTS.md ]; then
         if [ -z "$2" ] || [ ! -r /etc/claude-code/CLAUDE.md ] ||
