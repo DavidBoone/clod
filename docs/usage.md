@@ -178,7 +178,13 @@ See [OpenAI's authentication documentation](https://learn.chatgpt.com/docs/auth)
 
 Codex runs with `--dangerously-bypass-approvals-and-sandbox`, which turns off
 its own sandbox and approval prompts inside the container, including for
-resumed sessions.
+resumed sessions. The container's and your shared instructions reach it in its
+global `AGENTS.md`, in a block between `<!-- clod:begin` and `<!-- clod:end -->`
+lines that the entrypoint rewrites in the home on every run; anything of your
+own outside the block stays (`~/.codex/AGENTS.override.md` of your own would
+take the whole file's place). Without its `clod:end` line, clod can't tell the
+block from your text, so it leaves the file as it is and says so, as it does
+a symlink there.
 
 ## OpenCode
 
@@ -200,8 +206,12 @@ Arguments go to OpenCode unchanged. clod sets `OPENCODE_PERMISSION` to
 the container. Set `OPENCODE_PERMISSION` in the project's `.envrc` to choose
 a stricter policy. clod passes this setting through `OPENCODE_CONFIG_CONTENT`,
 preserving its other fields. Native v2 `permissions` in that inline config take
-precedence over the legacy policy. See the
-[OpenCode CLI documentation](https://opencode.ai/v2/docs/cli/).
+precedence over the legacy policy. The container's and your shared
+instructions reach it in its global `~/.config/opencode/AGENTS.md`, the only
+instructions file OpenCode reads from outside the workspace, in a block the
+entrypoint rewrites on every run, as for Codex; what you write there outside
+the block stays, for that home. See
+the [OpenCode CLI documentation](https://opencode.ai/v2/docs/cli/).
 
 ## Publishing ports
 
@@ -285,7 +295,7 @@ what changed, one line per change. When the checkout is on another branch,
 it asks first whether to switch to `master`; without a terminal it pulls the
 branch it's on. The next `clod` rebuilds the image if it changed; `clod image
 build` builds it straight away instead, without starting a container. Only a change to the base `Dockerfile` rebuilds the base:
-`entrypoint.sh`, `container.md` (what Claude is told about the container) and
+`entrypoint.sh`, `container.md` (what the agents are told about the container) and
 `clipboard.sh` (the `xclip` and `wl-paste` behind `--clipboard`) are mounted
 from the checkout on every run, so changes to them apply without a build. An
 update that changes the base image leaves every variant you've built stale;

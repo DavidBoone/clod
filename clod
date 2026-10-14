@@ -46,10 +46,13 @@
 # --build-arg BASE=clod-a.
 #
 # ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
-# reads managed settings and CLAUDE.md for every home, and the entrypoint passes
-# its settings.json as --settings. Until you create it, the starter set in this
-# script's shared/ directory is mounted instead. What Claude is told about the
-# container comes with the image, from container.md.
+# reads managed settings for every home, and the entrypoint passes its
+# settings.json as --settings. Its AGENTS.md, or a CLAUDE.md kept from before
+# AGENTS.md, holds the instructions for every home, which the entrypoint
+# composes with the image's into the AGENTS.md each agent reads globally (and
+# Claude's /etc/clod/CLAUDE.md). Until you create it, the starter set in this
+# script's shared/ directory is mounted instead. What the agents are told
+# about the container comes with the image, from container.md.
 #
 # /workspace is the current directory, or with -w another directory or, as
 # vol:NAME, the Docker volume clod-workspace-NAME. It is an option only: the
@@ -149,7 +152,7 @@ Shared config
 shared|-|the shared config: settings and instructions for every home
 shared new||create ~/.clod/shared from the starter
 shared diff||compare ~/.clod/shared with the starter
-shared edit|[FILE]|edit a file of ~/.clod/shared, its CLAUDE.md by default
+shared edit|[FILE]|edit a file of ~/.clod/shared, its AGENTS.md by default
 Settings
 env||show the home, workspace, image, ports and variables a run uses
 default|[KEY [VALUE]];KEY --reset;edit|show or set your defaults
@@ -206,7 +209,7 @@ starter. Run it with clod -i NAME.
 @image edit
 Opens your variant ~/.clod/images/NAME's Dockerfile in $VISUAL, or $EDITOR,
 or vi, or with no NAME that of the image -i or CLOD_IMAGE selects. FILE opens
-another file in that directory instead, such as its CLAUDE.md, creating it if
+another file in that directory instead, such as its AGENTS.md, creating it if
 it isn't there. Its next run rebuilds it, or with --build, clod builds it as
 soon as the editor exits, so a broken Dockerfile shows now; an editor that
 exits with an error skips the build. A bundled variant is clod's own:
@@ -264,16 +267,17 @@ them and asks first. It refuses a workspace a container uses.
 @shared
 ~/.clod/shared is mounted read-only as /etc/claude-code in every container:
 settings for every home (the statusline), any managed settings, and your
-instructions for every home in its CLAUDE.md. Until you create it, clod's
-starter is mounted.
+instructions for every home in its AGENTS.md, which every agent reads. Until
+you create it, clod's starter is mounted.
 @shared new
 Creates ~/.clod/shared as a copy of the starter, to customise. If it exists,
 lists the starter's files it lacks or differs on.
 @shared diff
 Shows the differences between the starter and ~/.clod/shared.
 @shared edit
-Opens ~/.clod/shared/CLAUDE.md, your instructions for every home, in $VISUAL,
-or $EDITOR, or vi; FILE opens another file there instead, such as
+Opens ~/.clod/shared/AGENTS.md, your instructions for every home, in $VISUAL,
+or $EDITOR, or vi; a CLAUDE.md kept from before AGENTS.md opens while that is
+all the instructions there, and FILE opens another file there instead, such as
 settings.json, creating it if it isn't there. The next run mounts it. clod
 shared new creates ~/.clod/shared first.
 @env
@@ -2724,15 +2728,24 @@ cmd_workspace_rm() {
 }
 
 cmd_shared_new() {
-  local target=$clod_dir/shared starter=$script_dir/shared report backup
+  local target=$clod_dir/shared starter=$script_dir/shared report backup f
   if [[ ! -d $starter ]]; then
     echo "clod: there's no starter shared config in $(tildify "$script_dir")" >&2
     exit 1
   fi
   if [[ -e $target && -z $force ]]; then
-    # A CLAUDE.md that describes the container repeats the image's container.md.
-    if grep -qs "started by the user's \`clod\` launcher" "$target/CLAUDE.md"; then
-      echo "clod: $(tildify "$target/CLAUDE.md") describes the container, which the image already does; remove that section"
+    # An instructions file that describes the container repeats the image's
+    # container.md. CLAUDE.md is the name it went by before AGENTS.md.
+    for f in AGENTS.md CLAUDE.md; do
+      if grep -qs "started by the user's \`clod\` launcher" "$target/$f"; then
+        echo "clod: $(tildify "$target/$f") describes the container, which the image already does; remove that section"
+      fi
+    done
+    # Claude Code reads a shared CLAUDE.md itself and gets AGENTS.md composed
+    # in too (unless the two are the same), so both load; the other agents
+    # read only AGENTS.md.
+    if [[ -f $target/AGENTS.md && -f $target/CLAUDE.md ]]; then
+      echo "clod: $(tildify "$target") has both AGENTS.md and CLAUDE.md: Claude Code reads both, the other agents only AGENTS.md; keep only Claude-specific instructions in CLAUDE.md, or remove it"
     fi
     # The statusline moved from managed-settings.json to settings.json.
     if grep -qs '"statusLine"' "$target/managed-settings.json"; then
@@ -2836,8 +2849,9 @@ $from_lines
 USER root
 # RUN apt-get install -y postgresql-client
 USER claude
-# Instructions for Claude about this image, from a CLAUDE.md beside this file:
-# COPY CLAUDE.md /etc/clod/.claude/rules/$name.md
+# Instructions for the agents about this image, from an AGENTS.md beside this
+# file:
+# COPY AGENTS.md /etc/clod/AGENTS.d/$name.md
 STARTER
     echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, built on $variants}"
   fi
@@ -2879,12 +2893,20 @@ edit_config() {
   done < "$config"
 }
 
-# Opens file $2 (default CLAUDE.md) of ~/.clod/shared in the editor.
+# Opens file $1 of ~/.clod/shared in the editor, AGENTS.md by default, or a
+# CLAUDE.md kept from before AGENTS.md while it is all the instructions there.
 cmd_shared_edit() {
-  local dir=$clod_dir/shared file=${1:-CLAUDE.md}
+  local dir=$clod_dir/shared file=${1:-}
   if [[ ! -d $dir ]]; then
     echo "clod: there's no $(tildify "$dir") yet, so clod mounts the starter; clod shared new creates yours" >&2
     exit 1
+  fi
+  if [[ -z $file ]]; then
+    if [[ -f $dir/CLAUDE.md && ! -f $dir/AGENTS.md ]]; then
+      file=CLAUDE.md
+    else
+      file=AGENTS.md
+    fi
   fi
   check_rel_file "$file" "$dir"
   edit_file "$dir/$file"
@@ -3259,7 +3281,7 @@ cmd_run() {
   if [[ -n $base_dir ]]; then
     mount_arg "$base_dir/entrypoint.sh" /usr/local/bin/clod-entrypoint ,readonly
     run_args+=(--mount "$REPLY")
-    mount_arg "$base_dir/container.md" /etc/clod/.claude/rules/clod.md ,readonly
+    mount_arg "$base_dir/container.md" /etc/clod/AGENTS.md ,readonly
     run_args+=(--mount "$REPLY")
     mount_arg "$base_dir/clipboard.sh" /usr/local/bin/clod-clipboard ,readonly
     run_args+=(--mount "$REPLY")

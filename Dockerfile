@@ -156,8 +156,13 @@ RUN chmod 755 /usr/local/bin/clod-clipboard \
     && ln -s clod-clipboard /usr/local/bin/xclip \
     && ln -s clod-clipboard /usr/local/bin/wl-paste
 
-# Tells Claude about the container; the entrypoint loads /etc/clod.
-COPY container.md /etc/clod/.claude/rules/clod.md
+# Tells every agent about the container; the entrypoint composes it with the
+# variants' (AGENTS.d/) and the shared config's instructions into the one
+# AGENTS.md file each agent reads, and Claude's /etc/clod/CLAUDE.md.
+COPY container.md /etc/clod/AGENTS.md
+# The entrypoint writes that composition as claude, so the directory takes its
+# ownership; the variants' files under AGENTS.d/ are only read.
+RUN chown claude:claude /etc/clod
 
 # Claude Code plugins the entrypoint loads with --plugin-dir: show-image draws
 # pictures inline in kitty and Ghostty. The launcher mounts its checkout's

@@ -65,13 +65,13 @@ clod image new mine go+sudo  # a starter Dockerfile, built on go+sudo
 clod image new go            # your own copy of the bundled go, which then takes its place
 clod image diff go           # how yours differs from the bundled go, after either changes
 clod image edit mine         # open its Dockerfile in $VISUAL, $EDITOR or vi
-clod image edit mine CLAUDE.md  # or another file beside it, created if need be
+clod image edit mine AGENTS.md  # or another file beside it, created if need be
 clod image edit mine --build    # then build it, to see a mistake now
 ```
 
 `clod image edit` with no name edits the variant `-i` or `CLOD_IMAGE` selects.
 A file beside the `Dockerfile` reaches the image only if the `Dockerfile`
-copies it in, as `COPY CLAUDE.md /etc/clod/.claude/rules/mine.md` does.
+copies it in, as `COPY AGENTS.md /etc/clod/AGENTS.d/mine.md` does.
 It edits only your own variants: a bundled one needs `clod image new NAME`
 first, and a combination is edited one variant at a time. The next run picks up
 the change and rebuilds.
@@ -105,14 +105,19 @@ packages install without their docs, man pages or translations
 directory is the build context, so `COPY` works for files beside the
 `Dockerfile`.
 
-A variant can give Claude instructions about itself, such as where its tools
-are. Put them in a Markdown file beside the `Dockerfile` and copy it into
-`/etc/clod/.claude/rules/`, which Claude Code loads in every image built from
-the variant:
+A variant can give the agents instructions about itself, such as where its
+tools are. Put them in a Markdown file beside the `Dockerfile` and copy it into
+`/etc/clod/AGENTS.d/`; the entrypoint composes those with the image's own into
+the AGENTS.md every agent reads:
 
 ```dockerfile
-COPY CLAUDE.md /etc/clod/.claude/rules/mine.md
+COPY AGENTS.md /etc/clod/AGENTS.d/mine.md
 ```
+
+A variant from before `AGENTS.d/` that copies its file into
+`/etc/clod/.claude/rules/`, or to `/etc/clod/CLAUDE.md`, keeps working: the
+entrypoint composes those in too. Move it to `AGENTS.d/` when you next edit
+the variant.
 
 Node is in the base for the agents' own tooling: Codex installs with npm, and
 many MCP servers run with `npx`. Claude Code doesn't need it. The base gets Node

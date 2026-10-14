@@ -11,5 +11,5 @@ RUN curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings
        > /etc/apt/sources.list.d/docker.sources \
     && apt-get update \
     && apt-get install -y docker-ce-cli docker-buildx-plugin docker-compose-plugin
-COPY CLAUDE.md /etc/clod/.claude/rules/docker.md
+COPY AGENTS.md /etc/clod/AGENTS.d/docker.md
 USER claude
