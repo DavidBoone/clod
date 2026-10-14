@@ -37,6 +37,12 @@ unset env_file
 compose_agents_md() {
     begin='<!-- clod:begin: written by clod on every run, from the container'\''s and ~/.clod/shared'\''s instructions; edit outside this block -->'
     end='<!-- clod:end -->'
+    # A home's own file the container user can't read can't be kept: leave it
+    # as it is, without the composition, rather than replace it.
+    if [ -z "${2:-}" ] && [ -e "$1" ] && [ ! -r "$1" ]; then
+        echo "clod: can't read $1, so it is left as it is, without the container's and shared instructions" >&2
+        return 0
+    fi
     # The image's /etc/clod isn't the container user's to write on an image
     # from before this composition. Say so and go on: the agent then runs
     # without the composed instructions rather than not at all.
@@ -50,11 +56,16 @@ compose_agents_md() {
     if [ -n "$2" ]; then
         [ ! -f "$1" ] || set -- "$@" "$1"
     else
-        for src in /etc/clod/.claude/rules/*.md; do
-            # clod.md is the container.md an image from before AGENTS.md has,
-            # which /etc/clod/AGENTS.md already gives.
-            [ "${src##*/}" = clod.md ] || set -- "$@" "$src"
-        done
+        # Claude finds rules in subdirectories too. clod.md is the
+        # container.md an image from before AGENTS.md has, which
+        # /etc/clod/AGENTS.md already gives.
+        rules=$(find /etc/clod/.claude/rules -type f -name '*.md' \
+            ! -path /etc/clod/.claude/rules/clod.md 2>/dev/null | sort)
+        while IFS= read -r src; do
+            [ -z "$src" ] || set -- "$@" "$src"
+        done <<EOF
+$rules
+EOF
         set -- "$@" /etc/clod/CLAUDE.md
     fi
     if [ -r /etc/claude-code/AGENTS.md ]; then

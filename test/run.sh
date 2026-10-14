@@ -285,16 +285,24 @@ test_codex() {
     test "$(grep -c "disposable Docker container" $f)" = 1 && test "$(tail -1 $f)" = "keep me"
     test -z "$(find ~/.codex -name "AGENTS.md.clod-tmp.*")"
   '
-  # a variant from before AGENTS.d/ reaches Codex too, from .claude/rules/ or
-  # its own /etc/clod/CLAUDE.md
+  # a home's own file the entrypoint can't read is left as it is, with a
+  # warning, rather than replaced
+  clod bash -c 'cp ~/.codex/AGENTS.md ~/agents-before && chmod 000 ~/.codex/AGENTS.md'
+  clod codex --version >/dev/null 2> err
+  has "can't read /home/claude/.codex/AGENTS.md, so it is left as it is" err
+  clod bash -c 'set -e; chmod 644 ~/.codex/AGENTS.md; cmp ~/agents-before ~/.codex/AGENTS.md; rm ~/agents-before'
+  # a variant from before AGENTS.d/ reaches Codex too, from .claude/rules/
+  # (subdirectories included) or its own /etc/clod/CLAUDE.md
   mkdir -p ~/.clod/images/oldstyle
   echo '# old-style rule' > ~/.clod/images/oldstyle/rule.md
   echo '# old-style claude-md' > ~/.clod/images/oldstyle/CLAUDE.md
+  echo '# old-style nested rule' > ~/.clod/images/oldstyle/nested.md
   printf '%s\n' 'ARG BASE=clod' 'FROM $BASE' 'USER root' \
-    'COPY rule.md /etc/clod/.claude/rules/rule.md' 'COPY CLAUDE.md /etc/clod/CLAUDE.md' \
+    'COPY rule.md /etc/clod/.claude/rules/rule.md' 'COPY CLAUDE.md /etc/clod/CLAUDE.md' 'COPY nested.md /etc/clod/.claude/rules/sub/nested.md' \
     'USER claude' > ~/.clod/images/oldstyle/Dockerfile
   clod -i oldstyle codex --version >/dev/null
-  clod bash -c 'grep -qx "# old-style rule" ~/.codex/AGENTS.md && grep -qx "# old-style claude-md" ~/.codex/AGENTS.md'
+  clod bash -c 'grep -qx "# old-style rule" ~/.codex/AGENTS.md && grep -qx "# old-style claude-md" ~/.codex/AGENTS.md &&
+    grep -qx "# old-style nested rule" ~/.codex/AGENTS.md'
   clod --force image rm oldstyle
 }
 
