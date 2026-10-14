@@ -291,18 +291,35 @@ test_codex() {
   clod codex --version >/dev/null 2> err
   has "can't read /home/claude/.codex/AGENTS.md, so it is left as it is" err
   clod bash -c 'set -e; chmod 644 ~/.codex/AGENTS.md; cmp ~/agents-before ~/.codex/AGENTS.md; rm ~/agents-before'
+  # an editor's CRLF line ends still mark the block, so the user's text stays
+  # and the block isn't repeated
+  clod bash -c "sed -i 's/\$/\r/' ~/.codex/AGENTS.md"
+  clod codex --version >/dev/null
+  clod bash -c '
+    set -e
+    f=~/.codex/AGENTS.md
+    test "$(grep -c "^<!-- clod:begin" $f)" = 1 && test "$(grep -c "^# my codex rules" $f)" = 1
+  '
+  # a block whose clod:end line is gone leaves the file as it is, with a
+  # warning, as the user's text can't be told from the block's
+  clod bash -c 'set -e; sed -i "/clod:end/d" ~/.codex/AGENTS.md; cp ~/.codex/AGENTS.md ~/agents-before'
+  clod codex --version >/dev/null 2> err
+  has 'without its clod:end line, so it is left as it is' err
+  clod bash -c 'set -e; cmp ~/agents-before ~/.codex/AGENTS.md; rm ~/agents-before ~/.codex/AGENTS.md'
   # a variant from before AGENTS.d/ reaches Codex too, from .claude/rules/
-  # (subdirectories included) or its own /etc/clod/CLAUDE.md
+  # (subdirectories and symlinks included) or its own /etc/clod/CLAUDE.md
   mkdir -p ~/.clod/images/oldstyle
   echo '# old-style rule' > ~/.clod/images/oldstyle/rule.md
   echo '# old-style claude-md' > ~/.clod/images/oldstyle/CLAUDE.md
   echo '# old-style nested rule' > ~/.clod/images/oldstyle/nested.md
+  echo '# old-style linked rule' > ~/.clod/images/oldstyle/linked.md
   printf '%s\n' 'ARG BASE=clod' 'FROM $BASE' 'USER root' \
     'COPY rule.md /etc/clod/.claude/rules/rule.md' 'COPY CLAUDE.md /etc/clod/CLAUDE.md' 'COPY nested.md /etc/clod/.claude/rules/sub/nested.md' \
+    'COPY linked.md /opt/linked.md' 'RUN ln -s /opt/linked.md /etc/clod/.claude/rules/linked.md' \
     'USER claude' > ~/.clod/images/oldstyle/Dockerfile
   clod -i oldstyle codex --version >/dev/null
   clod bash -c 'grep -qx "# old-style rule" ~/.codex/AGENTS.md && grep -qx "# old-style claude-md" ~/.codex/AGENTS.md &&
-    grep -qx "# old-style nested rule" ~/.codex/AGENTS.md'
+    grep -qx "# old-style nested rule" ~/.codex/AGENTS.md && grep -qx "# old-style linked rule" ~/.codex/AGENTS.md'
   clod --force image rm oldstyle
 }
 

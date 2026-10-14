@@ -182,7 +182,8 @@ resumed sessions. The container's and your shared instructions reach it in its
 global `AGENTS.md`, in a block between `<!-- clod:begin` and `<!-- clod:end -->`
 lines that the entrypoint rewrites in the home on every run; anything of your
 own outside the block stays (`~/.codex/AGENTS.override.md` of your own would
-take the whole file's place).
+take the whole file's place). Without its `clod:end` line, clod can't tell the
+block from your text, so it leaves the file as it is and says so.
 
 ## OpenCode
 

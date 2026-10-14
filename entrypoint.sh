@@ -43,6 +43,23 @@ compose_agents_md() {
         echo "clod: can't read $1, so it is left as it is, without the container's and shared instructions" >&2
         return 0
     fi
+    # The user's own instructions: what a home's file has outside an earlier
+    # block, without the blank lines that set it apart. A clod:begin line with
+    # no clod:end after it (deleted, or mangled by an editor) leaves no way to
+    # tell the block from the user's text, so the file is left as it is.
+    # Markers match with a CR at the end, as an editor saving CRLF leaves them.
+    own=
+    if [ -z "${2:-}" ] && [ -f "$1" ] && ! own=$(awk -v e="$end" '
+        { l = $0; sub(/\r$/, "", l) }
+        index(l, "<!-- clod:begin") == 1 { skip = 1; next }
+        skip && l == e { skip = 0; next }
+        skip { next }
+        !seen && l == "" { next }
+        { seen = 1; print }
+        END { if (skip) exit 3 }' "$1"); then
+        echo "clod: $1 has a clod:begin line without its clod:end line, so it is left as it is, without the container's and shared instructions; restore the line or remove the block" >&2
+        return 0
+    fi
     # The image's /etc/clod isn't the container user's to write on an image
     # from before this composition. Say so and go on: the agent then runs
     # without the composed instructions rather than not at all.
@@ -56,10 +73,10 @@ compose_agents_md() {
     if [ -n "$2" ]; then
         [ ! -f "$1" ] || set -- "$@" "$1"
     else
-        # Claude finds rules in subdirectories too. clod.md is the
-        # container.md an image from before AGENTS.md has, which
-        # /etc/clod/AGENTS.md already gives.
-        rules=$(find /etc/clod/.claude/rules -type f -name '*.md' \
+        # Claude finds rules in subdirectories and through symlinks too.
+        # clod.md is the container.md an image from before AGENTS.md has,
+        # which /etc/clod/AGENTS.md already gives.
+        rules=$(find -L /etc/clod/.claude/rules -type f -name '*.md' \
             ! -path /etc/clod/.claude/rules/clod.md 2>/dev/null | sort)
         while IFS= read -r src; do
             [ -z "$src" ] || set -- "$@" "$src"
@@ -92,21 +109,7 @@ EOF
         done
         if [ -z "$claude" ]; then
             printf '\n%s\n' "$end"
-            # The user's own instructions: what the file has outside an
-            # earlier block, without the blank lines that set it apart.
-            if [ -f "$dest" ]; then
-                awk -v e="$end" '
-                    index($0, "<!-- clod:begin") == 1 { skip = 1; next }
-                    skip && $0 == e { skip = 0; next }
-                    skip { next }
-                    !seen && $0 == "" { next }
-                    { seen = 1; print }' "$dest" | {
-                    if IFS= read -r line; then
-                        printf '\n%s\n' "$line"
-                        cat
-                    fi
-                }
-            fi
+            [ -z "$own" ] || printf '\n%s\n' "$own"
         fi
     } >> "$tmp"
     if ! mv -f "$tmp" "$dest" 2>/dev/null; then
