@@ -267,6 +267,23 @@ IMAGES
 check 0 image
 has '^  old\+top +stale '
 has '^  keep +stale, in use '
+# A CLOD_IMAGE clod can't run is a warning where it lists, and an error where
+# it needs the image.
+export CLOD_IMAGE=python+nosuch
+clod image > actual 2> errors
+has "^clod: no variant named 'nosuch'" errors
+has '^  keep '
+clod env > actual 2> errors
+has "^image: +python\+nosuch \(no variant named 'nosuch'"
+for command in bash 'image build' 'image clean' 'image edit'; do
+  # shellcheck disable=SC2086 # split each command into its noun and verb
+  check 1 $command
+  has "^clod: no variant named 'nosuch'" errors
+done
+export CLOD_IMAGE='+python'
+clod env > actual 2> errors
+has "^image: +\+python \(invalid CLOD_IMAGE"
+unset CLOD_IMAGE
 check 0 image clean old
 has '^removed old$'
 check 1 image clean keep

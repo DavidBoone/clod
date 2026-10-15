@@ -1060,12 +1060,15 @@ test_combine() {
   echo 'RUN true' >> ~/.clod/images/first/Dockerfile
   clod image | has '^  first+second  *stale'
   clod -i first+second bash -c true 2>&1 | has 'building first+second\.\.\.'
-  exits 1 clod -i first+fixed env 2>out
+  exits 1 clod -i first+fixed bash -c true 2>out
   grep -q "fixed can't go on top" out
-  exits 1 clod -i first+nope env
+  clod -i first+fixed env | has "^image: *first+fixed (variant fixed can't go on top"
+  exits 1 clod -i first+nope bash -c true
+  clod -i first+nope env | has "^image: *first+nope (no variant named 'nope'"
   for name in first+ first++second; do
-    exits 1 clod -i "$name" env 2>out
+    exits 1 clod -i "$name" bash -c true 2>out
     grep -q 'invalid image name' out
+    clod -i "$name" env | has "^image: *$name (invalid image name"
   done
   exits 1 clod default image first+nope
   clod -i fixed+first env | has '^image: *fixed+first '
@@ -1115,11 +1118,12 @@ test_image_add() {
   grep -q 'first+second already has second' out
   exits 1 clod -i +first+first env 2>out
   grep -q 'names first twice' out
-  CLOD_IMAGE=+first exits 1 clod env 2>out
+  CLOD_IMAGE=+first exits 1 clod bash -c true 2>out
   grep -q 'only -i takes a leading +' out
+  CLOD_IMAGE=+first clod env | has "^image: *+first (invalid CLOD_IMAGE '+first': only -i takes a leading +)$"
   exits 2 clod -i + env
   for name in +first+ ++first; do
-    exits 1 clod -i "$name" env
+    exits 1 clod -i "$name" bash -c true
   done
 }
 
@@ -1451,7 +1455,8 @@ test_devcontainer_names() {
     has '^image: *devcontainer:py+sudo (.*/proj/.devcontainer/py/devcontainer.json + .*/images/sudo)$'
   exits 1 clod -i devcontainer:nope bash -c true 2>&1 |
     has -x "clod: no devcontainer named 'nope' in $PWD (it has: py)"
-  exits 1 clod -i go+devcontainer env 2>&1 | has -x 'clod: a devcontainer goes first in a combination, as devcontainer+go'
+  exits 1 clod -i go+devcontainer bash -c true 2>&1 | has -x 'clod: a devcontainer goes first in a combination, as devcontainer+go'
+  clod -i go+devcontainer env | has '^image: *go+devcontainer (a devcontainer goes first in a combination, as devcontainer+go)$'
   exits 1 clod -s -i devcontainer bash -c true 2>&1 | has -x 'clod: a scratch workspace has no devcontainer; name one by its path, as devcontainer:PATH'
   exits 1 clod -w vol:dcvol -i devcontainer bash -c true 2>&1 | has -x 'clod: a volume workspace has no devcontainer; name one by its path, as devcontainer:PATH'
   # one the workspace hasn't is an error only for what needs it

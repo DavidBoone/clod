@@ -484,6 +484,12 @@ show_help() {
   if [[ -z $1 ]]; then help_summary; else help_page "$1"; fi
 }
 
+# Exits with error message $1.
+die() {
+  echo "$1" >&2
+  exit 1
+}
+
 # Exits with error message $1 and where to read about it: the page of the
 # command it's about, or clod help.
 usage_error() {
@@ -983,40 +989,41 @@ tag_variant() {
 
 # Sets REPLY to the tag of the variant or combination image name $1 means:
 # clod-NAME for NAME or clod-NAME, clod-A.B for A+B, A.B or clod-A.B. Sets it
-# to nothing when $1 is neither, so names a local docker image. Exits with an
-# error when $1 is a combination clod can't build: a name with + in it whose
-# parts aren't all variants, or one whose variants after the first don't take
-# ARG BASE. devcontainer and devcontainer:NAME, first in a combination or
-# alone, are the workspace's devcontainer image (devcontainer_tag), and an error
-# when it has none.
+# to nothing when $1 is neither, so names a local docker image. Returns 1,
+# with the reason in variant_error, when $1 is a combination clod can't build: a
+# name with + in it whose parts aren't all variants, or one whose variants after
+# the first don't take ARG BASE. devcontainer and devcontainer:NAME, first in a
+# combination or alone, are the workspace's devcontainer image
+# (devcontainer_tag), and an error when it has none.
 resolve_variant() {
   local name=${1//+/.} first=${1%%+*}
+  variant_error=''
   case +$1+ in
     *+devcontainer[+:]*)
       if [[ $first != devcontainer && $first != devcontainer:* ]]; then
-        echo "clod: a devcontainer goes first in a combination, as devcontainer+${first#clod-}" >&2
-        exit 1
+        variant_error="clod: a devcontainer goes first in a combination, as devcontainer+${first#clod-}"
+        return 1
       fi
-      devcontainer_tag "$first" || { echo "$dc_error" >&2; exit 1; }
+      devcontainer_tag "$first" || { variant_error=$dc_error; return 1; }
       name=$REPLY${name#"${first//+/.}"}
       ;;
   esac
   if [[ $1 == *+* ]]; then
     case ${name#clod-} in
       .*|*.|*..*)
-        echo "clod: invalid image name '$1': a combination is variants joined by +, like go+sudo" >&2
-        exit 1
+        variant_error="clod: invalid image name '$1': a combination is variants joined by +, like go+sudo"
+        return 1
         ;;
     esac
   fi
   tag_variant "clod-${name#clod-}"
   if [[ -n $variant_fixed ]]; then
-    echo "clod: variant $variant_fixed can't go on top of another: its Dockerfile needs ARG BASE=clod and FROM \$BASE in place of FROM clod" >&2
-    exit 1
+    variant_error="clod: variant $variant_fixed can't go on top of another: its Dockerfile needs ARG BASE=clod and FROM \$BASE in place of FROM clod"
+    return 1
   fi
   if [[ -n $variant_missing && $1 == *+* ]]; then
-    echo "clod: no variant named '$variant_missing' (clod image lists them)" >&2
-    exit 1
+    variant_error="clod: no variant named '$variant_missing' (clod image lists them)"
+    return 1
   fi
   if [[ -n $REPLY || -n $variant_dc ]]; then
     REPLY=clod-${name#clod-}
@@ -1424,8 +1431,8 @@ add_variants() {
 # built on A, as clod-A.B; image becomes NAME or A+B. The base image is clod,
 # or clod:full with CLOD_BASE=full (base_tag). image_dc is the
 # devcontainer image at the root of its chain, if there is one; a devcontainer
-# the workspace doesn't have is an error only for what needs the image
-# (need_image), so other commands still work.
+# the workspace doesn't have, or a CLOD_IMAGE clod can't run, is an error only
+# for what needs the image (need_image), so other commands still work.
 setup_image() {
   local spec
   image=${CLOD_IMAGE:-clod} image_dc='' image_error='' dc_note=''
@@ -1450,20 +1457,24 @@ setup_image() {
       ;;
     *) echo "clod: CLOD_DEVCONTAINER is '$CLOD_DEVCONTAINER'; it must be auto or off" >&2; exit 1 ;;
   esac
+  tag='' variant_dir=''
   if [[ $image == +* ]]; then
-    echo "clod: invalid CLOD_IMAGE '$image': only -i takes a leading +" >&2
-    exit 1
+    image_error="clod: invalid CLOD_IMAGE '$image': only -i takes a leading +"
+    return 0
   fi
   [[ -n $image_add ]] && add_variants
   if [[ $image == *[[:space:]]* ]]; then
-    echo "clod: invalid CLOD_IMAGE '$image'" >&2
-    exit 1
-  fi
-  if [[ $image == devcontainer || $image == devcontainer[:+]* ]] && ! devcontainer_tag "${image%%+*}"; then
-    image_error=$dc_error tag='' variant_dir=''
+    image_error="clod: invalid CLOD_IMAGE '$image'"
     return 0
   fi
-  resolve_variant "$image"
+  if [[ $image == devcontainer || $image == devcontainer[:+]* ]] && ! devcontainer_tag "${image%%+*}"; then
+    image_error=$dc_error
+    return 0
+  fi
+  if ! resolve_variant "$image"; then
+    image_error=$variant_error
+    return 0
+  fi
   if [[ -n $REPLY ]]; then
     tag=$REPLY
     spec=$image
@@ -1482,11 +1493,9 @@ setup_image() {
 }
 
 # Exits with the reason when this run's image is a devcontainer the workspace
-# doesn't have.
+# doesn't have or a CLOD_IMAGE clod can't run.
 need_image() {
-  [[ -z $image_error ]] && return 0
-  echo "$image_error" >&2
-  exit 1
+  [[ -z $image_error ]] || die "$image_error"
 }
 
 # Sets shared_dir to the shared config to mount, port_args and container_ports
@@ -2115,7 +2124,7 @@ cmd_default() {
   if [[ -n $value ]]; then
     case $key in
       image)
-        resolve_variant "$value"
+        resolve_variant "$value" || die "$variant_error"
         if [[ -z $REPLY ]] && ! docker image inspect "$value" >/dev/null 2>&1; then
           echo "clod: no variant or local image named '$value' (clod image lists them)" >&2
           exit 1
@@ -2236,7 +2245,7 @@ cmd_image_show() {
   elif [[ $1 == "$full_tag" ]]; then
     tag=$1
   else
-    resolve_variant "$1"
+    resolve_variant "$1" || die "$variant_error"
     tag=$REPLY
     if [[ -z $tag ]]; then
       echo "clod: no variant named '$1' (clod image lists them)" >&2
@@ -2260,6 +2269,7 @@ cmd_image_show() {
 cmd_image() {
   local n src t i names tags srcs states=() state_width=5 mark any_dc='' rest
   any_stale='' any_used=''
+  [[ -n $image_error ]] && echo "$image_error" >&2
   names=(clod) tags=(clod)
   srcs=("$([[ -n $base_dir ]] && echo bundled || echo 'local image') (base)")
   if [[ -n $base_dir ]]; then
@@ -2395,7 +2405,7 @@ cmd_image_clean() {
     [[ $name == clod ]] && t=$base_tag
     [[ $name == "$full_tag" ]] && t=$name
     if [[ $name == devcontainer || $name == devcontainer[:+]* ]]; then
-      resolve_variant "$name"
+      resolve_variant "$name" || die "$variant_error"
       t=$REPLY
     fi
     if [[ -z $(docker image inspect -f '{{index .Config.Labels "clod.hash"}}' "$t" 2>/dev/null) ]]; then
@@ -2814,7 +2824,7 @@ cmd_image_new() {
     exit 1
   fi
   if [[ -n $from ]]; then
-    resolve_variant "$from"
+    resolve_variant "$from" || die "$variant_error"
     [[ $REPLY == clod-*.* ]] && combo=$REPLY
     find_variant "$from"
     src=$REPLY
@@ -2934,6 +2944,7 @@ check_rel_file() {
 cmd_image_edit() {
   local name=${1:-} file=${2:-Dockerfile} dir combo
   if [[ -z $name ]]; then
+    need_image
     image_name "$image"
     name=$REPLY
   fi
@@ -3069,7 +3080,7 @@ cmd_image_build() {
     elif [[ $name == "$full_tag" ]]; then
       t=$name
     else
-      resolve_variant "$name"
+      resolve_variant "$name" || die "$variant_error"
       t=$REPLY
     fi
     if [[ -z $t ]]; then
@@ -3236,7 +3247,6 @@ start_clipboard() {
 
 cmd_run() {
   local run_args variants endpoint sock mount probe sock_stat
-  need_image
   need_home
   [[ -n $dc_note ]] && echo "$dc_note" >&2
 
@@ -3371,9 +3381,12 @@ case $command${verb:+ $verb} in
   # diff's status: 1 when they differ.
   'shared diff') cmd_shared_diff; exit ;;
   'image diff') cmd_image_diff "$@"; exit ;;
-  'image build'|'image rebuild') need_docker; cmd_image_build "$@"; exit 0 ;;
+  # With no names, these act on this run's image.
+  'image build'|'image rebuild') (( $# )) || need_image; need_docker; cmd_image_build "$@"; exit 0 ;;
+  'image clean') (( $# )) || need_image; need_docker; cmd_image_clean "$@"; exit 0 ;;
   'image '*|'home '*|workspace*) need_docker; "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
 esac
+need_image
 check_workspace
 refuse_off_limits
 need_docker
