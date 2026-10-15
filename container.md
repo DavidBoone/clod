@@ -24,15 +24,12 @@ Only `/home/claude` and (unless scratch) `/workspace` persist. System packages (
 
 # Changing the container
 
-You can't run `clod` or see the host's `~/.clod`; the user changes these on the host, and they take effect on the next `clod` run. When something about the container is in the way, say which of these to change, with the exact lines:
+You can't run `clod` or see the host's `~/.clod`; the user changes these on the host, effective next run. When the container is in the way, say what to change, with exact lines:
 
-- Docs and man pages for installed packages: `clod default base full` builds on `debian:trixie` instead of the slim image
-- Packages or system setup: a variant, `~/.clod/images/<name>/Dockerfile` (`ARG BASE=clod` / `FROM $BASE`, `USER root` … `USER claude`), run with `clod -i <name>`; `clod image new <name>` starts one and `clod image edit <name>` opens its Dockerfile. Variants combine (`-i go+<name>`), and clod rebuilds them when their files change. For root while running, the bundled `sudo` variant
-- Environment variables for the container: `.envrc` in the project (`export FOO=bar`), loaded by direnv on the host, where it must be allowed
-- Defaults for every run: `clod default image|base|command|home|ports|ports-busy|clipboard|devcontainer VALUE`; for one project, `CLOD_IMAGE`, `CLOD_PORTS` and so on in its `.envrc`
-- A project with a `.devcontainer`: `clod -i devcontainer` runs in it (`clod -i devcontainer:PATH/` for one in another folder, such as below the workspace) (the devcontainer CLI on the host builds it), and `clod default devcontainer auto` does so wherever there is one; the devcontainer config, in the project, is what to change for its packages
-- Instructions or managed settings for every home: `~/.clod/shared/` (`clod shared new` creates it)
-- A home on the shared folders that's slow, or that `chown` fails in: a volume home, which `clod home mv NAME vol:NAME` moves it to, login included (`clod home cp` copies)
-- Ports: `clod -P 3000` or `CLOD_PORTS`; Docker access: `clod -i docker --docker`, which gives the agent root on the Docker host
+- Packages: a variant Dockerfile (`clod image new <name>`, `clod image edit <name>`), run with `clod -i <name>`; root while running: the `sudo` variant
+- Environment variables: the project's `.envrc` (direnv, allowed on the host)
+- Defaults: `clod default KEY VALUE`, or `CLOD_*` in a project's `.envrc`
+- Instructions or settings for every home: `~/.clod/shared/`
+- Ports: `clod -P 3000`; Docker access: `clod -i docker --docker` (root on the Docker host)
 
-On the host, `clod env` shows the settings a run would use; `clod image`, `clod home` and `clod workspace` list the images, homes and volume workspaces, and `clod help` lists the rest (`clod help COMMAND` for one). The full docs are in the repo's `docs/`: `usage.md`, `images.md`, `configuration.md`, `shared-config.md`, `docker-socket.md`, `security.md`, `docker.md`. Read them (`https://raw.githubusercontent.com/DavidBoone/clod/master/docs/<page>`) before advising on clod beyond this summary.
+`clod env` and `clod help` show the rest. Read the docs (`https://raw.githubusercontent.com/DavidBoone/clod/master/docs/<page>`: `usage.md`, `images.md`, `configuration.md`, `shared-config.md`, `docker-socket.md`, `security.md`, `docker.md`) before advising beyond this.
