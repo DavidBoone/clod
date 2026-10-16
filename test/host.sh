@@ -214,6 +214,9 @@ has '^ARG BASE=devcontainer:/.*/proj/\+top$' "$HOME/.clod/images/short/Dockerfil
 check 1 image new nope devcontainer
 has 'by its path' errors
 check 1 image new nope devcontainer:proj
+check 1 image new nope 'devcontainer:my proj/'
+has 'invalid image name' errors
+test ! -e "$HOME/.clod/images/nope"
 check 1 image new nope devcontainer:missing/
 has 'no devcontainer at' errors
 check 0 env -i short

@@ -2910,6 +2910,7 @@ cmd_image_new() {
     usage_error "invalid image name '$name': lowercase letters and digits, joined by - or _"
   [[ $name == devcontainer || $name == devcontainer-* ]] &&
     usage_error "devcontainer names the workspace's devcontainer image; choose another name"
+  [[ $from == *[[:space:]]* ]] && die "clod: invalid image name '$from'"
   if [[ $from == devcontainer || $from == devcontainer[:+]* ]]; then
     path=${from%%+*}
     path=${path#devcontainer}
