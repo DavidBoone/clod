@@ -204,8 +204,10 @@ Shows how image NAME is built: each image in its chain, its state (built,
 stale), the images it is FROM and where its files are.
 @image new
 Creates the variant ~/.clod/images/NAME: a copy of variant FROM, a starter
-built on combination FROM (A+B), a copy of the bundled variant NAME, or a
-starter. Run it with clod -i NAME.
+built on FROM when that is a combination (A+B) or a devcontainer by its path
+(devcontainer:PATH, or with variants on top, devcontainer:PATH+B), a copy of
+the bundled variant NAME, or a starter. Run it with clod -i NAME; one built on
+FROM gives FROM a short name, and goes first in a combination.
 @image edit
 Opens your variant ~/.clod/images/NAME's Dockerfile in $VISUAL, or $EDITOR,
 or vi, or with no NAME that of the image -i or CLOD_IMAGE selects. FILE opens
@@ -770,19 +772,26 @@ devcontainer_tag() {
   realdir "$dc_workspace"
   hash=$(printf '%s' "$REPLY${dc_config#"$dc_workspace"}" | $sum | cut -c1-12)
   dc_tag=clod-devcontainer-${name:+$name-}$hash
+  dc_known+=("$dc_tag" "$dc_config" "$dc_workspace")
   REPLY=$dc_tag
 }
 
 # Sets dc_cfg and dc_ws to the config file and workspace devcontainer image $1
-# is built from: this run's, or those it was built with. Fails if the config
-# file has gone.
+# is built from: those devcontainer_tag found for it this run (dc_known, as
+# TAG CONFIG WORKSPACE triples), or else those it was built with. Fails if the
+# config file has gone.
+dc_known=()
 dc_source() {
-  if [[ $1 == "${dc_tag:-}" ]]; then
-    dc_cfg=$dc_config dc_ws=$dc_workspace
-  else
-    dc_cfg=$(docker image inspect -f '{{index .Config.Labels "clod.devcontainer.config"}}' "$1" 2>/dev/null)
-    dc_ws=$(docker image inspect -f '{{index .Config.Labels "clod.devcontainer.workspace"}}' "$1" 2>/dev/null)
-  fi
+  local i
+  for (( i = 0; i < ${#dc_known[@]}; i += 3 )); do
+    if [[ $1 == "${dc_known[i]}" ]]; then
+      dc_cfg=${dc_known[i+1]} dc_ws=${dc_known[i+2]}
+      [[ -f $dc_cfg ]]
+      return
+    fi
+  done
+  dc_cfg=$(docker image inspect -f '{{index .Config.Labels "clod.devcontainer.config"}}' "$1" 2>/dev/null)
+  dc_ws=$(docker image inspect -f '{{index .Config.Labels "clod.devcontainer.workspace"}}' "$1" 2>/dev/null)
   [[ -n $dc_cfg && -f $dc_cfg ]]
 }
 
@@ -881,13 +890,45 @@ is_base() {
 }
 
 # Sets REPLY to the image variant directory $1 is built on when first in its
-# chain: base_tag when that isn't clod and the Dockerfile's ARG BASE defaults
-# to clod, else nothing, leaving its own FROM as it is.
+# chain, passed to it as BASE: for an ARG BASE defaulting to clod, base_tag;
+# for one defaulting to a combination or a devcontainer as -i names them, such
+# as go+sudo or devcontainer:PATH (relative to $1), that image's Docker name;
+# else nothing, leaving its own FROM as it is, so a single name such as python
+# stays a Docker name. root_spec is the default when it starts with a
+# devcontainer by its path, which the Docker name can't carry. Fails, with the reason in root_error, when clod can't build the
+# image it names, or it names the workspace's devcontainer (devcontainer or
+# devcontainer:NAME), which differs from one workspace to the next. Keeps
+# dc_tag, dc_config and dc_workspace, which are this run's.
 root_base() {
-  REPLY=''
-  [[ $base_tag != clod ]] || return 0
-  awk 'toupper($1) == "FROM" { exit } toupper($1) == "ARG" && $2 ~ /^BASE=/ { v = substr($2, 6); gsub(/^"|"$/, "", v) }
-    END { exit v != "clod" }' "$1/Dockerfile" && REPLY=$base_tag
+  local dir=$1 spec raw first path status keep=("${dc_tag:-}" "${dc_config:-}" "${dc_workspace:-}")
+  REPLY='' root_spec='' root_error=''
+  base_default "$dir" && [[ -n $base_arg ]] || return 0
+  spec=$base_arg raw=$base_arg
+  case $spec in
+    clod) [[ $base_tag == clod ]] || REPLY=$base_tag; return 0 ;;
+    *'$'*) return 0 ;;
+    *+*|devcontainer|devcontainer:*) ;;
+    *) return 0 ;;
+  esac
+  first=${spec%%+*}
+  if [[ $first == devcontainer || $first == devcontainer:* ]]; then
+    path=${first#devcontainer}
+    path=${path#:}
+    if [[ $path != */* && $path != .* && $path != '~'* ]]; then
+      root_error="clod: $(tildify "$dir/Dockerfile") is built on ARG BASE=$raw, the devcontainer of whichever workspace clod runs in; name one by its path, as devcontainer:PATH"
+      return 1
+    fi
+    [[ $path == /* || $path == '~'* ]] || spec=devcontainer:$dir/${spec#devcontainer:}
+  fi
+  resolve_variant "$spec"
+  status=$?
+  dc_tag=${keep[0]} dc_config=${keep[1]} dc_workspace=${keep[2]}
+  if (( status )); then
+    REPLY=''
+    root_error="clod: $(tildify "$dir/Dockerfile") is built on ARG BASE=$raw: ${variant_error#clod: }"
+    return 1
+  fi
+  [[ -n $path ]] && root_spec=$raw
   return 0
 }
 
@@ -955,22 +996,40 @@ variant_parents() {
     }' "$1/Dockerfile"
 }
 
-# True when variant directory $1's Dockerfile declares ARG BASE before its first
-# FROM, so it can be built on another variant.
-takes_base() {
-  awk 'toupper($1) == "FROM" { exit } toupper($1) == "ARG" && $2 ~ /^BASE(=|$)/ { found = 1 }
-    END { exit !found }' "$1/Dockerfile"
+# Sets base_arg to the default of the ARG BASE variant directory $1's
+# Dockerfile declares before its first FROM, or to nothing when it has none.
+# Fails when it declares no ARG BASE, so it can't be built on another image.
+base_default() {
+  base_arg=$(awk 'toupper($1) == "FROM" { exit }
+    toupper($1) == "ARG" && $2 ~ /^BASE(=|$)/ { found = 1; v = substr($2, 6); gsub(/^"|"$/, "", v) }
+    END { if (found) print v; exit !found }' "$1/Dockerfile")
+}
+
+# True when ARG BASE default $1 builds a variant on an image of its own, which
+# BASE from below it in a combination would replace: anything but nothing, a
+# base (clod, clod:full) or one naming another ARG ($X).
+own_base() {
+  [[ -n $1 && $1 != clod && $1 != "$full_tag" && $1 != *'$'* ]]
+}
+
+# True when variant directory $1 can go on top of another in a combination:
+# it takes ARG BASE, and its default isn't an image of its own (own_base).
+# Sets base_arg (base_default).
+goes_on_top() {
+  base_default "$1" && ! own_base "$base_arg"
 }
 
 # Sets REPLY to the directory of the variant clod image $1 is built from, or to
 # nothing if it isn't a variant's, and variant_base to the image a combination's
 # last variant is built on (clod-a.b for clod-a.b.c), or to nothing. Of the
-# variants its name lists, variant_missing is the first that doesn't exist, and
-# variant_fixed the first after the first that doesn't take ARG BASE. A chain
-# can start with a devcontainer image, whose Docker name goes in variant_dc.
+# variants its name lists, variant_missing is the first that doesn't exist,
+# variant_fixed the first after the first that doesn't take ARG BASE, and
+# variant_rooted the first after the first whose ARG BASE defaults to an image
+# other than clod, which goes in variant_rooted_base. A chain can start with a
+# devcontainer image, whose Docker name goes in variant_dc.
 tag_variant() {
   local parts part i=0
-  REPLY='' variant_base='' variant_missing='' variant_fixed='' variant_dc=''
+  REPLY='' variant_base='' variant_missing='' variant_fixed='' variant_rooted='' variant_rooted_base='' variant_dc=''
   IFS=. read -ra parts <<< "${1#clod-}"
   for part in ${parts[@]+"${parts[@]}"}; do
     if (( i == 0 )) && [[ $part =~ $dc_re ]]; then
@@ -980,7 +1039,13 @@ tag_variant() {
     fi
     find_variant "$part"
     [[ -n $REPLY ]] || { variant_missing=$part; return 0; }
-    (( i++ )) && [[ -z $variant_fixed ]] && ! takes_base "$REPLY" && variant_fixed=$part
+    if (( i++ )); then
+      if ! base_default "$REPLY"; then
+        [[ -n $variant_fixed ]] || variant_fixed=$part
+      elif [[ -z $variant_rooted ]] && own_base "$base_arg"; then
+        variant_rooted=$part variant_rooted_base=$base_arg
+      fi
+    fi
   done
   [[ $1 == clod-?* && $1 != clod-.* && $1 != *. && $1 != *..* ]] || { REPLY=''; return 0; }
   (( ${#parts[@]} > 1 )) && variant_base=${1%.*}
@@ -992,7 +1057,8 @@ tag_variant() {
 # to nothing when $1 is neither, so names a local docker image. Returns 1,
 # with the reason in variant_error, when $1 is a combination clod can't build: a
 # name with + in it whose parts aren't all variants, or one whose variants after
-# the first don't take ARG BASE. devcontainer and devcontainer:NAME, first in a
+# the first don't take ARG BASE or are built on an image of their own (an ARG
+# BASE defaulting to another image than clod). devcontainer and devcontainer:NAME, first in a
 # combination or alone, are the workspace's devcontainer image
 # (devcontainer_tag), and an error when it has none.
 resolve_variant() {
@@ -1019,6 +1085,10 @@ resolve_variant() {
   tag_variant "clod-${name#clod-}"
   if [[ -n $variant_fixed ]]; then
     variant_error="clod: variant $variant_fixed can't go on top of another: its Dockerfile needs ARG BASE=clod and FROM \$BASE in place of FROM clod"
+    return 1
+  fi
+  if [[ -n $variant_rooted ]]; then
+    variant_error="clod: variant $variant_rooted can't go on top of another: it is built on $variant_rooted_base (its ARG BASE), so it goes first in a combination"
     return 1
   fi
   if [[ -n $variant_missing && $1 == *+* ]]; then
@@ -1119,9 +1189,16 @@ walk_image() {
   else
     tag_variant "$tag"
     dir=$REPLY base=$variant_base
+    if [[ $mode == build && -n $variant_rooted ]]; then
+      image_name "$tag"
+      die "clod: can't build $REPLY: variant $variant_rooted is built on $variant_rooted_base (its ARG BASE), so it goes first in a combination"
+    fi
     REPLY=built
     [[ -n $dir ]] || return 0
-    [[ -n $base ]] || { root_base "$dir"; base=$REPLY; }
+    if [[ -z $base ]]; then
+      root_base "$dir" || { [[ $mode == build ]] && die "$root_error"; }
+      base=$REPLY
+    fi
     [[ -n $base ]] && build_args=(--build-arg "BASE=$base")
     while IFS= read -r parent; do
       parents+=("$parent")
@@ -1430,12 +1507,14 @@ add_variants() {
 # to nothing. A variant NAME is built as clod-NAME, and a combination A+B, B
 # built on A, as clod-A.B; image becomes NAME or A+B. The base image is clod,
 # or clod:full with CLOD_BASE=full (base_tag). image_dc is the
-# devcontainer image at the root of its chain, if there is one; a devcontainer
-# the workspace doesn't have, or a CLOD_IMAGE clod can't run, is an error only
+# devcontainer image at the root of its chain, if there is one, and
+# image_on_dc is set when its first variant's ARG BASE names one instead
+# (root_base); a devcontainer the workspace doesn't have, an ARG BASE clod
+# can't build, or a CLOD_IMAGE clod can't run, is an error only
 # for what needs the image (need_image), so other commands still work.
 setup_image() {
   local spec
-  image=${CLOD_IMAGE:-clod} image_dc='' image_error='' dc_note=''
+  image=${CLOD_IMAGE:-clod} image_dc='' image_on_dc='' image_error='' dc_note=''
   case ${CLOD_BASE:-slim} in
     slim) base_tag=clod ;;
     full) base_tag=$full_tag ;;
@@ -1485,6 +1564,15 @@ setup_image() {
     [[ ${spec%%+*} == devcontainer:*/* || ${spec%%+*} == devcontainer:[.~]* ]] && image=$spec
     tag_variant "$tag"
     variant_dir=$REPLY image_dc=$variant_dc
+    # The first variant in the chain may be built on an image its ARG BASE names.
+    if [[ -z $image_dc ]]; then
+      spec=${tag#clod-}
+      find_variant "${spec%%.*}"
+      if [[ -n $REPLY ]]; then
+        root_base "$REPLY" || image_error=$root_error
+        [[ -n $root_spec ]] && image_on_dc=1
+      fi
+    fi
   else
     tag=$image variant_dir=''
     # The base image is the one CLOD_BASE selects, shown as its Docker name.
@@ -1762,56 +1850,61 @@ volume_names() {
   return 0
 }
 
-# Offers image names: clod and the current directory's devcontainers (unless
-# $1 is "variants") and the variants, or after a + the variants that can go on
-# top and aren't in the combination yet. A devcontainer elsewhere is
+# Offers image names: clod and the current directory's devcontainers and the
+# variants, or after a + the variants that can go on top and aren't in the
+# combination yet. A devcontainer elsewhere is
 # devcontainer:PATH: the subdirectories that have one, or once the word starts
 # devcontainer:, the folders and config files in the path typed so far, each
-# folder ending in /, after which the shell adds no space. Reads $cur and
-# $variants from cmd_complete.
+# folder ending in /, after which the shell adds no space. With $1 "from",
+# for image new, it offers devcontainers only by their paths, the current
+# directory's as devcontainer:./, and not clod. Reads $cur and $variants from
+# cmd_complete.
 offer_images() {
-  local v below on_top=() dcs=() path dir real
+  local v below on_top=() dcs=() path dir real here=()
   if [[ $cur == *+* ]]; then
     below=${cur%+*}
     for v in $variants; do
       [[ +$below+ == *+$v+* ]] && continue
       find_variant "$v"
-      takes_base "$REPLY" && on_top+=("$below+$v")
+      goes_on_top "$REPLY" && on_top+=("$below+$v")
     done
     offer ${on_top[@]+"${on_top[@]}"}
   else
-    if [[ $1 != variants ]]; then
-      find_devcontainer "$PWD" ''
+    find_devcontainer "$PWD" ''
+    if [[ $1 == from ]]; then
+      [[ $cur != devcontainer:* ]] && [[ -n $REPLY || -n $dc_names ]] && dcs+=(devcontainer:./)
+    else
+      here=(clod)
       [[ -n $REPLY ]] && dcs+=(devcontainer)
       for v in $dc_names; do
         [[ $v =~ $variant_re ]] && dcs+=("devcontainer:$v")
       done
-      if [[ $cur == devcontainer:* ]]; then
-        path=${cur#devcontainer:}
-        dir=${path%"${path##*/}"}
-        real=${dir:-./}
-        [[ $real == \~/* ]] && real=$HOME${real#\~}
-        [[ $path == \~ ]] && dcs+=('devcontainer:~/')
-        for v in "$real"*/ "$real"devcontainer.json; do
+    fi
+    if [[ $cur == devcontainer:* ]]; then
+      path=${cur#devcontainer:}
+      dir=${path%"${path##*/}"}
+      real=${dir:-./}
+      [[ $real == \~/* ]] && real=$HOME${real#\~}
+      [[ $path == \~ ]] && dcs+=('devcontainer:~/')
+      for v in "$real"*/ "$real"devcontainer.json; do
+        [[ -e $v ]] && dcs+=("devcontainer:$dir${v#"$real"}")
+      done
+      # hidden ones once the name being typed starts with .
+      if [[ ${path##*/} == .* ]]; then
+        dcs+=("devcontainer:$dir./" "devcontainer:$dir../")
+        for v in "$real".*/ "$real".devcontainer.json; do
+          [[ $v == */./ || $v == */../ ]] && continue
           [[ -e $v ]] && dcs+=("devcontainer:$dir${v#"$real"}")
         done
-        # hidden ones once the name being typed starts with .
-        if [[ ${path##*/} == .* ]]; then
-          dcs+=("devcontainer:$dir./" "devcontainer:$dir../")
-          for v in "$real".*/ "$real".devcontainer.json; do
-            [[ $v == */./ || $v == */../ ]] && continue
-            [[ -e $v ]] && dcs+=("devcontainer:$dir${v#"$real"}")
-          done
-        fi
-      else
-        for v in */; do
-          [[ -d $v ]] || continue
-          find_devcontainer "${v%/}" ''
-          [[ -n $REPLY || -n $dc_names ]] && dcs+=("devcontainer:$v")
-        done
       fi
-      offer clod ${dcs[@]+"${dcs[@]}"}
+    else
+      for v in */; do
+        [[ -d $v ]] || continue
+        find_devcontainer "${v%/}" ''
+        [[ -n $REPLY || -n $dc_names ]] && dcs+=("devcontainer:$v")
+      done
     fi
+    offer ${here[@]+"${here[@]}"} ${dcs[@]+"${dcs[@]}"}
     # shellcheck disable=SC2086 # variant names don't contain spaces or globs
     offer $variants
   fi
@@ -1988,7 +2081,7 @@ cmd_complete() {
             docker image inspect "$REPLY" >/dev/null 2>&1 && offer "$word"
         done
         ;;
-      image:new) (( ${#cmd_args[@]} == 1 )) && offer_images variants ;;
+      image:new) (( ${#cmd_args[@]} == 1 )) && offer_images from ;;
       shared:edit) (( ${#cmd_args[@]} )) || offer_files "$clod_dir/shared" ;;
       # Your variants that have a bundled one of the same name.
       image:diff)
@@ -2198,7 +2291,7 @@ image_state() {
 # images it is FROM, in any stage, each once.
 chain_seen=() chain_rows=()
 image_chain() {
-  local tag=$1 dir base='' src from='' parent parents=() t state
+  local tag=$1 dir base='' spec='' src from='' parent parents=() t state
   for t in ${chain_seen[@]+"${chain_seen[@]}"}; do
     [[ $t == "$tag" ]] && return 0
   done
@@ -2217,12 +2310,15 @@ image_chain() {
     tag_variant "$tag"
     dir=$REPLY base=$variant_base
     src=$([[ -n $dir ]] && tildify "$dir/Dockerfile" || echo 'local image')
-    [[ -n $dir && -z $base ]] && root_base "$dir" && base=$REPLY
+    if [[ -n $dir && -z $base ]] && root_base "$dir"; then
+      base=$REPLY spec=$root_spec
+    fi
   fi
   if [[ -n $dir ]]; then
     while IFS= read -r parent; do
       parents+=("$parent")
       image_name "$parent"
+      [[ -n $spec && $parent == "$base" ]] && REPLY=$spec
       from+="${from:+, }$REPLY"
     done < <(variant_parents "$dir" "$base")
   fi
@@ -2809,14 +2905,27 @@ cmd_shared_diff() {
 }
 
 cmd_image_new() {
-  local name=$1 from=$2 target src='' combo='' variants from_lines
+  local name=$1 from=$2 target src='' combo='' path rest from_lines
   [[ $name =~ $variant_re ]] ||
     usage_error "invalid image name '$name': lowercase letters and digits, joined by - or _"
   [[ $name == devcontainer || $name == devcontainer-* ]] &&
     usage_error "devcontainer names the workspace's devcontainer image; choose another name"
   if [[ $from == devcontainer || $from == devcontainer[:+]* ]]; then
-    echo "clod: a variant can't start from a devcontainer, which differs from one workspace to the next; make a variant FROM \$BASE and run clod -i devcontainer+$name" >&2
-    exit 1
+    path=${from%%+*}
+    path=${path#devcontainer}
+    path=${path#:}
+    if [[ $path != */* && $path != .* && $path != '~'* ]]; then
+      echo "clod: a variant can't start from the workspace's devcontainer, which differs from one workspace to the next; name one by its path, as devcontainer:PATH, or make a variant FROM \$BASE and run clod -i devcontainer+$name" >&2
+      exit 1
+    fi
+    # The variant names the devcontainer by its full path, wherever it is run.
+    if [[ $path != '~'* ]]; then
+      rest=${from#"${from%%+*}"}
+      abspath "$path"
+      REPLY=$(tildify "$REPLY")
+      [[ $path == */ ]] && REPLY+=/
+      from=devcontainer:$REPLY$rest
+    fi
   fi
   target=$clod_dir/images/$name
   if [[ -e $target ]]; then
@@ -2825,7 +2934,12 @@ cmd_image_new() {
   fi
   if [[ -n $from ]]; then
     resolve_variant "$from" || die "$variant_error"
-    [[ $REPLY == clod-*.* ]] && combo=$REPLY
+    if [[ $from == devcontainer* ]]; then
+      combo=$from
+    elif [[ $REPLY == clod-*.* ]]; then
+      image_name "$REPLY"
+      combo=$REPLY
+    fi
     find_variant "$from"
     src=$REPLY
     if [[ -z $src && -z $combo ]]; then
@@ -2842,11 +2956,12 @@ cmd_image_new() {
   else
     mkdir "$target"
     if [[ -n $combo ]]; then
-      image_name "$combo"
-      variants=$REPLY
-      from_lines="# Run with \`clod -i $name\`. It rebuilds whenever a file in this directory or
-# in ${variants//+/, } changes. FROM names $variants as Docker does: $combo.
-FROM $combo"
+      from_lines="# Run with \`clod -i $name\`. It is built on $combo, which clod builds
+# first, and rebuilds whenever a file in this directory or that image changes.
+# Being built on an image of its own, it goes first in a combination, as in
+# \`clod -i $name+sudo\`.
+ARG BASE=$combo
+FROM \$BASE"
     else
       from_lines="# Run with \`clod -i $name\`. It rebuilds whenever a file in this directory or
 # the image it is FROM changes. BASE lets it go on top
@@ -2863,7 +2978,7 @@ USER claude
 # file:
 # COPY AGENTS.md /etc/clod/AGENTS.d/$name.md
 STARTER
-    echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, built on $variants}"
+    echo "clod: created $(tildify "$target") with a starter Dockerfile${combo:+, built on $combo}"
   fi
   echo "Edit its Dockerfile with: clod image edit $name"
   echo "Then run it with: clod -i $name"
@@ -3019,7 +3134,7 @@ cmd_env() {
     esac
   fi
   # A devcontainer the run doesn't use.
-  if [[ -z $image_dc && -z $image_error && -z $scratch && $workspace != vol:* ]]; then
+  if [[ -z $image_dc$image_on_dc && -z $image_error && -z $scratch && $workspace != vol:* ]]; then
     find_devcontainer "$workspace" ''
     if [[ -n $REPLY ]]; then
       shown="$(tildify "$REPLY") (clod -i devcontainer runs it)"
