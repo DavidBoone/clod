@@ -629,6 +629,11 @@ test_envrc_path() {
   (cd 'c\d' && PATH=$PWD/../bin:$PATH exits 1 clod env 2>&1 |
     has -xF "clod: direnv 2.32.1 can't load an .envrc whose path has a \\, as $PWD/.envrc does; direnv 2.33.0 and later can")
   (cd plain && PATH=$PWD/../bin:$PATH clod env | has '^FOO=bar$')
+  # a workspace reached through a symlink, its .envrc allowed from there
+  mkdir real
+  echo 'export FOO=bar' > real/.envrc
+  ln -s real link
+  (cd link && direnv allow && clod env | has '^FOO=bar$')
 }
 
 test_volume_home() {
