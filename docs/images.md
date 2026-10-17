@@ -158,7 +158,10 @@ starts one, writing a devcontainer's path in full.
 A devcontainer path in `ARG BASE` is relative to the variant's directory; `~`
 is your home. `devcontainer` and `devcontainer:NAME` aren't allowed there:
 they name the devcontainer of whichever workspace clod runs in. Such a
-variant needs clod to build it, as `docker build` can't resolve these names.
+variant needs clod to build it, as `docker build` can't resolve these names;
+Docker's build check warns that the default isn't an image name unless the
+`Dockerfile` starts with `# check=skip=InvalidDefaultArgInFrom`, which
+`clod image new`'s starter does.
 Any other default is a Docker name, used as it is: a single variant by its
 Docker name (`clod-go`, as `FROM clod-go` names it) or another image
 (`python` is Docker Hub's). A combination can also go by its Docker name,

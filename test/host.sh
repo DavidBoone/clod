@@ -209,6 +209,10 @@ echo '{}' > "$work/proj/.devcontainer/devcontainer.json"
 check 0 image new pair top+python
 has 'built on top\+python$'
 has '^ARG BASE=top\+python$' "$HOME/.clod/images/pair/Dockerfile"
+if [[ $(head -1 "$HOME/.clod/images/pair/Dockerfile") != '# check=skip=InvalidDefaultArgInFrom' ]]; then
+  echo "image new's starter doesn't start with the check directive" >&2
+  exit 1
+fi
 check 0 image new short devcontainer:proj/+top
 has '^ARG BASE=devcontainer:/.*/proj/\+top$' "$HOME/.clod/images/short/Dockerfile"
 check 1 image new nope devcontainer

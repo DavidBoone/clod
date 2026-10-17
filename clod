@@ -2957,10 +2957,12 @@ cmd_image_new() {
   else
     mkdir "$target"
     if [[ -n $combo ]]; then
-      from_lines="# Run with \`clod -i $name\`. It is built on $combo, which clod builds
+      from_lines="# check=skip=InvalidDefaultArgInFrom
+# Run with \`clod -i $name\`. It is built on $combo, which clod builds
 # first, and rebuilds whenever a file in this directory or that image changes.
 # Being built on an image of its own, it goes first in a combination, as in
-# \`clod -i $name+sudo\`.
+# \`clod -i $name+sudo\`. clod passes that image's Docker name as BASE; the
+# check line above stops Docker warning that the default isn't one.
 ARG BASE=$combo
 FROM \$BASE"
     else
