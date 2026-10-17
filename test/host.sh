@@ -200,6 +200,74 @@ echo '# changed' >> "$HOME/.clod/shared/settings.json"
 check 1 shared diff
 has '^\+# changed$'
 unset VISUAL
+# A variant's ARG BASE can name an image as -i does: a combination, or a
+# devcontainer by its path, relative to the variant's directory. image new
+# writes a devcontainer's path in full. Such a variant goes first in a
+# combination, and the workspace's devcontainer can't be a variant's base.
+mkdir -p "$work/proj/.devcontainer"
+echo '{}' > "$work/proj/.devcontainer/devcontainer.json"
+check 0 image new pair top+python
+has 'built on top\+python$'
+has '^ARG BASE=top\+python$' "$HOME/.clod/images/pair/Dockerfile"
+if [[ $(head -1 "$HOME/.clod/images/pair/Dockerfile") != '# check=skip=InvalidDefaultArgInFrom' ]]; then
+  echo "image new's starter doesn't start with the check directive" >&2
+  exit 1
+fi
+check 0 image new short devcontainer:proj/+top
+has '^ARG BASE=devcontainer:/.*/proj/\+top$' "$HOME/.clod/images/short/Dockerfile"
+check 1 image new nope devcontainer
+has 'by its path' errors
+check 1 image new nope devcontainer:proj
+check 1 image new nope 'devcontainer:my proj/'
+has 'invalid image name' errors
+test ! -e "$HOME/.clod/images/nope"
+check 1 image new nope devcontainer:missing/
+has 'no devcontainer at' errors
+check 0 env -i short
+has '^image: +short '
+# the devcontainer it's built on is the run's, so env doesn't offer it
+(cd proj && clod env -i short) > actual
+if grep -q '^devcontainer:' actual; then
+  echo 'env offers the devcontainer the run is built on' >&2
+  exit 1
+fi
+check 0 image new dotted top.python
+has '^ARG BASE=top\+python$' "$HOME/.clod/images/dotted/Dockerfile"
+# a single name stays a Docker name, and a variant on a base still goes on top
+mkdir "$HOME/.clod/images/hub" "$HOME/.clod/images/full"
+# shellcheck disable=SC2016 # BASE is expanded by Docker, not the host shell
+printf 'ARG BASE=python\nFROM $BASE\n' > "$HOME/.clod/images/hub/Dockerfile"
+# shellcheck disable=SC2016
+printf 'ARG BASE=clod:full\nFROM $BASE\n' > "$HOME/.clod/images/full/Dockerfile"
+check 0 image show hub
+if grep -q '^python ' actual; then
+  echo 'ARG BASE=python resolved to the python variant' >&2
+  exit 1
+fi
+check 0 env -i top+full
+has '^image: +top\+full '
+rm -rf "$HOME/.clod/images/hub" "$HOME/.clod/images/full" "$HOME/.clod/images/dotted"
+check 0 env -i pair+short
+has "variant short can't go on top of another: it is built on devcontainer:"
+check 1 image build pair+short
+has "variant short can't go on top" errors
+completes -i 'top+'
+if grep -qE 'short|pair' actual; then
+  echo 'completion offers a variant with a base of its own on top' >&2
+  exit 1
+fi
+mkdir "$HOME/.clod/images/rel" "$HOME/.clod/images/ws"
+# shellcheck disable=SC2016 # BASE is expanded by Docker, not the host shell
+printf 'ARG BASE=devcontainer:../../../../proj/\nFROM $BASE\n' > "$HOME/.clod/images/rel/Dockerfile"
+# shellcheck disable=SC2016
+printf 'ARG BASE=devcontainer\nFROM $BASE\n' > "$HOME/.clod/images/ws/Dockerfile"
+check 0 image show rel
+has '^rel +[a-z]+ +devcontainer:\.\./\.\./\.\./\.\./proj/ '
+has '^devcontainer +[a-z]+ +- +.*/proj/\.devcontainer/devcontainer\.json'
+check 0 env -i ws
+has 'whichever workspace clod runs in'
+check 1 image build ws
+rm -rf "$HOME/.clod/images/pair" "$HOME/.clod/images/short" "$HOME/.clod/images/rel" "$HOME/.clod/images/ws"
 echo 'PASS image files and shared config'
 
 # Homes use real directories; Docker volume state is held by the fake CLI.

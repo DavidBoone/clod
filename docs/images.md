@@ -54,6 +54,11 @@ ARG BASE=clod
 FROM $BASE
 ```
 
+A variant whose `ARG BASE` defaults to an image other than the base (`clod`,
+or `clod:full`), as in [Building on an image](#building-on-an-image), is built
+on that image and goes first in a combination: clod refuses `go+mine` when
+`mine` has a base of its own.
+
 Your own variants go in `~/.clod/images/<name>/`, a directory holding a
 `Dockerfile` built `FROM clod`, or `FROM` another variant. Built `FROM $BASE`,
 as above, it combines with the others. `clod image new` creates one:
@@ -62,6 +67,7 @@ as above, it combines with the others. `clod image new` creates one:
 clod image new mine          # a starter Dockerfile, FROM $BASE
 clod image new mine go       # a copy of the go variant
 clod image new mine go+sudo  # a starter Dockerfile, built on go+sudo
+clod image new mine devcontainer:~/src/app/+sudo  # built on a devcontainer, with sudo
 clod image new go            # your own copy of the bundled go, which then takes its place
 clod image diff go           # how yours differs from the bundled go, after either changes
 clod image edit mine         # open its Dockerfile in $VISUAL, $EDITOR or vi
@@ -88,12 +94,6 @@ USER claude
 
 `build-essential` is there for npm or pip packages that compile native code on
 install; most ship prebuilt binaries and don't need it.
-
-A variant can be `FROM` a combination by its Docker name, which joins the
-variants with dots: `browser+dotnet` is `FROM clod-browser.dotnet`. clod builds
-the combination first, and rebuilds yours when any variant in it changes. That
-keeps your own additions on top of bundled variants without copying their
-install steps.
 
 `clod -i mine` builds `go` if needed, then `mine`, and
 rebuilds each whenever a file in its directory or an image it is `FROM`
@@ -134,6 +134,39 @@ USER claude
 Images are never pulled at launch, so `-i` must name a variant or an image
 already built locally.
 
+## Building on an image
+
+A variant's `ARG BASE` default can name the image it is built on as `-i`
+names it, when that is a combination (`browser+dotnet`) or a devcontainer by
+its path, alone or with variants on top (`devcontainer:~/src/app/+sudo`):
+clod builds that image first and passes its Docker name as `BASE`. That keeps
+your own additions on top of bundled variants without copying their install
+steps, and gives a long image name a short one of its own: with
+
+```dockerfile
+# ~/.clod/images/app/Dockerfile
+ARG BASE=devcontainer:~/src/app/+sudo
+FROM $BASE
+```
+
+`clod -i app` runs the devcontainer with `sudo`, as `app` wherever clod shows
+the image's name, `$CLOD_IMAGE` in the container included. It rebuilds when a
+file beside its `Dockerfile` or the image it is built on changes.
+`clod image new NAME FROM`, with a combination or a devcontainer as `FROM`,
+starts one, writing a devcontainer's path in full.
+
+A devcontainer path in `ARG BASE` is relative to the variant's directory; `~`
+is your home. `devcontainer` and `devcontainer:NAME` aren't allowed there:
+they name the devcontainer of whichever workspace clod runs in. Such a
+variant needs clod to build it, as `docker build` can't resolve these names;
+Docker's build check warns that the default isn't an image name unless the
+`Dockerfile` starts with `# check=skip=InvalidDefaultArgInFrom`, which
+`clod image new`'s starter does.
+Any other default is a Docker name, used as it is: a single variant by its
+Docker name (`clod-go`, as `FROM clod-go` names it) or another image
+(`python` is Docker Hub's). A combination can also go by its Docker name,
+the variants joined by dots (`clod-browser.dotnet`).
+
 ## The base
 
 `CLOD_BASE` picks the Debian image the base is built on, from the same
@@ -149,8 +182,8 @@ keeps them (the `man` command itself isn't installed). The two are separate
 images, `clod` and `clod:full`, so switching between them builds each only
 once. `clod image` lists both, `clod env` shows which a
 run uses, and `-i clod` names whichever `CLOD_BASE` picks. Variants whose
-`ARG BASE` defaults to `clod`, the bundled ones and those `clod image new`
-starts, are built on it, keeping their names (`clod-go`), so switching rebuilds
+`ARG BASE` defaults to `clod`, the bundled ones and the starter `clod image
+new NAME` writes, are built on it, keeping their names (`clod-go`), so switching rebuilds
 them on their next run; a variant built on another variant gets it through
 that one. A variant whose `Dockerfile` says `FROM clod` stays on the slim base,
 and one whose `ARG BASE` defaults to another image stays on that.
@@ -181,9 +214,10 @@ project (`devcontainer:app/`), a config folder
 (`devcontainer:app/.devcontainer/python`) or a config file. `/workspace` is
 still the directory clod runs in, and the image is the one `clod -i
 devcontainer` builds in the project. In an `.envrc`, `export
-CLOD_IMAGE=devcontainer:$PWD/app` pins it. It goes first in a combination,
-and a variant can't be built `FROM` it, since it differs from one project to
-the next: make your variant `FROM $BASE` and combine them. `clod env` mentions
+CLOD_IMAGE=devcontainer:$PWD/app` pins it. It goes first in a combination.
+A variant can be built on one named by its path (see
+[Building on an image](#building-on-an-image)), which also gives it a short
+name. `clod env` mentions
 a devcontainer the run doesn't use. With `auto`, a run uses the devcontainer
 unless `-i`, `CLOD_IMAGE` in your shell or the project's `.envrc` chooses an
 image; one in `~/.clod/config` doesn't count, so `clod default image go` still

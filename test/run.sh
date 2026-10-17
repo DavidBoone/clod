@@ -1096,8 +1096,8 @@ test_combine() {
   # a variant on a combination rebuilds when a variant in it changes
   rm -rf ~/.clod/images/ontop
   clod image new ontop first+second
-  grep -q '^FROM clod-first\.second$' ~/.clod/images/ontop/Dockerfile
-  grep -q 'FROM names first+second as Docker does: clod-first\.second\.$' ~/.clod/images/ontop/Dockerfile
+  grep -q '^ARG BASE=first+second$' ~/.clod/images/ontop/Dockerfile
+  clod -i third+ontop env | has "^image: *third+ontop (variant ontop can't go on top of another: it is built on first+second"
   clod -i ontop bash -c 'test "$(cat /tmp/order)" = "$(printf "first\nsecond")"'
   clod image | has '^  ontop  *built'
   echo 'RUN true' >> ~/.clod/images/second/Dockerfile
@@ -1493,7 +1493,11 @@ test_devcontainer_names() {
   exits 1 clod image rm devcontainer 2>&1 | has 'clod image clean devcontainer removes its built image$'
   completes -i '' | has -x devcontainer
   completes -i '' | has -x devcontainer:py
-  if completes image new mine '' | grep -q devcontainer; then false; fi
+  # image new takes a devcontainer by its path only
+  completes image new mine '' | has -x devcontainer:./
+  if completes image new mine '' | grep -qx 'devcontainer\|devcontainer:py'; then false; fi
+  (cd .. && completes image new mine '' | has -x devcontainer:proj/)
+  exits 1 clod image new mine devcontainer:py 2>&1 | has 'by its path, as devcontainer:PATH'
   # bash splits words at :, as in vol:NAME
   for sh in bash zsh; do
     [[ $sh == bash ]] || command -v zsh >/dev/null || continue
@@ -1886,6 +1890,19 @@ test_devcontainer() {
   '
   clod image show devcontainer:py+sudo |
     has "^devcontainer:py  *built  *-  *$PWD/.devcontainer/py/devcontainer.json, then the base\$"
+  # a variant built on a devcontainer and a variant, named by its path, runs
+  # under its own name in any workspace, and goes first in a combination
+  (cd .. && clod image new short devcontainer:proj/.devcontainer/py+sudo)
+  grep -q '^ARG BASE=devcontainer:/.*/proj/\.devcontainer/py+sudo$' ~/.clod/images/short/Dockerfile
+  echo 'RUN touch /tmp/short' >> ~/.clod/images/short/Dockerfile
+  mkdir -p ../other
+  (cd ../other && clod -i short bash -c '
+    test -f /tmp/short && test "$(stat -c %u /opt/tool)" = "$(id -u)" &&
+      test "$(sudo -n whoami)" = root && test "$CLOD_IMAGE" = short
+  ')
+  clod image show short | has '^short  *built  *devcontainer:/.*/proj/\.devcontainer/py+sudo  '
+  exits 1 clod -i sudo+short bash -c true
+  clod image rm short --force
   echo '// changed' >> .devcontainer/devcontainer.json
   clod image show devcontainer | has '^devcontainer  *stale '
   CLOD_DEVCONTAINER=auto clod env | has '^image: *devcontainer '
