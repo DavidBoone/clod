@@ -33,6 +33,9 @@
 #               with -P that is taken always stops the run.
 #   CLOD_CLIPBOARD  on lets Ctrl+V in Claude Code paste the image on the
 #               host's clipboard (default off); --clipboard turns it on for a run
+#   CLOD_QUIET  on hides the start-up line clod prints on stderr before a run
+#               (default off); -q, --quiet turns it on for a run. clod's other
+#               messages still show
 #
 # The .envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
@@ -284,7 +287,9 @@ settings.json, creating it if it isn't there. The next run mounts it. clod
 shared new creates ~/.clod/shared first.
 @env
 Shows what a run here would use: the home, workspace, image, ports, the
-.envrc and the variables it passes in.
+.envrc and the variables it passes in. With --json it prints them as one JSON
+object instead: the launcher settings, CLOD_WORKSPACE and CLOD_SCRATCH by name,
+null where unset, and the .envrc's variables under "variables".
 @default
 Shows your defaults in ~/.clod/config, or setting KEY, or sets it to VALUE;
 KEY --reset removes it; edit opens ~/.clod/config in $VISUAL, or $EDITOR, or
@@ -329,7 +334,10 @@ install|-f --force||replace an existing clod or completion file
 shared new|-f --force||replace ~/.clod/shared, keeping a backup
 image rm,home rm,workspace rm|-f --force||delete without asking; needed without a terminal
 clod,run|--skip-build||run the image as built, even if its files changed
+clod|--json||print the settings and variables as JSON (env)
+env|--json||print the settings and the .envrc's variables as one JSON object
 clod,run,env|--clipboard||let Ctrl+V in Claude Code paste the host clipboard's image (CLOD_CLIPBOARD)
+clod,run,env|-q --quiet||hide the start-up line clod prints before a run (CLOD_QUIET)
 clod|--build||build the image after editing it (image edit)
 image edit|--build||build the image once the editor exits, as image build does
 clod,run|--docker||mount the host's Docker socket, which is root on the Docker host; the CLI comes from the image (-i docker)
@@ -347,6 +355,7 @@ home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
 ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
 clipboard|CLOD_CLIPBOARD|off|on lets Ctrl+V in Claude Code paste the image on the host's clipboard
+quiet|CLOD_QUIET|off|on hides the start-up line clod prints on stderr before a run
 devcontainer|CLOD_DEVCONTAINER|off|auto runs the workspace's devcontainer image when it has one and no image is chosen
 EOF
 
@@ -1250,7 +1259,7 @@ off_limits() {
 # The setup phases.
 
 # Reads the command line into scratch, workspace_opt, force, skip_build, build_after,
-# docker_socket, ports_opt (set when -P gave the ports), command (empty for the default command), verb (a noun's, or
+# docker_socket, json, ports_opt (set when -P gave the ports), command (empty for the default command), verb (a noun's, or
 # empty) and args, the command's arguments; or shows the help it asks for
 # (clod help, -h, --help) and exits.
 # Options set the launcher settings, winning over the environment, the envrc and
@@ -1291,6 +1300,8 @@ take_option() {
     --build) build_after=1 ;;
     --docker) docker_socket=1 ;;
     --clipboard) CLOD_CLIPBOARD=on ;;
+    -q|--quiet) CLOD_QUIET=on ;;
+    --json) json=1 ;;
     -h|--help) help=1 ;;
     --version) echo "clod $(clod_version)"; exit 0 ;;
     *) REPLY=0 ;;
@@ -1301,7 +1312,7 @@ take_option() {
 # too, up to --, except after a run command, whose arguments are the program's.
 parse_args() {
   local opt_ports=() dashdash='' arg rest=() unknown=''
-  scratch='' image_add='' workspace_opt='' force='' skip_build='' build_after='' docker_socket='' ports_opt='' command='' verb='' help=''
+  scratch='' image_add='' workspace_opt='' force='' skip_build='' build_after='' docker_socket='' ports_opt='' command='' verb='' help='' json=''
   while (( $# )); do
     case $1 in
       --) shift; dashdash=1; break ;;
@@ -1394,6 +1405,7 @@ parse_args() {
   esac
   [[ -n $scratch && -n $workspace_opt ]] && usage_error "--scratch and --workspace don't combine"
   [[ -n $build_after && $command${verb:+ $verb} != 'image edit' ]] && usage_error "--build goes with image edit"
+  [[ -n $json && $command != env ]] && usage_error "--json goes with env"
   args=("$@")
   (( ${#opt_ports[@]} )) && CLOD_PORTS="${opt_ports[*]}" ports_opt=1
   return 0
@@ -1620,6 +1632,10 @@ setup_container() {
   case ${CLOD_CLIPBOARD:-off} in
     on|off) ;;
     *) echo "clod: CLOD_CLIPBOARD is '$CLOD_CLIPBOARD'; it must be on or off" >&2; exit 1 ;;
+  esac
+  case ${CLOD_QUIET:-off} in
+    on|off) ;;
+    *) echo "clod: CLOD_QUIET is '$CLOD_QUIET'; it must be on or off" >&2; exit 1 ;;
   esac
 
   tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
@@ -2048,6 +2064,9 @@ cmd_complete() {
         offer $'auto\trun the workspace\'s devcontainer when it has one' \
           $'off\trun the chosen image' "$reset"
         ;;
+      1:quiet)
+        offer $'on\thide clod\'s start-up line' $'off\tshow clod\'s start-up line' "$reset"
+        ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
     if (( ${#cmd_args[@]} == 0 )); then
@@ -2253,6 +2272,9 @@ cmd_default() {
         ;;
       devcontainer)
         is_one_of "$value" 'auto off' || usage_error "devcontainer is auto or off"
+        ;;
+      quiet)
+        is_one_of "$value" 'on off' || usage_error "quiet is on or off"
         ;;
     esac
   fi
@@ -3106,8 +3128,87 @@ cmd_image_edit() {
 # Prints a line of clod env: field $1 with value $2.
 field() { printf '%-14s%s\n' "$1:" "$2"; }
 
+# Sets REPLY to $1 as a JSON string.
+json_string() {
+  local s=$1 pre rest ch
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\t'/\\t}
+  while [[ $s == *[[:cntrl:]]* ]]; do
+    pre=${s%%[[:cntrl:]]*}
+    rest=${s:${#pre}}
+    printf -v ch '%04x' "'${rest:0:1}"
+    s=$pre\\u$ch${rest:1}
+  done
+  REPLY="\"$s\""
+}
+
+# Sets REPLY to a JSON object's member $1, with the value $2 as a string, or
+# null without $2.
+json_member() {
+  local name
+  json_string "$1"
+  name=$REPLY
+  if (( $# > 1 )); then json_string "$2"; else REPLY=null; fi
+  REPLY="$name: $REPLY"
+}
+
+# Prints clod env --json: each launcher setting, by its variable, with the
+# value a run would use (null for one with neither a value nor a built-in
+# default), CLOD_WORKSPACE and CLOD_SCRATCH as the container gets them (null
+# when unset), and the envrc's variables as the object "variables".
+env_json() {
+  local var builtin value line parts members=()
+  while IFS='|' read -r _ var builtin _; do
+    case $var in
+      CLOD_HOME) value=$home_label ;;
+      CLOD_IMAGE) value=$image ;;
+      CLOD_PORTS)
+        read -ra parts <<< "${CLOD_PORTS//,/ }"
+        value=$(IFS=,; echo "${parts[*]}")
+        ;;
+      *)
+        value=${!var-}
+        [[ -n $value || $builtin == - ]] || value=$builtin
+        ;;
+    esac
+    if [[ -n $value ]]; then json_member "$var" "$value"; else json_member "$var"; fi
+    members+=("$REPLY")
+  done <<<"$settings_table"
+  if [[ -n $scratch ]]; then
+    json_member CLOD_WORKSPACE; members+=("$REPLY")
+    json_member CLOD_SCRATCH 1; members+=("$REPLY")
+  else
+    json_member CLOD_WORKSPACE "$workspace_label"; members+=("$REPLY")
+    json_member CLOD_SCRATCH; members+=("$REPLY")
+  fi
+  echo '{'
+  printf '  %s,\n' "${members[@]}"
+  if (( ${#vars[@]} )); then
+    members=()
+    for line in "${vars[@]}"; do
+      json_member "${line%%=*}" "${line#*=}"
+      members+=("$REPLY")
+    done
+    echo '  "variables": {'
+    line=$(printf '    %s,\n' "${members[@]}")
+    printf '%s\n' "${line%,}"
+    echo '  }'
+  else
+    echo '  "variables": {}'
+  fi
+  echo '}'
+}
+
 cmd_env() {
   local home_path parts p from shown
+  if [[ -n $json ]]; then
+    [[ -n $dc_note ]] && echo "$dc_note" >&2
+    env_json
+    return 0
+  fi
   home_path=$(tildify "$home")
   if [[ $home == vol:* ]]; then
     field home "$home_label (Docker volume $home_src)"
@@ -3182,6 +3283,7 @@ cmd_env() {
     field ports "$shown"
   fi
   [[ ${CLOD_CLIPBOARD:-off} == on ]] && field clipboard "the host clipboard's image, for Ctrl+V in Claude Code"
+  [[ ${CLOD_QUIET:-off} == on ]] && field quiet "clod's start-up line is hidden"
   [[ -n $docker_socket ]] && field docker "the host's Docker socket (root on the Docker host)"
   [[ -f $config ]] && field config "$(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
@@ -3466,7 +3568,9 @@ cmd_run() {
       [[ -n ${!v:-} ]] && run_args+=(-e "$v")
     done
   fi
-  echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
+  if [[ ${CLOD_QUIET:-off} != on ]]; then
+    echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
+  fi
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }

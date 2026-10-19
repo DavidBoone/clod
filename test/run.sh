@@ -28,8 +28,8 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 export LC_ALL=C.UTF-8
 
 lint_tests='lint'
-base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode statusline
-  port port-busy clipboard show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
+base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode statusline
+  port port-busy clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install'
 classic_tests='classic'
@@ -96,6 +96,35 @@ test_env() {
   printf '#!/bin/sh\n[ "$*" = -g ] && { echo 4242; exit; }\nexec /usr/bin/id "$@"\n' > fakeid/id
   chmod +x fakeid/id
   PATH=$PWD/fakeid:$PATH clod env | has -x "user: *claude as $(id -u):$(id -g "$(id -un)")"
+}
+
+test_env_json() {
+  # every setting, by its variable, as the text form resolves it
+  local dir=$'a"b\\c\td\001e'
+  mkdir "$dir"
+  clod -w "$dir" env --json > out
+  test "$(jq -r 'keys_unsorted | join(" ")' out)" = \
+    'CLOD_IMAGE CLOD_BASE CLOD_COMMAND CLOD_HOME CLOD_PORTS CLOD_PORTS_BUSY CLOD_CLIPBOARD CLOD_QUIET CLOD_DEVCONTAINER CLOD_WORKSPACE CLOD_SCRATCH variables'
+  jq -e '.CLOD_IMAGE == "clod" and .CLOD_BASE == "slim" and .CLOD_COMMAND == "claude" and .CLOD_HOME == "default" and .CLOD_PORTS == null
+    and .CLOD_PORTS_BUSY == "skip" and .CLOD_CLIPBOARD == "off" and .CLOD_QUIET == "off" and .CLOD_DEVCONTAINER == "off"
+    and .CLOD_SCRATCH == null and .variables == {}' out >/dev/null
+  test "$(jq -r .CLOD_WORKSPACE out)" = "$(clod -w "$dir" env | sed -n 's/^workspace: *//p')"
+  test "$(clod -H ./h env --json | jq -r .CLOD_HOME)" = "$(clod -H ./h env | sed -n 's/^home: *//p')"
+  CLOD_PORTS_BUSY=next CLOD_COMMAND=bash clod -s -i clod-python -H vol:x -P 3000:5173 -P 8080 --clipboard -q env --json |
+    jq -e '.CLOD_IMAGE == "python" and .CLOD_COMMAND == "bash" and .CLOD_HOME == "vol:x" and .CLOD_PORTS == "3000:5173,8080"
+      and .CLOD_PORTS_BUSY == "next" and .CLOD_CLIPBOARD == "on" and .CLOD_QUIET == "on" and .CLOD_WORKSPACE == null and .CLOD_SCRATCH == "1"' >/dev/null
+  # the envrc's variables, apart from the settings, empty values included
+  printf 'export FOO=bar EMPTY= CLOD_WORKSPACE=mine Q=%s CLOD_PORTS=5000\n' "'a\"b\\c'" > .envrc
+  direnv allow
+  clod env --json > out
+  jq -e --arg w "$(clod env | sed -n 's/^workspace: *//p')" '.CLOD_PORTS == "5000" and .CLOD_WORKSPACE == $w
+    and .variables == {CLOD_WORKSPACE: "mine", EMPTY: "", FOO: "bar", Q: "a\"b\\c"}' out >/dev/null
+  # only with env, and in its help and completion
+  exits 2 clod --json 2>&1 | has -x "clod: --json goes with env (see 'clod help')"
+  exits 2 clod image --json 2>&1 | has -x "clod: --json goes with env (see 'clod image -h')"
+  clod help | has -- '--json'
+  clod env -h | has -- '--json'
+  clod __complete env --j | has -xF -e "$(printf -- "--json\tprint the settings and the .envrc's variables as one JSON object")"
 }
 
 test_run_command() {
@@ -554,6 +583,29 @@ test_clipboard() {
   # the server exits with the run
   sleep 3
   if pgrep -f clipboard-server.py; then false; fi
+}
+
+# -q, --quiet and CLOD_QUIET=on leave out the line summing up the run; clod's
+# other messages still show.
+test_quiet() {
+  clod bash -c true 2> err
+  has '^clod ⌂' < err
+  clod -q bash -c true 2> err
+  if has '^clod ⌂' < err; then false; fi
+  clod --quiet --skip-build bash -c true 2> err
+  has -x 'clod: running clod as built' < err
+  if has '^clod ⌂' < err; then false; fi
+  if clod env | has '^quiet:'; then false; fi
+  clod default quiet on
+  clod bash -c true 2> err
+  if has '^clod ⌂' < err; then false; fi
+  clod env | has '^quiet:'
+  clod default quiet --reset
+  CLOD_QUIET=on clod env | has '^quiet:'
+  CLOD_QUIET=maybe exits 1 clod bash -c true 2>&1 | has "CLOD_QUIET is 'maybe'; it must be on or off"
+  exits 2 clod default quiet maybe
+  test "$(completes default quiet '' | tr '\n' ' ')" = 'on off --reset '
+  test "$(completes --q)" = --quiet
 }
 
 test_docker_socket() {

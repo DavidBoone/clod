@@ -82,6 +82,7 @@ A setting given empty still wins and means its default, so `clod -P ''` or
 | `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
 | `CLOD_PORTS_BUSY` | none | `skip` | What a run does with a `CLOD_PORTS` host port another running container publishes: `skip` leaves it out, `next` publishes the next free host port, `error` stops. A taken port given with `-P` always stops the run (see [Publishing ports](usage.md#publishing-ports)). |
 | `CLOD_CLIPBOARD` | `--clipboard` | `off` | `on` lets Ctrl+V in Claude Code paste the image on your machine's clipboard (see [Pasting images](usage.md#pasting-images)). |
+| `CLOD_QUIET` | `-q` | `off` | `on` hides the start-up line clod prints on stderr before a run; its other messages still show (see [The command line](usage.md#the-command-line)). |
 | `CLOD_DEVCONTAINER` | none | `off` | `auto` runs the project's devcontainer when it has one, unless `-i`, the shell or the `.envrc` chooses an image (see [Devcontainers](images.md#devcontainers)). |
 
 In an `.envrc`, `$PWD` is the `.envrc`'s directory, so
@@ -102,6 +103,7 @@ clod default home work          # CLOD_HOME=work
 clod default ports 5173         # CLOD_PORTS=5173
 clod default ports-busy next    # CLOD_PORTS_BUSY=next
 clod default clipboard on       # CLOD_CLIPBOARD=on
+clod default quiet on           # CLOD_QUIET=on
 clod default devcontainer auto  # CLOD_DEVCONTAINER=auto
 clod default image              # show one
 clod default image --reset      # back to the built-in default
@@ -109,10 +111,10 @@ clod default edit               # open ~/.clod/config in $VISUAL, $EDITOR or vi
 ```
 
 The keys are `image`, `base`, `command`, `home`, `ports`, `ports-busy`,
-`clipboard` and `devcontainer`. Values are checked when you set them, and a home path is
-stored as an absolute path; `clod default edit` checks only that each line is a
-setting clod reads. Your shell's settings and a project's `.envrc` win over
-these defaults; `clod env` shows what a run will actually use.
+`clipboard`, `quiet` and `devcontainer`. Values are checked when you set them,
+and a home path is stored as an absolute path; `clod default edit` checks only
+that each line is a setting clod reads. Your shell's settings and a project's
+`.envrc` win over these defaults; `clod env` shows what a run will actually use.
 
 Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME` is the home name (or `~/`-relative path, or `vol:NAME`),
@@ -121,6 +123,13 @@ Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME_PATH` and `CLOD_WORKSPACE_PATH` are the host folders mounted as the
 home and workspace (`~/`-relative, so a named home is `~/.clod/homes/NAME`),
 and are unset for a volume home or workspace and a scratch workspace.
+
+`clod env --json` prints what a run would use as one JSON object: each launcher
+setting by its variable (`CLOD_IMAGE`, `CLOD_HOME` and the rest), its built-in
+default when unset; `CLOD_WORKSPACE` and `CLOD_SCRATCH` as the container gets
+them; and the `.envrc`'s variables under `variables`. A value is `null` where
+it is unset: `CLOD_PORTS` with no ports, `CLOD_WORKSPACE` for a scratch
+workspace and `CLOD_SCRATCH` otherwise.
 
 ## Per-project environment
 
