@@ -15,6 +15,7 @@ clod -w vol:play     # a workspace kept in a Docker volume
 clod -s              # an empty, throwaway /workspace (see A scratch workspace)
 clod -q              # without clod's start-up line
 clod env             # show the home, workspace, image, ports, .envrc and variables that would be used
+clod env --json      # the same settings and variables as one JSON object
 clod default         # show your defaults
 clod image           # list the images (see Image variants)
 clod home            # list the homes (see Homes)

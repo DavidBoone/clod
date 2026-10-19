@@ -124,6 +124,13 @@ Inside the container the same variables hold what the launch resolved to:
 home and workspace (`~/`-relative, so a named home is `~/.clod/homes/NAME`),
 and are unset for a volume home or workspace and a scratch workspace.
 
+`clod env --json` prints what a run would use as one JSON object: each launcher
+setting by its variable (`CLOD_IMAGE`, `CLOD_HOME` and the rest), its built-in
+default when unset; `CLOD_WORKSPACE` and `CLOD_SCRATCH` as the container gets
+them; and the `.envrc`'s variables under `variables`. A value is `null` where
+it is unset: `CLOD_PORTS` with no ports, `CLOD_WORKSPACE` for a scratch
+workspace and `CLOD_SCRATCH` otherwise.
+
 ## Per-project environment
 
 `clod` looks up from the workspace directory (the current directory, or the
