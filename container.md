@@ -26,7 +26,7 @@ You can't run `clod` or see the host's `~/.clod`; the user changes these on the 
 - Packages: a variant Dockerfile (`ARG BASE=clod` / `FROM $BASE`, `USER root` … `USER claude`; `clod image new <name>`, `clod image edit <name>`), run with `clod -i <name>`, combinable (`-i go+<name>`); root while running: the `sudo` variant
 - A project with a `.devcontainer`: `clod -i devcontainer` (`devcontainer:PATH/` for another folder), or `clod default devcontainer auto`; `clod image new NAME devcontainer:PATH/+sudo` makes a variant on it (also a short name for a long spec); its packages come from the devcontainer config
 - Environment variables: the project's `.envrc` (direnv, allowed on the host)
-- Defaults: `clod default image|base|command|home|ports|ports-busy|clipboard|devcontainer VALUE` (`clipboard on` enables paste), or `CLOD_*` in a project's `.envrc`
+- Defaults: `clod default image|base|command|home|ports|ports-busy|clipboard|quiet|devcontainer VALUE` (`clipboard on` enables paste), or `CLOD_*` in a project's `.envrc`
 - Instructions or settings for every home: `~/.clod/shared/` (`clod shared new` creates it)
 - A slow home, or one `chown` fails in: a volume home (`clod home mv NAME vol:NAME`, login included; `clod home cp` copies)
 - Ports: `clod -P 3000`; Docker access: `clod -i docker --docker` (root on the Docker host)

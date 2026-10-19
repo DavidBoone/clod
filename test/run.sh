@@ -29,7 +29,7 @@ export LC_ALL=C.UTF-8
 
 lint_tests='lint'
 base_tests='env run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode statusline
-  port port-busy clipboard show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
+  port port-busy clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install'
 classic_tests='classic'
@@ -554,6 +554,29 @@ test_clipboard() {
   # the server exits with the run
   sleep 3
   if pgrep -f clipboard-server.py; then false; fi
+}
+
+# -q, --quiet and CLOD_QUIET=on leave out the line summing up the run; clod's
+# other messages still show.
+test_quiet() {
+  clod bash -c true 2> err
+  has '^clod ⌂' < err
+  clod -q bash -c true 2> err
+  if has '^clod ⌂' < err; then false; fi
+  clod --quiet --skip-build bash -c true 2> err
+  has -x 'clod: running clod as built' < err
+  if has '^clod ⌂' < err; then false; fi
+  if clod env | has '^quiet:'; then false; fi
+  clod default quiet on
+  clod bash -c true 2> err
+  if has '^clod ⌂' < err; then false; fi
+  clod env | has '^quiet:'
+  clod default quiet --reset
+  CLOD_QUIET=on clod env | has '^quiet:'
+  CLOD_QUIET=maybe exits 1 clod bash -c true 2>&1 | has "CLOD_QUIET is 'maybe'; it must be on or off"
+  exits 2 clod default quiet maybe
+  test "$(completes default quiet '' | tr '\n' ' ')" = 'on off --reset '
+  test "$(completes --q)" = --quiet
 }
 
 test_docker_socket() {

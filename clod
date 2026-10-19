@@ -33,6 +33,9 @@
 #               with -P that is taken always stops the run.
 #   CLOD_CLIPBOARD  on lets Ctrl+V in Claude Code paste the image on the
 #               host's clipboard (default off); --clipboard turns it on for a run
+#   CLOD_QUIET  on hides the start-up line clod prints on stderr before a run
+#               (default off); -q, --quiet turns it on for a run. clod's other
+#               messages still show
 #
 # The .envrc (below) can set these too, as defaults for the shell's, and
 # ~/.clod/config (NAME=value lines, written by `clod default KEY VALUE`) as
@@ -330,6 +333,7 @@ shared new|-f --force||replace ~/.clod/shared, keeping a backup
 image rm,home rm,workspace rm|-f --force||delete without asking; needed without a terminal
 clod,run|--skip-build||run the image as built, even if its files changed
 clod,run,env|--clipboard||let Ctrl+V in Claude Code paste the host clipboard's image (CLOD_CLIPBOARD)
+clod,run,env|-q --quiet||hide the start-up line clod prints before a run (CLOD_QUIET)
 clod|--build||build the image after editing it (image edit)
 image edit|--build||build the image once the editor exits, as image build does
 clod,run|--docker||mount the host's Docker socket, which is root on the Docker host; the CLI comes from the image (-i docker)
@@ -347,6 +351,7 @@ home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
 ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
 clipboard|CLOD_CLIPBOARD|off|on lets Ctrl+V in Claude Code paste the image on the host's clipboard
+quiet|CLOD_QUIET|off|on hides the start-up line clod prints on stderr before a run
 devcontainer|CLOD_DEVCONTAINER|off|auto runs the workspace's devcontainer image when it has one and no image is chosen
 EOF
 
@@ -1291,6 +1296,7 @@ take_option() {
     --build) build_after=1 ;;
     --docker) docker_socket=1 ;;
     --clipboard) CLOD_CLIPBOARD=on ;;
+    -q|--quiet) CLOD_QUIET=on ;;
     -h|--help) help=1 ;;
     --version) echo "clod $(clod_version)"; exit 0 ;;
     *) REPLY=0 ;;
@@ -1620,6 +1626,10 @@ setup_container() {
   case ${CLOD_CLIPBOARD:-off} in
     on|off) ;;
     *) echo "clod: CLOD_CLIPBOARD is '$CLOD_CLIPBOARD'; it must be on or off" >&2; exit 1 ;;
+  esac
+  case ${CLOD_QUIET:-off} in
+    on|off) ;;
+    *) echo "clod: CLOD_QUIET is '$CLOD_QUIET'; it must be on or off" >&2; exit 1 ;;
   esac
 
   tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
@@ -2048,6 +2058,9 @@ cmd_complete() {
         offer $'auto\trun the workspace\'s devcontainer when it has one' \
           $'off\trun the chosen image' "$reset"
         ;;
+      1:quiet)
+        offer $'on\thide clod\'s start-up line' $'off\tshow clod\'s start-up line' "$reset"
+        ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
     if (( ${#cmd_args[@]} == 0 )); then
@@ -2253,6 +2266,9 @@ cmd_default() {
         ;;
       devcontainer)
         is_one_of "$value" 'auto off' || usage_error "devcontainer is auto or off"
+        ;;
+      quiet)
+        is_one_of "$value" 'on off' || usage_error "quiet is on or off"
         ;;
     esac
   fi
@@ -3182,6 +3198,7 @@ cmd_env() {
     field ports "$shown"
   fi
   [[ ${CLOD_CLIPBOARD:-off} == on ]] && field clipboard "the host clipboard's image, for Ctrl+V in Claude Code"
+  [[ ${CLOD_QUIET:-off} == on ]] && field quiet "clod's start-up line is hidden"
   [[ -n $docker_socket ]] && field docker "the host's Docker socket (root on the Docker host)"
   [[ -f $config ]] && field config "$(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
@@ -3466,7 +3483,9 @@ cmd_run() {
       [[ -n ${!v:-} ]] && run_args+=(-e "$v")
     done
   fi
-  echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
+  if [[ ${CLOD_QUIET:-off} != on ]]; then
+    echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
+  fi
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"
 }

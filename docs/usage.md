@@ -13,6 +13,7 @@ clod -H work         # the "work" home (see Homes)
 clod -w ~/src/app    # that directory as /workspace (see Another workspace)
 clod -w vol:play     # a workspace kept in a Docker volume
 clod -s              # an empty, throwaway /workspace (see A scratch workspace)
+clod -q              # without clod's start-up line
 clod env             # show the home, workspace, image, ports, .envrc and variables that would be used
 clod default         # show your defaults
 clod image           # list the images (see Image variants)
@@ -41,6 +42,11 @@ is clod's page for it. A usage error names the page to read.
 A bare `clod` runs Claude Code, or whatever you've set as the default command.
 To pass it arguments without naming it, put them after `--`: `clod -- --resume`
 is `clod claude --resume`.
+
+Before it starts the container, clod prints a start-up line on stderr summing
+up the run, such as `clod ⌂ default ⬢ go · 2 vars`. `-q` (`--quiet`) hides it,
+and `clod default quiet on` does so for every run. clod's other messages, such
+as building an image or leaving out a port another container has, still show.
 
 Claude Code runs with `--dangerously-skip-permissions` unless its arguments
 include `--permission-mode`, `--dangerously-skip-permissions` or
