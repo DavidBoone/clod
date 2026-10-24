@@ -3001,7 +3001,7 @@ FROM \$BASE"
     cat > "$target/Dockerfile" <<STARTER
 $from_lines
 USER root
-# RUN apt-get install -y postgresql-client
+# RUN apt-get update && apt-get install -y postgresql-client
 USER claude
 # Instructions for the agents about this image, from an AGENTS.md beside this
 # file:

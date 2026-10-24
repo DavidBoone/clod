@@ -4,7 +4,7 @@
 ARG BASE=clod
 FROM $BASE
 USER root
-RUN apt-get install -y build-essential
+RUN apt-get update && apt-get install -y build-essential
 RUN mkdir /usr/local/rustup /usr/local/cargo \
     && chown claude:claude /usr/local/rustup /usr/local/cargo
 USER claude
