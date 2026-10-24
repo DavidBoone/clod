@@ -2,9 +2,9 @@
 # Languages, compilers and browsers go in variants built FROM clod (see
 # docs/images.md). BASE can instead name another Debian or Ubuntu image, such
 # as one with a project's toolchain, to add clod's layer to: its PATH and other
-# ENV are kept, and a user it has at claude's uid keeps its files. Layers are
-# ordered rarely-changed first. Apt lists are kept so variants can `apt-get
-# install` without re-running update. The slim base installs packages without
+# ENV are kept, and a user it has at claude's uid keeps its files. Apt lists
+# are kept, but they date from the base's build, so a variant runs `apt-get
+# update` before it installs. The slim base installs packages without
 # their docs, man pages (there's no man) or translations
 # (/etc/dpkg/dpkg.cfg.d/docker), which would be over 100 MB; variants inherit
 # that.
@@ -15,33 +15,24 @@ FROM $BASE
 # Another BASE may end as a user of its own; installing needs root.
 USER root
 
-# Base system
+# Everything from apt, in one layer, so the upgrade and every install use the
+# same package lists: a later layer reusing a cached layer's lists fails once
+# a package they name is superseded.
+# Language runtimes serve agent tooling (MCP servers, scripts, npm-installed
+# CLIs); Pillow converts pictures for the show-image plugin. Node comes from
+# NodeSource; its nodejs package includes npm. The GitHub CLI comes from
+# GitHub's own repository. Git comes from the git-core PPA, for relative
+# worktree paths (git 2.48), which keep a worktree's links valid on the host as
+# well as at /workspace: an Ubuntu base uses its own release's build, Debian
+# trixie Ubuntu 24.04's (its dependencies are all in trixie), and a release the
+# PPA lacks keeps its own git. A repository the base already lists (a
+# devcontainer's github-cli feature adds GitHub's) is left as it is, since apt
+# refuses one listed twice with different keys.
 RUN command -v apt-get >/dev/null \
        || { echo "clod's image needs a Debian or Ubuntu base, with apt-get" >&2; exit 1; } \
     && apt-get update && apt-get upgrade -y \
-    && apt-get install -y \
-       curl wget ca-certificates \
-       locales
-
-# Culture (the clod launcher passes the host's TZ)
-RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
-    && locale-gen en_US.UTF-8 \
-    && update-locale LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-ENV LANG=en_US.UTF-8
-
-# Language runtimes for agent tooling (MCP servers, scripts, npm-installed CLIs).
-# Pillow converts pictures for the show-image plugin.
-# Node comes from NodeSource; its nodejs package includes npm. The GitHub CLI
-# comes from GitHub's own repository, installed with the CLI tools below. Git
-# comes from the git-core PPA, for relative worktree paths (git 2.48), which
-# keep a worktree's links valid on the host as well as at /workspace: an
-# Ubuntu base uses its own release's build, Debian trixie Ubuntu 24.04's (its
-# dependencies are all in trixie), and a release the PPA lacks keeps its own
-# git. A repository the base already lists (a devcontainer's github-cli
-# feature adds GitHub's) is left as it is, since apt refuses one listed twice
-# with different keys.
-RUN has_source() { grep -rqsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d; } \
+    && apt-get install -y curl ca-certificates \
+    && has_source() { grep -rqsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d; } \
     && mkdir -p /etc/apt/keyrings \
     && . /etc/os-release \
     && case "$ID:${VERSION_CODENAME:-}" in \
@@ -75,19 +66,23 @@ RUN has_source() { grep -rqsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d
        fi \
     && apt-get update \
     && apt-get install -y \
-       git \
-       python3 python3-venv python3-pil \
-       nodejs
-
-# CLI tools
-RUN apt-get install -y \
+       wget locales \
+       git python3 python3-venv python3-pil nodejs \
        gh vim zsh direnv less tree file jq bc gettext-base make \
-       ripgrep fd-find \
+       ripgrep fd-find tmux yq moreutils poppler-utils \
+       git-absorb git-filter-repo \
        binutils bsdextrautils strace lsof \
        psmisc procps rsync zip unzip xz-utils \
        openssh-client dnsutils netcat-openbsd iputils-ping socat iproute2 \
        sqlite3 tini \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd
+
+# Culture (the clod launcher passes the host's TZ)
+RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+    && locale-gen en_US.UTF-8 \
+    && update-locale LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8
 
 # Bind mounts can report owners git doesn't trust (macOS file sharing), and
 # the container has no other users to guard against.

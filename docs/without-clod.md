@@ -162,11 +162,11 @@ A variant is a `Dockerfile` that starts `FROM clod`:
 # ~/.clod/images/mine/Dockerfile
 FROM clod
 USER root
-RUN apt-get install -y postgresql-client
+RUN apt-get update && apt-get install -y postgresql-client
 USER claude
 ```
 
-Apt lists are kept in the base, so `apt-get install` needs no `apt-get update`.
+Run `apt-get update` first: the base's apt lists date from its build.
 Switch back to `USER claude` at the end, since the entrypoint and home expect
 it. Build and tag it yourself:
 

@@ -88,7 +88,7 @@ For example:
 # ~/.clod/images/mine/Dockerfile
 FROM clod-go
 USER root
-RUN apt-get install -y postgresql-client build-essential
+RUN apt-get update && apt-get install -y postgresql-client build-essential
 USER claude
 ```
 
@@ -98,10 +98,11 @@ install; most ship prebuilt binaries and don't need it.
 `clod -i mine` builds `go` if needed, then `mine`, and
 rebuilds each whenever a file in its directory or an image it is `FROM`
 (in any stage) changes. A variant in `~/.clod/images` takes precedence over a bundled one of
-the same name, so copying one there is how to customise it. Apt lists are kept
-in the base, so variants can `apt-get install` without `apt-get update`, and
-packages install without their docs, man pages or translations
-(the base is `debian:trixie-slim`; see [The base](#the-base) to keep them). The
+the same name, so copying one there is how to customise it. Run `apt-get
+update` before `apt-get install`: the base's apt lists date from its build, and
+a package superseded since then fails to download. Packages install without
+their docs, man pages or translations (the base is `debian:trixie-slim`; see
+[The base](#the-base) to keep them). The
 directory is the build context, so `COPY` works for files beside the
 `Dockerfile`.
 

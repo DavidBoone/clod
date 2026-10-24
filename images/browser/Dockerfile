@@ -5,7 +5,8 @@
 ARG BASE=clod
 FROM $BASE
 USER root
-RUN apt-get install -y chromium fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
+RUN apt-get update \
+    && apt-get install -y chromium fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
     && echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox"' > /etc/chromium.d/clod
 RUN npx --yes playwright install-deps chromium && rm -rf /root/.npm
 COPY AGENTS.md /etc/clod/AGENTS.d/browser.md

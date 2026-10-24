@@ -5,7 +5,8 @@
 ARG BASE=clod
 FROM $BASE
 USER root
-RUN apt-get install -y sudo \
+RUN apt-get update \
+    && apt-get install -y sudo \
     && echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude \
     && chmod 440 /etc/sudoers.d/claude
 COPY AGENTS.md /etc/clod/AGENTS.d/sudo.md
