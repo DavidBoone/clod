@@ -190,9 +190,9 @@ first run, replacing v1 if present.
 @gemini
 Runs Gemini CLI in a throwaway container on the current directory, which is
 mounted as /workspace, with --yolo unless ARGS include --approval-mode, -y or
---yolo, and the workspace trusted unless GEMINI_CLI_TRUST_WORKSPACE is set.
-ARGS go to Gemini CLI unchanged. Gemini CLI installs into the home on first
-run.
+--yolo or start with a subcommand (mcp, extensions, skills, hooks, gemma), and
+the workspace trusted unless GEMINI_CLI_TRUST_WORKSPACE is set. ARGS go to
+Gemini CLI unchanged. Gemini CLI installs into the home on first run.
 @bash
 Runs bash in a throwaway container on the current directory, which is mounted
 as /workspace. ARGS go to bash unchanged: clod bash -c 'make test'.

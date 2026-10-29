@@ -238,7 +238,8 @@ on the host and asks for the code it gives. For an API key instead, export
 `GEMINI_API_KEY` in the project's `.envrc`.
 
 Arguments go to Gemini CLI unchanged. It runs with `--yolo` unless they include
-`--approval-mode`, `-y` or `--yolo`. Gemini CLI turns approvals back on in a
+`--approval-mode`, `-y` or `--yolo`, or start with a subcommand such as
+`clod gemini mcp list`. Gemini CLI turns approvals back on in a
 folder it doesn't trust, so clod sets `GEMINI_CLI_TRUST_WORKSPACE=true`; set it
 to `false` in the `.envrc` to run the workspace untrusted. The container's and
 your shared instructions reach it in its global `~/.gemini/GEMINI.md`, in a

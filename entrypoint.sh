@@ -176,14 +176,19 @@ case "${1:-}" in
             npm install --global @google/gemini-cli
         }
         # Gemini drops YOLO to default approval in a folder it doesn't trust.
-        GEMINI_CLI_TRUST_WORKSPACE=${GEMINI_CLI_TRUST_WORKSPACE:-true}
+        GEMINI_CLI_TRUST_WORKSPACE=${GEMINI_CLI_TRUST_WORKSPACE-true}
         export GEMINI_CLI_TRUST_WORKSPACE
-        # Approvals are off unless the arguments choose an approval mode.
+        # Approvals are off unless the arguments choose an approval mode. A
+        # subcommand (gemini mcp list) gets no --yolo, before which Gemini
+        # would take the subcommand for a prompt.
         yolo=--yolo
+        case ${1:-} in
+            mcp|extensions|extension|skills|skill|hooks|hook|gemma) yolo= ;;
+        esac
         for arg; do
             case $arg in
                 --) break ;;
-                --approval-mode|--approval-mode=*|-y|--yolo|--yolo=*) yolo= ;;
+                --approval-mode|--approval-mode=*|--approvalMode|--approvalMode=*|-y|--yolo|--yolo=*) yolo= ;;
             esac
         done
         # The container's and the shared config's instructions, as Gemini's

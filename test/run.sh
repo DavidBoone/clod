@@ -444,7 +444,7 @@ test_gemini() {
   mkdir -p ~/.clod/homes/gemini-install
   clod -H gemini-install gemini --version | tee out
   has -E '^[0-9]+\.[0-9]+\.[0-9]+' out
-  clod -H gemini-install bash -c 'test -x ~/.local/bin/gemini; grep -q "disposable Docker container" ~/.gemini/GEMINI.md'
+  clod -H gemini-install bash -c 'test -x ~/.local/bin/gemini && grep -q "disposable Docker container" ~/.gemini/GEMINI.md'
   clod -H gemini-install bash -c 'echo "# my gemini rules" >> ~/.gemini/GEMINI.md'
   clod -H gemini-install gemini --version > out 2> err
   exits 1 grep -q 'installing Gemini CLI' err
@@ -467,8 +467,18 @@ EOF
   test "$(cat out)" = "$(printf 'true\n--yolo\n-p\na prompt')"
   clod -H gemini-args gemini --approval-mode=auto_edit > out
   test "$(cat out)" = "$(printf 'true\n--approval-mode=auto_edit')"
+  clod -H gemini-args gemini --approvalMode default > out
+  test "$(cat out)" = "$(printf 'true\n--approvalMode\ndefault')"
   clod -H gemini-args gemini -- --yolo > out
   test "$(cat out)" = "$(printf 'true\n--yolo\n--\n--yolo')"
+  # a subcommand gets no --yolo, which would make it a prompt
+  clod -H gemini-args gemini mcp list > out
+  test "$(cat out)" = "$(printf 'true\nmcp\nlist')"
+  # an empty GEMINI_CLI_TRUST_WORKSPACE stays empty
+  echo 'export GEMINI_CLI_TRUST_WORKSPACE=' > .envrc
+  direnv allow
+  clod -H gemini-args gemini -y > out
+  test "$(cat out)" = "$(printf '\n-y')"
   echo 'export GEMINI_CLI_TRUST_WORKSPACE=false' > .envrc
   direnv allow
   clod -H gemini-args gemini -y > out
