@@ -24,8 +24,8 @@ unset env_file
 # a CLAUDE.md already there came with the image, from a variant made before
 # AGENTS.d/, so it composes in after AGENTS.d/; the shared CLAUDE.md is left
 # out, as Claude Code reads it itself from /etc/claude-code, and so is a shared
-# AGENTS.md that is the same file. Without $2 ($1 is Codex's or OpenCode's
-# global AGENTS.md, in the home), the variants' files in the old
+# AGENTS.md that is the same file. Without $2 ($1 is Codex's, OpenCode's or
+# Gemini's global instructions file, in the home), the variants' files in the old
 # .claude/rules/, which Claude loads itself, and an image's own
 # /etc/clod/CLAUDE.md compose in after AGENTS.d/; and
 # the composition goes between the markers below, keeping whatever else the
@@ -168,6 +168,38 @@ case "${1:-}" in
         compose_agents_md "$HOME/.config/opencode/AGENTS.md"
         exec opencode "$@"
         ;;
+    gemini)
+        shift
+        # Installed into the mounted home so Gemini CLI can update itself.
+        command -v gemini >/dev/null || {
+            echo "clod: installing Gemini CLI into this home..." >&2
+            npm install --global @google/gemini-cli
+        }
+        # Gemini drops YOLO to default approval in a folder it doesn't trust.
+        GEMINI_CLI_TRUST_WORKSPACE=${GEMINI_CLI_TRUST_WORKSPACE-true}
+        export GEMINI_CLI_TRUST_WORKSPACE
+        # Approvals are off unless the arguments choose an approval mode. A
+        # subcommand (gemini mcp list) gets no --yolo, before which Gemini
+        # would take the subcommand for a prompt.
+        yolo=--yolo
+        case ${1:-} in
+            mcp|extensions|extension|skills|skill|hooks|hook|gemma) yolo= ;;
+        esac
+        for arg; do
+            case $arg in
+                --) break ;;
+                --approval-mode|--approval-mode=*|--approvalMode|--approvalMode=*|-y|--yolo|--yolo=*) yolo= ;;
+            esac
+        done
+        # The container's and the shared config's instructions, as Gemini's
+        # global GEMINI.md. Written every run, so changes apply on the next one.
+        mkdir -p "${GEMINI_CLI_HOME:-$HOME}/.gemini"
+        compose_agents_md "${GEMINI_CLI_HOME:-$HOME}/.gemini/GEMINI.md"
+        if [ -n "$yolo" ]; then
+            exec gemini "$yolo" "$@"
+        fi
+        exec gemini "$@"
+        ;;
     bash|zsh)
         shell=$1
         shift
@@ -201,7 +233,8 @@ fi
 # Instructions an image adds under /etc/clod (its AGENTS.md and any files its
 # variants put in AGENTS.d/) compose with the shared config's into one file,
 # which the agents each get as their global instructions: Codex's
-# $CODEX_HOME/AGENTS.md and OpenCode's ~/.config/opencode/AGENTS.md, and, here,
+# $CODEX_HOME/AGENTS.md, OpenCode's ~/.config/opencode/AGENTS.md, Gemini's
+# ~/.gemini/GEMINI.md and, here,
 # /etc/clod/CLAUDE.md, which loads through --add-dir. The = form keeps the
 # option, which takes several directories, from taking a subcommand or prompt
 # as one.

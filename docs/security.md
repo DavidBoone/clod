@@ -4,6 +4,10 @@ clod gives the agent a fixed reach instead of a stream of permission prompts.
 Claude Code runs with `--dangerously-skip-permissions` and Codex with
 `--dangerously-bypass-approvals-and-sandbox`. OpenCode defaults to
 `OPENCODE_PERMISSION='{"*":"allow"}'`; a value in `.envrc` overrides it.
+Gemini CLI runs with `--yolo` unless its arguments choose an approval mode,
+and with `GEMINI_CLI_TRUST_WORKSPACE=true`, which also lets it load the
+project's own `.gemini/settings.json` (MCP servers, hooks) without asking; a
+value in `.envrc` overrides it.
 Within that reach they act without asking:
 
 - **The project directory**, read-write: the agent can change or delete any
@@ -34,8 +38,8 @@ to run containers. It gives the agent the Docker host, which is far more than
 this list: see [Letting the agent run containers](docker-socket.md).
 
 Claude Code installs on first run with
-`curl -fsSL https://claude.ai/install.sh | bash`, and Codex and OpenCode from npm
-(`@openai/codex` and `@opencode/cli@2`). The base
+`curl -fsSL https://claude.ai/install.sh | bash`, and Codex, OpenCode and Gemini
+CLI from npm (`@openai/codex`, `@opencode/cli@2` and `@google/gemini-cli`). The base
 image's packages come from Debian, except Node, from NodeSource's apt
 repository, the GitHub CLI, from GitHub's, and git, from the git-core PPA on
 Launchpad (its Ubuntu 24.04 build).

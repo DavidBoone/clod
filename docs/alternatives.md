@@ -12,7 +12,7 @@ change quickly, so check before relying on a detail.
 
 |                            | Boundary            | Hosts                                   | Agents                                    | Network                         | Credentials                                          |
 | -------------------------- | ------------------- | --------------------------------------- | ----------------------------------------- | ------------------------------- | ---------------------------------------------------- |
-| **clod**                   | container           | macOS (Colima, Docker Desktop), Linux   | Claude Code, Codex                        | open                            | in the home, readable by the agent                   |
+| **clod**                   | container           | macOS (Colima, Docker Desktop), Linux   | Claude Code, Codex, OpenCode, Gemini      | open                            | in the home, readable by the agent                   |
 | **Docker Sandboxes**       | microVM             | macOS (Apple silicon), Windows 11       | Claude Code, Codex, Gemini, Copilot, more | open, balanced or locked down   | kept on the host; a proxy adds them to requests      |
 | **Anthropic devcontainer** | container           | wherever devcontainers run              | Claude Code                               | allowlist (iptables)            | in the container                                     |
 | **Claude Code `/sandbox`** | OS sandbox, no container | macOS, Linux, WSL2                 | Claude Code                               | allowlist (proxy)               | the agent runs as you, on your machine               |
@@ -92,7 +92,7 @@ agent can use but never read.
 - **Shared configuration.** Managed settings and instructions in
   `~/.clod/shared` apply to every home.
 - **Per-project variables** from a direnv `.envrc`.
-- **Claude Code and Codex** in the same image.
+- **Claude Code, Codex, OpenCode and Gemini CLI** in the same image.
 - **Plain Docker.** A bash script and `docker run --rm`, on Colima, Docker
   Desktop or Linux, with no VM of its own, no proxy and no daemon.
 

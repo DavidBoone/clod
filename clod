@@ -1,5 +1,5 @@
 #!/bin/bash
-# clod: run Claude Code, Codex, OpenCode or a shell in a throwaway Docker
+# clod: run Claude Code, Codex, OpenCode, Gemini CLI or a shell in a throwaway Docker
 # container on the current directory. `clod help` describes the commands and
 # options.
 #
@@ -23,7 +23,7 @@
 #               docs and man pages, built as clod:full); variants that take
 #               ARG BASE are built on the one it names
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
-#               (default), codex, opencode, bash or zsh
+#               (default), codex, opencode, gemini, bash or zsh
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
 #               space-separated: 8080 (the same on both sides), host:container,
 #               or address:host:container to publish on another address
@@ -129,6 +129,7 @@ Run in the container
 claude|[ARGS...]|Claude Code
 codex|[ARGS...]|Codex
 opencode|[ARGS...]|OpenCode
+gemini|[ARGS...]|Gemini CLI
 bash|[ARGS...]|a bash shell
 zsh|[ARGS...]|a zsh shell
 Images
@@ -186,6 +187,12 @@ Runs OpenCode in a throwaway container on the current directory, which is
 mounted as /workspace, with all permissions allowed unless OPENCODE_PERMISSION
 is set. ARGS go to OpenCode unchanged. OpenCode v2 installs into the home on
 first run, replacing v1 if present.
+@gemini
+Runs Gemini CLI in a throwaway container on the current directory, which is
+mounted as /workspace, with --yolo unless ARGS include --approval-mode, -y or
+--yolo or start with a subcommand (mcp, extensions, skills, hooks, gemma), and
+the workspace trusted unless GEMINI_CLI_TRUST_WORKSPACE is set. ARGS go to
+Gemini CLI unchanged. Gemini CLI installs into the home on first run.
 @bash
 Runs bash in a throwaway container on the current directory, which is mounted
 as /workspace. ARGS go to bash unchanged: clod bash -c 'make test'.
@@ -350,7 +357,7 @@ EOF
 read -r -d '' settings_table <<'EOF' || true
 image|CLOD_IMAGE|clod|the image or variant a run uses
 base|CLOD_BASE|slim|the Debian image clod's image is built on: slim (debian:trixie-slim) or full (debian:trixie, with docs and man pages)
-command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, opencode, bash or zsh
+command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, opencode, gemini, bash or zsh
 home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
 ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
@@ -361,7 +368,7 @@ EOF
 
 # The commands that run in the container, the commands (each noun once) and the
 # nouns, whose verbs noun_verbs lists, all from command_table.
-run_commands='claude codex opencode bash zsh'
+run_commands='claude codex opencode gemini bash zsh'
 commands='' nouns=''
 while IFS= read -r row; do
   [[ $row == *'|'* ]] || continue
@@ -438,8 +445,8 @@ help_summary() {
   local row name args summary
   echo 'usage: clod [OPTIONS] [COMMAND [ARGS...]]'
   echo
-  echo 'Runs Claude Code, Codex, OpenCode or a shell in a throwaway container on'
-  echo 'the current directory. With no COMMAND it runs claude, unless'
+  echo 'Runs Claude Code, Codex, OpenCode, Gemini CLI or a shell in a throwaway'
+  echo 'container on the current directory. With no COMMAND it runs claude, unless'
   echo 'CLOD_COMMAND or clod default command says otherwise.'
   while IFS= read -r row; do
     if [[ $row != *'|'* ]]; then
@@ -449,7 +456,7 @@ help_summary() {
     IFS='|' read -r name args summary <<<"$row"
     [[ $args == - ]] || help_row "$name${args:+ ${args%%;*}}" "$summary"
   done <<<"$command_table"
-  printf "\nOptions go before the command, or after it up to --, except after\nclaude, codex, opencode, bash or zsh, whose arguments are the program's\n"
+  printf "\nOptions go before the command, or after it up to --, except after\nclaude, codex, opencode, gemini, bash or zsh, whose arguments are the program's\n"
   help_options clod
   # shellcheck disable=SC2016 # printed as is
   printf "\n'clod COMMAND -h' shows more about COMMAND.\n"
@@ -2573,21 +2580,22 @@ cmd_image_prune() {
 # Prints a row for home $1 (a directory or vol:NAME), labelled $2. A volume's
 # logins aren't on the host, so they show as ?.
 home_row() {
-  local mark=' ' claude=- codex=- opencode=-
+  local mark=' ' claude=- codex=- opencode=- gemini=-
   [[ $1 == "$home" ]] && mark='*'
   if [[ $1 == vol:* ]]; then
-    claude='?' codex='?' opencode='?'
+    claude='?' codex='?' opencode='?' gemini='?'
   else
     [[ -s $1/.claude/.credentials.json ]] && claude=yes
     [[ -s $1/.codex/auth.json ]] && codex=yes
     [[ -s $1/.local/share/opencode/auth.json ]] && opencode=yes
+    [[ -s $1/.gemini/oauth_creds.json ]] && gemini=yes
   fi
-  printf '%s %-20s %-7s %-7s %s\n' "$mark" "$2" "$claude" "$codex" "$opencode"
+  printf '%s %-20s %-7s %-7s %-8s %s\n' "$mark" "$2" "$claude" "$codex" "$opencode" "$gemini"
 }
 
 cmd_home() {
   local d v listed=''
-  printf '  %-20s %-7s %-7s %s\n' HOME CLAUDE CODEX OPENCODE
+  printf '  %-20s %-7s %-7s %-8s %s\n' HOME CLAUDE CODEX OPENCODE GEMINI
   for d in "$clod_dir"/homes/*; do
     [[ -d $d ]] || continue
     home_row "$d" "$(basename "$d")"

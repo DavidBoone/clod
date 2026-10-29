@@ -28,7 +28,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 export LC_ALL=C.UTF-8
 
 lint_tests='lint'
-base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode statusline
+base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode gemini statusline
   port port-busy clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install'
@@ -424,7 +424,7 @@ EOF
   chmod +x ~/.clod/homes/opencode-args/.local/bin/opencode
   mkdir -p ~/.clod/homes/opencode-args/.local/share/opencode
   echo '{"provider":{"type":"api","key":"test"}}' > ~/.clod/homes/opencode-args/.local/share/opencode/auth.json
-  clod home | has -E 'opencode-args +[-] +[-] +yes$'
+  clod home | has -E 'opencode-args +[-] +[-] +yes +[-]$'
   clod -H opencode-args opencode run 'a prompt' --model provider/model > out
   test "$(cat out)" = "$(printf '%s\n' '{"permission":{"*":"allow"}}' run 'a prompt' --model provider/model)"
   echo 'export OPENCODE_PERMISSION='"'"'{"*":"ask"}'"'" > .envrc
@@ -435,6 +435,61 @@ EOF
   direnv allow
   clod -H opencode-args opencode run 'a prompt' > out
   head -1 out | jq -e '.model == "provider/model" and .permissions[0].effect == "deny" and .permission == {"*":"ask"}'
+}
+
+test_gemini() {
+  # Gemini CLI installs into the home on first run, and the entrypoint
+  # composes the container's instructions into its global GEMINI.md, keeping
+  # the user's own text after the block
+  mkdir -p ~/.clod/homes/gemini-install
+  clod -H gemini-install gemini --version | tee out
+  has -E '^[0-9]+\.[0-9]+\.[0-9]+' out
+  clod -H gemini-install bash -c 'test -x ~/.local/bin/gemini && grep -q "disposable Docker container" ~/.gemini/GEMINI.md'
+  clod -H gemini-install bash -c 'echo "# my gemini rules" >> ~/.gemini/GEMINI.md'
+  clod -H gemini-install gemini --version > out 2> err
+  exits 1 grep -q 'installing Gemini CLI' err
+  clod -H gemini-install bash -c '
+    set -e
+    f=~/.gemini/GEMINI.md
+    test "$(grep -c "^<!-- clod:begin" $f)" = 1
+    test "$(tail -1 $f)" = "# my gemini rules"
+  '
+  # --yolo and a trusted workspace unless the arguments or the .envrc choose
+  mkdir -p ~/.clod/homes/gemini-args/.local/bin ~/.clod/homes/gemini-args/.gemini
+  cat > ~/.clod/homes/gemini-args/.local/bin/gemini <<'EOF'
+#!/bin/sh
+printf '%s\n' "$GEMINI_CLI_TRUST_WORKSPACE" "$@"
+EOF
+  chmod +x ~/.clod/homes/gemini-args/.local/bin/gemini
+  echo '{"access_token":"test"}' > ~/.clod/homes/gemini-args/.gemini/oauth_creds.json
+  clod home | has -E 'gemini-args +[-] +[-] +[-] +yes$'
+  clod -H gemini-args gemini -p 'a prompt' > out
+  test "$(cat out)" = "$(printf 'true\n--yolo\n-p\na prompt')"
+  clod -H gemini-args gemini --approval-mode=auto_edit > out
+  test "$(cat out)" = "$(printf 'true\n--approval-mode=auto_edit')"
+  clod -H gemini-args gemini --approvalMode default > out
+  test "$(cat out)" = "$(printf 'true\n--approvalMode\ndefault')"
+  clod -H gemini-args gemini -- --yolo > out
+  test "$(cat out)" = "$(printf 'true\n--yolo\n--\n--yolo')"
+  # a subcommand gets no --yolo, which would make it a prompt
+  clod -H gemini-args gemini mcp list > out
+  test "$(cat out)" = "$(printf 'true\nmcp\nlist')"
+  clod -H gemini-args gemini extension list > out
+  test "$(cat out)" = "$(printf 'true\nextension\nlist')"
+  # after --, an approval flag is the prompt's, not Gemini's
+  clod -H gemini-args gemini -p x -- -y > out
+  test "$(cat out)" = "$(printf 'true\n--yolo\n-p\nx\n--\n-y')"
+  clod -H gemini-args gemini --yolo=false > out
+  test "$(cat out)" = "$(printf 'true\n--yolo=false')"
+  # an empty GEMINI_CLI_TRUST_WORKSPACE stays empty
+  echo 'export GEMINI_CLI_TRUST_WORKSPACE=' > .envrc
+  direnv allow
+  clod -H gemini-args gemini -y > out
+  test "$(cat out)" = "$(printf '\n-y')"
+  echo 'export GEMINI_CLI_TRUST_WORKSPACE=false' > .envrc
+  direnv allow
+  clod -H gemini-args gemini -y > out
+  test "$(cat out)" = "$(printf 'false\n-y')"
 }
 
 test_statusline() {
@@ -1604,7 +1659,7 @@ test_completion() {
   test "$(completes i)" = "$(printf 'image\ninstall')"
   test "$(completes u)" = "$(printf 'uninstall\nupdate')"
   # in command_table's order, with its descriptions
-  test "$(completes '' | head -6)" = "$(printf 'claude\ncodex\nopencode\nbash\nzsh\nimage')"
+  test "$(completes '' | head -7)" = "$(printf 'claude\ncodex\nopencode\ngemini\nbash\nzsh\nimage')"
   clod __complete '' | has -xF -e "$(printf 'claude\tClaude Code')"
   clod __complete image '' | has -xF -e "$(printf 'rm\tdelete your variants and their built images')"
   clod __complete --sk | has -xF -e "$(printf -- '--skip-build\trun the image as built, even if its files changed')"
