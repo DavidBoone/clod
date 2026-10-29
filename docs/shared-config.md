@@ -2,16 +2,16 @@
 
 ![The clod statusline in five columns over two lines: the model over its effort, context use over token counts, the idle time, the home over the image and ports, and the git branch over lines changed, with the 5-hour and 7-day rate limits at the right](statusline.svg)
 
-Claude Code reads managed settings from `/etc/claude-code`, for every home,
-and the entrypoint passes its `settings.json` to Claude Code as `--settings`.
-The instructions for every agent come from there too: the entrypoint composes
-the shared config's `AGENTS.md` (or a `CLAUDE.md` kept from before it) with the
-image's own into the `AGENTS.md` each agent reads globally — Codex's
-`$CODEX_HOME/AGENTS.md`, OpenCode's `~/.config/opencode/AGENTS.md` and Gemini
-CLI's `~/.gemini/GEMINI.md` written in the home, and, for Claude Code, `/etc/clod/CLAUDE.md` (a `CLAUDE.md` in the
-shared config Claude Code still reads itself, as it always has). Until
-`~/.clod/shared` exists, clod mounts this repo's [`shared/`](../shared) there,
-which updates with `git pull`:
+clod mounts the shared config read-only at `/etc/clod-shared` in every
+container, for every home, and the entrypoint passes its `settings.json` to
+Claude Code as `--settings`. The instructions for every agent come from there
+too: the entrypoint composes the shared config's `AGENTS.md` (or a `CLAUDE.md`
+kept from before it) with the image's own into the `AGENTS.md` each agent
+reads globally — Codex's `$CODEX_HOME/AGENTS.md`, OpenCode's
+`~/.config/opencode/AGENTS.md` and Gemini CLI's `~/.gemini/GEMINI.md` written
+in the home, and, for Claude Code, `/etc/clod/CLAUDE.md`, which also gets a
+shared `CLAUDE.md` beside the `AGENTS.md`. Until `~/.clod/shared` exists, clod mounts this repo's
+[`shared/`](../shared) there, which updates with `git pull`:
 
 - `statusline.sh` is the statusline, in five columns over two lines: the
   model (`✨`) over its effort (`⚡`); context use over the session's input
@@ -46,7 +46,7 @@ keeping yours as a backup. Put your own instructions in an `AGENTS.md` there,
 which every agent reads, and settings for every home in `settings.json`. A
 `CLAUDE.md` from before `AGENTS.md` still reaches every agent while it is the
 only one; once you add an `AGENTS.md`, rename the `CLAUDE.md` to it, or keep
-only Claude-specific instructions in it, since Claude Code reads both (`clod
+only Claude-specific instructions in it, since Claude Code gets both (`clod
 shared new` points this out; an identical copy is read once).
 
 `settings.json` isn't a managed source: Claude Code doesn't read it itself.
@@ -58,6 +58,17 @@ so settings kept there would be skipped. Real policy can still go in
 `managed-settings.json` or `managed-settings.d/*.json` (see
 [managed settings](https://code.claude.com/docs/en/settings)), where it applies
 unless the organisation has server-managed settings.
+
+`/etc/claude-code` is the image's, so a devcontainer or variant that has its
+own managed settings keeps them. clod mounts the files there that Claude Code
+reads from the shared config one by one, beside the image's own: its
+`managed-settings.json` as `managed-settings.d/50-clod.json`, which Claude Code
+applies after the image's `managed-settings.json` (and before any of the
+image's drop-ins named after it), each file in its `managed-settings.d/` and
+each entry in its `.claude/` folders (`agents/`, `skills/` and the like), and
+its other files, such as `statusline.sh`. A file of the same name in the image
+is hidden by the shared one. `AGENTS.md`, `CLAUDE.md`, `settings.json` and
+other hidden files (`.git`) stay only in `/etc/clod-shared`.
 
 Only the last `--settings` Claude Code is given applies, so the entrypoint
 leaves `settings.json` out when you pass your own (`clod -- --settings
