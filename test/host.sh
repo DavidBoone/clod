@@ -86,7 +86,7 @@ fits() {
 completes() { clod __complete "$@" | cut -f1 > actual; }
 
 # Help and argument handling need no Docker, on every command's help page.
-for command in help env default install uninstall update completion claude codex opencode bash zsh \
+for command in help env default install uninstall update completion claude codex opencode gemini bash zsh \
   image 'image show' 'image new' 'image edit' 'image diff' 'image rm' \
   'image build' 'image rebuild' 'image clean' 'image prune' \
   home 'home new' 'home cp' 'home mv' 'home rm' workspace 'workspace rm' \
@@ -99,7 +99,7 @@ check 0 --version
 has '^clod '
 check 0 -h
 has '^Options go before the command, or after it up to --, except after$'
-has "^claude, codex, opencode, bash or zsh, whose arguments are the program's$"
+has "^claude, codex, opencode, gemini, bash or zsh, whose arguments are the program's$"
 has '  env +show the home, workspace, image, ports and variables$'
 fits
 check 2 --nope

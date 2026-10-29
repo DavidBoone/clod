@@ -1,6 +1,6 @@
 # Image variants
 
-The `clod` image is a generic base: Claude Code, Codex, OpenCode, git,
+The `clod` image is a generic base: Claude Code, Codex, OpenCode, Gemini CLI, git,
 the GitHub CLI,
 Python, Node 26, vim and everyday CLI tools. A variant puts a language,
 compiler or browser on top. clod comes with these, in [`images/`](../images):
@@ -120,7 +120,7 @@ A variant from before `AGENTS.d/` that copies its file into
 entrypoint composes those in too. Move it to `AGENTS.d/` when you next edit
 the variant.
 
-Node is in the base for the agents' own tooling: Codex installs with npm, and
+Node is in the base for the agents' own tooling: Codex, OpenCode and Gemini CLI install with npm, and
 many MCP servers run with `npx`. Claude Code doesn't need it. The base gets Node
 26 from NodeSource's repository, and a project that needs another major gets it
 from a variant that edits that repository and reinstalls:

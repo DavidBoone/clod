@@ -7,6 +7,7 @@ clod                 # Claude Code
 clod claude --resume # Claude Code with its own arguments
 clod codex [args]    # Codex
 clod opencode [args] # OpenCode
+clod gemini [args]   # Gemini CLI
 clod bash | zsh      # a shell in the container
 clod -i go           # the go image variant (see Image variants)
 clod -H work         # the "work" home (see Homes)
@@ -35,7 +36,7 @@ starting with `-` is an argument.
 `clod help` lists the commands and options. A command's page, with its usage,
 what it does and the options that apply to it, is `clod help COMMAND`, or `-h`
 or `--help` anywhere after the command: `clod home rm -h`. A noun's page lists
-its verbs. The run commands (`claude`, `codex`, `opencode`, `bash`, `zsh`) are the
+its verbs. The run commands (`claude`, `codex`, `opencode`, `gemini`, `bash`, `zsh`) are the
 exception: their arguments go to the program they run, so clod's options go
 before them, `clod claude --help` is Claude Code's help, and `clod help claude`
 is clod's page for it. A usage error names the page to read.
@@ -219,6 +220,31 @@ instructions file OpenCode reads from outside the workspace, in a block the
 entrypoint rewrites on every run, as for Codex; what you write there outside
 the block stays, for that home. See
 the [OpenCode CLI documentation](https://opencode.ai/v2/docs/cli/).
+
+## Gemini CLI
+
+`clod gemini` installs Gemini CLI from the official `@google/gemini-cli` npm
+package into the home on first run, and it updates itself. Its login and
+settings are per home, in `~/.gemini`.
+
+```bash
+clod gemini                      # start Gemini CLI, then /auth to log in
+clod gemini -p "explain this project"
+clod default command gemini      # make it the default agent
+```
+
+The container has no browser, so signing in with Google prints a link to open
+on the host and asks for the code it gives. For an API key instead, export
+`GEMINI_API_KEY` in the project's `.envrc`.
+
+Arguments go to Gemini CLI unchanged. It runs with `--yolo` unless they include
+`--approval-mode`, `-y` or `--yolo`. Gemini CLI turns approvals back on in a
+folder it doesn't trust, so clod sets `GEMINI_CLI_TRUST_WORKSPACE=true`; set it
+to `false` in the `.envrc` to run the workspace untrusted. The container's and
+your shared instructions reach it in its global `~/.gemini/GEMINI.md`, in a
+block the entrypoint rewrites on every run, as for Codex; what you write there
+outside the block stays, for that home. See the
+[Gemini CLI documentation](https://geminicli.com/docs/).
 
 ## Publishing ports
 

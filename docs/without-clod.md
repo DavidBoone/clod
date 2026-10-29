@@ -94,6 +94,7 @@ and the rest go to it:
 | `claude [args]` | Claude Code with its own arguments |
 | `codex [args]`  | Codex, installed into the home on first run |
 | `opencode [args]` | OpenCode, installed into the home on first run, with all permissions allowed |
+| `gemini [args]` | Gemini CLI, installed into the home on first run, with `--yolo` unless its arguments set an approval mode |
 | `bash`, `zsh`   | a shell |
 
 Anything else also runs Claude Code, with all the arguments passed to it.

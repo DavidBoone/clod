@@ -1,6 +1,6 @@
 # clod
 
-Run Claude Code, Codex or OpenCode with no permission prompts, safely.
+Run Claude Code, Codex, OpenCode or Gemini CLI with no permission prompts, safely.
 `clod` starts the agent in a throwaway Docker container that sees only the directory you run it
 from and a home of its own. Inside, it works without stopping to ask: it
 browses the web, runs whatever tools it needs and installs packages into its
@@ -48,14 +48,14 @@ Each `clod` starts a fresh container from three pieces:
   itself, which updates itself. It is not your own home directory: it starts
   empty, with none of your keys or logins, and holds only what you give it.
   `clod -H work` uses another home, with its own login.
-- **An image.** The `clod` image supports Claude Code, Codex and OpenCode,
+- **An image.** The `clod` image supports Claude Code, Codex, OpenCode and Gemini CLI,
   with git, the GitHub CLI, Python, Node and everyday CLI tools. Variants add a language or stack on
   top: `clod -i go`.
 
 When you exit, the container is removed. Only the project and the home remain.
 
 That container is the boundary. Claude Code runs with
-`--dangerously-skip-permissions`; Codex and OpenCode allow tools too, so instead of
+`--dangerously-skip-permissions`; the other agents allow tools too, so instead of
 asking you about each command, the agent can do anything inside it. What it
 can reach is short and easy to check:
 
@@ -72,7 +72,7 @@ reach](docs/security.md) goes through this in full.
 
 Everything below is optional; plain `clod` is all most work needs.
 
-- [Using clod](docs/usage.md): the command line, Codex, OpenCode, shells, publishing
+- [Using clod](docs/usage.md): the command line, Codex, OpenCode, Gemini CLI, shells, publishing
   ports, pasting images, git and GitHub logins, updating and rebuilding
 - [Image variants](docs/images.md): the bundled Go, Rust, Python, .NET, LAMP,
   browser and Docker images, combining them, and writing your own
