@@ -4,7 +4,10 @@ clod gives the agent a fixed reach instead of a stream of permission prompts.
 Claude Code runs with `--dangerously-skip-permissions` and Codex with
 `--dangerously-bypass-approvals-and-sandbox`. OpenCode defaults to
 `OPENCODE_PERMISSION='{"*":"allow"}'`; a value in `.envrc` overrides it.
-Gemini CLI runs with `--yolo` and `GEMINI_CLI_TRUST_WORKSPACE=true`.
+Gemini CLI runs with `--yolo` unless its arguments choose an approval mode,
+and with `GEMINI_CLI_TRUST_WORKSPACE=true`, which also lets it load the
+project's own `.gemini/settings.json` (MCP servers, hooks) without asking; a
+value in `.envrc` overrides it.
 Within that reach they act without asking:
 
 - **The project directory**, read-write: the agent can change or delete any

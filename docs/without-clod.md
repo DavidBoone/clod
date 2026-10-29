@@ -101,7 +101,11 @@ Anything else also runs Claude Code, with all the arguments passed to it.
 Claude Code gets `--dangerously-skip-permissions` unless its arguments include
 `--permission-mode`, `--dangerously-skip-permissions` or
 `--allow-dangerously-skip-permissions`. Codex always runs with
-`--dangerously-bypass-approvals-and-sandbox`.
+`--dangerously-bypass-approvals-and-sandbox`. OpenCode gets
+`OPENCODE_PERMISSION='{"*":"allow"}'` unless `-e` sets it. Gemini CLI gets
+`--yolo` unless its arguments include `--approval-mode`, `-y` or `--yolo` or
+start with a subcommand, and `GEMINI_CLI_TRUST_WORKSPACE=true` unless `-e`
+sets it.
 
 Other `docker run` options work as usual:
 

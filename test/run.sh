@@ -474,6 +474,13 @@ EOF
   # a subcommand gets no --yolo, which would make it a prompt
   clod -H gemini-args gemini mcp list > out
   test "$(cat out)" = "$(printf 'true\nmcp\nlist')"
+  clod -H gemini-args gemini extension list > out
+  test "$(cat out)" = "$(printf 'true\nextension\nlist')"
+  # after --, an approval flag is the prompt's, not Gemini's
+  clod -H gemini-args gemini -p x -- -y > out
+  test "$(cat out)" = "$(printf 'true\n--yolo\n-p\nx\n--\n-y')"
+  clod -H gemini-args gemini --yolo=false > out
+  test "$(cat out)" = "$(printf 'true\n--yolo=false')"
   # an empty GEMINI_CLI_TRUST_WORKSPACE stays empty
   echo 'export GEMINI_CLI_TRUST_WORKSPACE=' > .envrc
   direnv allow
