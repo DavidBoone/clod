@@ -26,8 +26,9 @@ clod help home rm    # one command's page; so is clod home rm -h
 ```
 
 Commands that manage something are a noun and a verb: `clod image build`,
-`clod home rm`. The noun on its own lists them, except `shared`, which needs
-`new` or `diff`.
+`clod home rm`. The noun on its own lists: `clod image`, `clod home`,
+`clod workspace`, `clod shared` (which shows where the shared config is and
+its files).
 
 clod's options go before the command or anywhere after it, up to `--`:
 `clod home rm work --force` is `clod --force home rm work`. Past `--`, a word

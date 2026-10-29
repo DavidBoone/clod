@@ -109,8 +109,11 @@ check 2 image new -- -invalid
 check 2 image nope
 check 2 home new a b
 check 2 workspace rm
-check 2 shared
-has 'shared takes a command: new, diff or edit' errors
+# a bare shared lists the starter's config and its files
+check 0 shared
+has '/shared \(the starter\):$'
+has '^  settings\.json$'
+has '^  statusline\.sh$'
 echo 'PASS help and arguments'
 
 # Settings persist, options override them, and resetting restores defaults.
@@ -157,6 +160,11 @@ check 1 shared diff
 check 0 shared new
 test -f "$HOME/.clod/shared/settings.json"
 check 0 shared diff
+# a bare shared lists yours now
+check 0 shared
+has '^~/.clod/shared \(your shared config\):$'
+has '^  settings\.json$'
+has '^  statusline\.sh$'
 # with no instructions file there yet, shared edit opens AGENTS.md
 check 0 shared edit
 has '/shared/AGENTS.md$'

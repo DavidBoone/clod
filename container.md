@@ -31,4 +31,4 @@ You can't run `clod` or see the host's `~/.clod`; the user changes these on the 
 - A slow home, or one `chown` fails in: a volume home (`clod home mv NAME vol:NAME`, login included; `clod home cp` copies)
 - Ports: `clod -P 3000`; Docker access: `clod -i docker --docker` (root on the Docker host)
 
-`clod env` shows a run's settings; `clod image`, `clod home` and `clod workspace` list those; `clod help` shows the rest. Read the docs (`https://raw.githubusercontent.com/DavidBoone/clod/master/docs/<page>`: `usage.md`, `images.md`, `configuration.md`, `shared-config.md`, `docker-socket.md`, `security.md`, `docker.md`) before advising beyond this.
+`clod env` shows a run's settings; `clod image`, `clod home`, `clod workspace` and `clod shared` list those; `clod help` shows the rest. Read the docs (`https://raw.githubusercontent.com/DavidBoone/clod/master/docs/<page>`: `usage.md`, `images.md`, `configuration.md`, `shared-config.md`, `docker-socket.md`, `security.md`, `docker.md`) before advising beyond this.
