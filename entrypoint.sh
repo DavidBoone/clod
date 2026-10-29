@@ -15,6 +15,11 @@ if [ -r "$env_file" ]; then
 fi
 unset env_file
 
+# The shared config (~/.clod/shared), which clod mounts read-only here. It also
+# mounts the files Claude Code reads from /etc/claude-code into that folder,
+# beside the image's own.
+shared=/etc/clod-shared
+
 # Composes the instructions agents share into the file $1, in order: the
 # image's /etc/clod/AGENTS.md, anything its variants added under
 # /etc/clod/AGENTS.d/, then the shared config's own AGENTS.md, or, when there
@@ -22,14 +27,13 @@ unset env_file
 #
 # With $2 set ($1 is then Claude's /etc/clod/CLAUDE.md, new in each container),
 # a CLAUDE.md already there came with the image, from a variant made before
-# AGENTS.d/, so it composes in after AGENTS.d/; the shared CLAUDE.md is left
-# out, as Claude Code reads it itself from /etc/claude-code, and so is a shared
-# AGENTS.md that is the same file. Without $2 ($1 is Codex's, OpenCode's or
-# Gemini's global instructions file, in the home), the variants' files in the old
-# .claude/rules/, which Claude loads itself, and an image's own
-# /etc/clod/CLAUDE.md compose in after AGENTS.d/; and
-# the composition goes between the markers below, keeping whatever else the
-# file has, which is the user's own.
+# AGENTS.d/, so it composes in after AGENTS.d/, and the shared CLAUDE.md
+# composes in after the shared AGENTS.md, unless it is the same file. Without
+# $2 ($1 is Codex's, OpenCode's or Gemini's global instructions file, in the
+# home), the variants' files in the old .claude/rules/, which Claude loads
+# itself, and an image's own /etc/clod/CLAUDE.md compose in after AGENTS.d/;
+# and the composition goes between the markers below, keeping whatever else
+# the file has, which is the user's own.
 #
 # Written to a temporary file then renamed over $1, so an agent another run
 # starts at the same moment on the same home reads one whole version. mktemp
@@ -92,13 +96,14 @@ $rules
 EOF
         set -- "$@" /etc/clod/CLAUDE.md
     fi
-    if [ -r /etc/claude-code/AGENTS.md ]; then
-        if [ -z "$2" ] || [ ! -r /etc/claude-code/CLAUDE.md ] ||
-            ! cmp -s /etc/claude-code/AGENTS.md /etc/claude-code/CLAUDE.md; then
-            set -- "$@" /etc/claude-code/AGENTS.md
+    if [ -r "$shared/AGENTS.md" ]; then
+        set -- "$@" "$shared/AGENTS.md"
+        if [ -n "$2" ] && [ -r "$shared/CLAUDE.md" ] &&
+            ! cmp -s "$shared/AGENTS.md" "$shared/CLAUDE.md"; then
+            set -- "$@" "$shared/CLAUDE.md"
         fi
-    elif [ -z "$2" ]; then
-        set -- "$@" /etc/claude-code/CLAUDE.md
+    else
+        set -- "$@" "$shared/CLAUDE.md"
     fi
     dest=$1 claude=$2
     shift 2
@@ -251,7 +256,7 @@ fi
 # The shared settings (the statusline) go in as --settings, not as managed
 # settings, which an organisation's server-managed settings would replace. Only
 # the last --settings applies, so one in the arguments replaces them.
-settings=/etc/claude-code/settings.json
+settings=$shared/settings.json
 for arg; do
     case $arg in
         --) break ;;

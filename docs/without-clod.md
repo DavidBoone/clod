@@ -51,7 +51,7 @@ mkdir -p ~/.clod/homes/default
 docker run -it --rm --pull=never \
   -v ~/.clod/homes/default:/home/claude \
   -v "$PWD":/workspace \
-  -v ~/.clod/src/shared:/etc/claude-code:ro \
+  -v ~/.clod/src/shared:/etc/clod-shared:ro \
   -e TZ=Europe/London \
   clod
 ```
@@ -71,12 +71,14 @@ Each piece:
   the same home the `clod` script uses by default, so the two can share it.
 - **`-v "$PWD":/workspace`** is the project, read-write. The image's working
   directory is `/workspace`, and a new home is set to trust it.
-- **`-v ~/.clod/src/shared:/etc/claude-code:ro`** is the shared config the
+- **`-v ~/.clod/src/shared:/etc/clod-shared:ro`** is the shared config the
   entrypoint reads for every home: the statusline and the settings that turn
   it on. Use your own copy (such as `~/.clod/shared`) to change them or to add
-  an `AGENTS.md` of your own instructions, which every agent gets. Read-only,
-  so the agent can't edit its own instructions. Leave it out and Claude runs
-  without the statusline.
+  an `AGENTS.md` of your own instructions, which every agent gets. Its
+  `managed-settings.json` and `.claude/` reach Claude Code only through
+  `clod`, which mounts them into `/etc/claude-code`. Read-only, so the agent
+  can't edit its own instructions. Leave it out and Claude runs without the
+  statusline.
 - **`-e TZ=...`** sets the timezone, which is otherwise UTC. Use your host's
   zone name, as found under `/usr/share/zoneinfo`.
 - **`clod`** is the image. A variant goes here instead (see below).
@@ -137,7 +139,7 @@ clod() {
   docker run -i $tty $host --rm --pull=never \
     -v "$home":/home/claude \
     -v "$PWD":/workspace \
-    -v "$shared":/etc/claude-code:ro \
+    -v "$shared":/etc/clod-shared:ro \
     -e TZ="$tz" -e CLOD_HOME=default -e CLOD_IMAGE="$image" \
     "$image" "$@"
 }

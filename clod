@@ -48,14 +48,15 @@
 # declare ARG BASE=clod and build FROM $BASE, so a combination a+b can pass it
 # --build-arg BASE=clod-a.
 #
-# ~/.clod/shared is mounted read-only as /etc/claude-code, where Claude Code
-# reads managed settings for every home, and the entrypoint passes its
-# settings.json as --settings. Its AGENTS.md, or a CLAUDE.md kept from before
-# AGENTS.md, holds the instructions for every home, which the entrypoint
-# composes with the image's into the AGENTS.md each agent reads globally (and
-# Claude's /etc/clod/CLAUDE.md). Until you create it, the starter set in this
-# script's shared/ directory is mounted instead. What the agents are told
-# about the container comes with the image, from container.md.
+# ~/.clod/shared is mounted read-only as /etc/clod-shared, and the files in it
+# Claude Code reads from /etc/claude-code (managed settings, .claude/'s agents
+# and skills) one by one into that folder, beside the image's own. The
+# entrypoint passes its settings.json as --settings. Its AGENTS.md, or a
+# CLAUDE.md kept from before AGENTS.md, holds the instructions for every home,
+# which the entrypoint composes with the image's into the AGENTS.md each agent
+# reads globally (and Claude's /etc/clod/CLAUDE.md). Until you create it, the
+# starter set in this script's shared/ directory is mounted instead. What the
+# agents are told about the container comes with the image, from container.md.
 #
 # /workspace is the current directory, or with -w another directory or, as
 # vol:NAME, the Docker volume clod-workspace-NAME. It is an option only: the
@@ -277,10 +278,11 @@ a container uses.
 Deletes volume workspaces, named NAME or vol:NAME. In a terminal it lists
 them and asks first. It refuses a workspace a container uses.
 @shared
-~/.clod/shared is mounted read-only as /etc/claude-code in every container:
+~/.clod/shared is mounted read-only as /etc/clod-shared in every container:
 settings for every home (the statusline), any managed settings, and your
-instructions for every home in its AGENTS.md, which every agent reads. Until
-you create it, clod's starter is mounted.
+instructions for every home in its AGENTS.md, which every agent reads. Its
+managed-settings.json and .claude/ go into /etc/claude-code beside the
+image's own. Until you create it, clod's starter is mounted.
 @shared new
 Creates ~/.clod/shared as a copy of the starter, to customise. If it exists,
 lists the starter's files it lacks or differs on.
@@ -2881,9 +2883,8 @@ cmd_shared_new() {
         echo "clod: $(tildify "$target/$f") describes the container, which the image already does; remove that section"
       fi
     done
-    # Claude Code reads a shared CLAUDE.md itself and gets AGENTS.md composed
-    # in too (unless the two are the same), so both load; the other agents
-    # read only AGENTS.md.
+    # Claude Code gets both composed in (once, when the two are the same); the
+    # other agents get only AGENTS.md.
     if [[ -f $target/AGENTS.md && -f $target/CLAUDE.md ]]; then
       echo "clod: $(tildify "$target") has both AGENTS.md and CLAUDE.md: Claude Code reads both, the other agents only AGENTS.md; keep only Claude-specific instructions in CLAUDE.md, or remove it"
     fi
@@ -3341,11 +3342,40 @@ cmd_image_build() {
 # path) or a Docker volume, at $2, with options $3 (such as ",readonly"). Unlike
 # -v, a bind --mount fails when Docker can't see the directory (outside
 # Colima's shared folders, say) instead of mounting an empty one it creates.
-# The source is CSV-quoted, since commas separate the fields.
+# The source and destination are CSV-quoted, since commas separate the fields.
 mount_arg() {
   local type=volume
   [[ $1 == /* ]] && type=bind
-  REPLY="type=$type,\"src=${1//\"/\"\"}\",dst=$2$3"
+  REPLY="type=$type,\"src=${1//\"/\"\"}\",\"dst=${2//\"/\"\"}\"$3"
+}
+
+# Adds to run_args the read-only mounts of the shared config $1: the folder at
+# /etc/clod-shared, and each file Claude Code reads from /etc/claude-code
+# there, one mount apiece so the image's own files there stay as they are,
+# root's, which Claude Code requires of managed settings it trusts. Its
+# managed-settings.json goes in as the drop-in managed-settings.d/50-clod.json,
+# which applies after the image's managed-settings.json; managed-settings.d/
+# and .claude/'s folders (agents/, skills/ and the like) go in entry by entry.
+# The entrypoint reads AGENTS.md, CLAUDE.md and settings.json from
+# /etc/clod-shared; the other hidden files (.git, .DS_Store) are left out.
+shared_mounts() {
+  local entry dst
+  mount_arg "$1" /etc/clod-shared ,readonly
+  run_args+=(--mount "$REPLY")
+  for entry in "$1"/* "$1"/managed-settings.d/* "$1"/.claude/* "$1"/.claude/*/*; do
+    [[ -e $entry ]] || continue
+    dst=${entry#"$1"/}
+    case $dst in
+      AGENTS.md|CLAUDE.md|settings.json|managed-settings.d|.claude) continue ;;
+      managed-settings.json) dst=managed-settings.d/50-clod.json ;;
+      # Its own would be mounted at the same place, which Docker refuses.
+      managed-settings.d/50-clod.json) [[ -e $1/managed-settings.json ]] && continue ;;
+    esac
+    # A folder in .claude/ goes in entry by entry, above.
+    [[ $dst == .claude/* && $dst != .claude/*/* && -d $entry ]] && continue
+    mount_arg "$entry" "/etc/claude-code/$dst" ,readonly
+    run_args+=(--mount "$REPLY")
+  done
 }
 
 # Exits unless the home exists or, asked in a terminal, you say to create it, so
@@ -3512,10 +3542,7 @@ cmd_run() {
   if (( ${#port_args[@]} )); then
     run_args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")")
   fi
-  if [[ -n $shared_dir ]]; then
-    mount_arg "$shared_dir" /etc/claude-code ,readonly
-    run_args+=(--mount "$REPLY")
-  fi
+  [[ -n $shared_dir ]] && shared_mounts "$shared_dir"
   # The checkout's entrypoint, container description, clipboard shim and
   # plugin replace the copies the image was built with, which are as of its
   # last build. Claude Code runs the shim directly as xclip and wl-paste, so it

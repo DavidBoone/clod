@@ -1,7 +1,7 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "bash /etc/claude-code/statusline.sh",
+    "command": "bash /etc/clod-shared/statusline.sh",
     "refreshInterval": 10
   }
 }

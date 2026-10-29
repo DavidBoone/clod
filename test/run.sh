@@ -31,7 +31,7 @@ lint_tests='lint'
 base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode gemini statusline
   port port-busy clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
-  completion update install'
+  completion update install image-claude-code'
 classic_tests='classic'
 # The bundled variants: go and sudo are checked together as go+sudo, and docker
 # by docker-socket.
@@ -135,7 +135,7 @@ test_run_command() {
     test "$(cat /proc/1/comm)" = tini
     test "$USER" = claude && test "$TMPDIR" = /tmp && test "$EDITOR" = vim && test "$PAGER" = less
     test "$(cat /workspace/from-host)" = hello
-    test -f /etc/claude-code/settings.json
+    test -f /etc/clod-shared/settings.json && test -f /etc/claude-code/statusline.sh
     test -r /etc/clod/AGENTS.md
     test "$(find /usr/share/doc/git -type f)" = /usr/share/doc/git/copyright
     test ! -e /usr/share/man/man1/git.1.gz
@@ -176,7 +176,7 @@ test_mount_paths() {
     set -e
     test "$(cat /workspace/from-host)" = hello
     touch ~/from-container
-    if touch /etc/claude-code/x 2>/dev/null; then false; fi
+    if touch /etc/clod-shared/x 2>/dev/null; then false; fi
   '
   test -f 'h,"1/from-container'
 }
@@ -273,15 +273,15 @@ test_claude_args() {
   clod -H args -- -p hi | tee out
   has 'disposable Docker container' out
   has -e '^--add-dir=/etc/clod$' out
-  has -e '^--settings=/etc/claude-code/settings.json$' out
+  has -e '^--settings=/etc/clod-shared/settings.json$' out
   has -e '^--dangerously-skip-permissions$' out
   has -e '^--plugin-dir=/etc/clod/plugins/show-image$' out
   test "$(tail -2 out | tr '\n' ' ')" = '-p hi '
   # only the last --settings applies, so the user's own replaces the shared one
   clod -H args -- --settings mine.json -p hi | tee out
-  exits 1 grep -q /etc/claude-code/settings.json out
+  exits 1 grep -q /etc/clod-shared/settings.json out
   clod -H args -- --settings=mine.json -p hi | tee out
-  exits 1 grep -q /etc/claude-code/settings.json out
+  exits 1 grep -q /etc/clod-shared/settings.json out
 }
 
 test_codex() {
@@ -502,7 +502,7 @@ test_statusline() {
   git init -q -b main .
   # five columns over two lines: model over effort, context over tokens, home
   # over image and ports, git over lines changed; the 5h meter ends line 1
-  clod -P 5173 -P 6000/udp bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod -P 5173 -P 6000/udp bash -c 'bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g; s/\x1b\]8;;[^\x07]*\x07//g' | tee out
   test "$(wc -l < out)" = 2
   head -1 out | has '^✨ Opus  *◔ [▰▱]* 42%  *🏠 default  *🪾 main ±[0-9]  *5h '
@@ -517,7 +517,7 @@ test_statusline() {
     echo '{"message":{"id":"m2","usage":{"input_tokens":3,"cache_creation_input_tokens":800,"cache_read_input_tokens":5000,"output_tokens":725}}}'
   } > s/subagents/agent-a.jsonl
   sed -i 's|"session_id":"ci"|"session_id":"sub","transcript_path":"/workspace/s.jsonl"|' input.json
-  clod bash -c 'TMPDIR=/workspace bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod bash -c 'TMPDIR=/workspace bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g' | tail -1 | has '↑5.8k  *↓1.0k '
   # appended entries are read on later refreshes, from the cache TMPDIR keeps
   # between runs: a message continued past what was read replaces its count,
@@ -526,14 +526,14 @@ test_statusline() {
   { echo '{"message":{"id":"m2","usage":{"input_tokens":3,"cache_creation_input_tokens":800,"output_tokens":2725}}}'
     printf '{"message":{"id":"m3","usage":{"input_tokens":200,'
   } >> s/subagents/agent-a.jsonl
-  clod bash -c 'TMPDIR=/workspace bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod bash -c 'TMPDIR=/workspace bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g' | tail -1 | has '↑5.8k  *↓3.0k '
   echo '"output_tokens":1000}}}' >> s/subagents/agent-a.jsonl
-  clod bash -c 'TMPDIR=/workspace bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod bash -c 'TMPDIR=/workspace bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g' | tail -1 | has '↑6.0k  *↓4.0k '
   # inside .git, where git status fails, it still shows both lines
   sed -i 's|"/workspace"|"/workspace/.git"|' input.json
-  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' > out
+  clod bash -c 'bash /etc/clod-shared/statusline.sh < /workspace/input.json' > out
   test "$(wc -l < out)" = 2
   # halfway through both windows, the 5h bar's last cell is yellow (48% used)
   # and the 7d bar's red (60% used, ahead)
@@ -541,12 +541,12 @@ test_statusline() {
   now=$(date +%s)
   printf '{"session_id":"q","rate_limits":{"five_hour":{"used_percentage":48,"resets_at":%d},
     "seven_day":{"used_percentage":60,"resets_at":%d}}}' $((now + 9000)) $((now + 302400)) > input.json
-  clod bash -c 'bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod bash -c 'bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[92m▰/G/g; s/\x1b\[93m▰/Y/g; s/\x1b\[91m▰/R/g; s/\x1b\[[0-9;]*m//g' | tee out
   head -1 out | has '5h GGGGY▁▁▁▁▁ 48%/50%$'
   tail -1 out | has '7d GGGGGR▁▁▁▁ 60%/50%$'
   # with room in the terminal the bars widen to 20 cells and end 4 columns short
-  clod bash -c 'COLUMNS=120 bash /etc/claude-code/statusline.sh < /workspace/input.json' |
+  clod bash -c 'COLUMNS=120 bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
     sed 's/\x1b\[[0-9;]*m//g' | tee out
   head -1 out | has '5h [▰▱▁]\{20\} 48%/50%$'
   # (✨ and 🏠 take two columns each)
@@ -996,8 +996,7 @@ test_shared() {
   test -z "$(completes shared edit settings.json '')"
   # The shared instructions reach the other agents too: Codex's global
   # AGENTS.md gets the CLAUDE.md kept from before AGENTS.md, then an AGENTS.md
-  # takes its place; Claude's composed /etc/clod/CLAUDE.md gets the AGENTS.md,
-  # leaving the CLAUDE.md, which Claude reads itself, out.
+  # takes its place; Claude's composed /etc/clod/CLAUDE.md gets both.
   clod codex --version >/dev/null
   # the image's container.md and the shared copy of it both compose in, so the
   # marker twice: the CLAUDE.md is what put the second one there
@@ -1012,16 +1011,16 @@ test_shared() {
   printf '#!/bin/sh\ncat /etc/clod/CLAUDE.md\n' > ~/.clod/homes/agents-md/.local/bin/claude
   chmod +x ~/.clod/homes/agents-md/.local/bin/claude
   clod -H agents-md claude > out
-  has 'disposable Docker container' out
   has '# my instructions' out
-  test "$(grep -c 'disposable Docker container' out)" = 1
-  # a shared AGENTS.md that is the same as the CLAUDE.md, which Claude reads
-  # itself, isn't composed in again
+  test "$(grep -c 'disposable Docker container' out)" = 2
+  # the AGENTS.md, then the CLAUDE.md, the copy of container.md
+  awk '/# my instructions/ { m = NR } /disposable Docker/ { d = NR } END { exit !(m && d > m) }' out
+  # a shared AGENTS.md that is the same as the CLAUDE.md goes in once
   echo '# same' > ~/.clod/shared/AGENTS.md
   echo '# same' > ~/.clod/shared/CLAUDE.md
   clod -H agents-md claude > out
   has 'disposable Docker container' out
-  if grep -q '# same' out; then false; fi
+  test "$(grep -c '# same' out)" = 1
   rm ~/.clod/shared/AGENTS.md
   clod --force shared new
   test -f ~/.clod/shared/statusline.sh
@@ -1927,6 +1926,59 @@ test_install() {
   has -F '~/.clod: your homes' < out
   # nothing left to remove
   FAKE_FPATH=$PWD/zfn "$repo/clod" uninstall | has -F "found no links to $repo to remove"
+}
+
+# An image's own /etc/claude-code (a devcontainer's policy, say) stays as it
+# is, root's: the shared config's files Claude Code reads from there go in
+# beside the image's, one mount each, its managed-settings.json as a drop-in,
+# and its CLAUDE.md composes into Claude's /etc/clod/CLAUDE.md.
+test_image_claude_code() {
+  mkdir -p ~/.clod/images/policy
+  cat > ~/.clod/images/policy/Dockerfile <<'EOF'
+ARG BASE=clod
+FROM $BASE
+USER root
+RUN mkdir -p /etc/claude-code/.claude/agents /etc/claude-code/managed-settings.d \
+    && echo '{"env": {"FROM_IMAGE": "1"}}' > /etc/claude-code/managed-settings.json \
+    && echo '{"env": {"LATER": "1"}}' > /etc/claude-code/managed-settings.d/90-later.json \
+    && echo '# image policy' > /etc/claude-code/CLAUDE.md \
+    && echo '# image agent' > /etc/claude-code/.claude/agents/team.md
+USER claude
+EOF
+  clod shared new >/dev/null
+  echo '{"env": {"FROM_SHARED": "1"}}' > ~/.clod/shared/managed-settings.json
+  mkdir -p ~/.clod/shared/.claude/agents ~/.clod/shared/.claude/skills/tidy \
+    ~/.clod/shared/managed-settings.d ~/.clod/shared/.git
+  echo '# shared agent' > ~/.clod/shared/.claude/agents/mine.md
+  echo '# shared skill' > ~/.clod/shared/.claude/skills/tidy/SKILL.md
+  echo '{}' > ~/.clod/shared/managed-settings.d/60-extra.json
+  echo '# shared instructions' > ~/.clod/shared/CLAUDE.md
+  # an older settings.json runs the statusline from /etc/claude-code
+  sed -i 's|/etc/clod-shared/statusline.sh|/etc/claude-code/statusline.sh|' ~/.clod/shared/settings.json
+  clod -i policy bash -c '
+    set -e
+    cd /etc/claude-code
+    test "$(cat CLAUDE.md)" = "# image policy"
+    test "$(cat .claude/agents/team.md)" = "# image agent"
+    test "$(cat .claude/agents/mine.md)" = "# shared agent"
+    test "$(cat .claude/skills/tidy/SKILL.md)" = "# shared skill"
+    grep -q FROM_IMAGE managed-settings.json
+    grep -q FROM_SHARED managed-settings.d/50-clod.json
+    test "$(ls managed-settings.d | tr "\n" " ")" = "50-clod.json 60-extra.json 90-later.json "
+    test ! -e settings.json && test ! -e AGENTS.md && test ! -e .git
+    test -f "$(jq -r .statusLine.command /etc/clod-shared/settings.json | cut -d" " -f2)"
+    # Claude Code trusts managed settings only in folders the user cannot write
+    test "$(stat -c "%u %a" . managed-settings.json managed-settings.d | tr "\n" " ")" = "0 755 0 644 0 755 "
+    if touch x 2>/dev/null; then false; fi
+  '
+  mkdir -p ~/.clod/homes/policy/.local/bin
+  printf '#!/bin/sh\ncat /etc/clod/CLAUDE.md\n' > ~/.clod/homes/policy/.local/bin/claude
+  chmod +x ~/.clod/homes/policy/.local/bin/claude
+  clod -i policy -H policy claude > out
+  has '# shared instructions' out
+  if grep -q '# image policy' out; then false; fi
+  clod --force image rm policy >/dev/null
+  rm -r ~/.clod/shared
 }
 
 # Homebrew's docker on macOS has no buildx, so clod's builds there use the
