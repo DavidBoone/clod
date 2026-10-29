@@ -31,6 +31,7 @@ shared `CLAUDE.md` beside the `AGENTS.md`. Until `~/.clod/shared` exists, clod m
 To customise them, make your own copy and edit that:
 
 ```bash
+clod shared           # lists the shared config: where it is and its files
 clod shared new       # copies the starter to ~/.clod/shared
 clod shared diff      # shows how yours differs from the starter
 clod shared edit      # opens its AGENTS.md in $VISUAL, $EDITOR or vi

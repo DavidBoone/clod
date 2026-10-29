@@ -966,9 +966,14 @@ test_default() {
 test_shared() {
   exits 1 clod shared diff
   exits 1 clod shared edit 2>&1 | has 'clod shared new creates yours'
-  exits 2 clod shared
+  # a bare shared lists the starter's config and its files
+  clod shared | has 'the starter'
+  clod shared | has '^  settings\.json$'
   clod shared new
   test -f ~/.clod/shared/statusline.sh
+  # a bare shared lists yours now
+  clod shared | has '^~/.clod/shared \(your shared config\):$'
+  clod shared | has '^  statusline\.sh$'
   clod shared new | has 'has everything in the starter'
   clod shared diff | has 'same as the starter'
   clod env | has '^shared: *~/.clod/shared'
@@ -1092,7 +1097,7 @@ test_help() {
   has -xE '  image clean \[NAME\.\.\.\] +remove built images, keeping their variants' < out
   has -xE '  -i, --image NAME +the image or variant to run, a\+b, or \+NAME for NAME' < out
   has -x "'clod COMMAND -h' shows more about COMMAND." < out
-  if grep -q '^  shared  *the shared config' out; then false; fi
+  has -xE '  shared +list the shared config: where it is and its files$' < out
   clod -h | diff - out
   clod --help | diff - out
   # a command's page: -h or --help after it, before it, or clod help COMMAND
@@ -1106,7 +1111,7 @@ test_help() {
   exits 2 clod home rm -- -h 2>&1 | has "'-h' isn't a name"
   # a noun's page lists its verbs, default's its keys, help's its own
   clod image -h | has -xE '  image prune +remove the stale images clod built'
-  clod shared -h | has -x 'usage: clod shared COMMAND'
+  clod shared -h | has -x 'usage: clod shared$'
   clod help default | has -xE '  ports \(CLOD_PORTS\) +ports to publish on localhost, comma-separated'
   clod help default | has -x '       clod default KEY --reset'
   clod help -h | has -x 'usage: clod help \[COMMAND\]'

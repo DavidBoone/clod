@@ -94,8 +94,8 @@
 # Below are the helpers, the setup phases and the commands (cmd_* functions);
 # the dispatch at the bottom runs the phases a command needs, then the command.
 # Commands are a single word (env, default, the run commands) or a noun with a
-# verb (image, home, workspace, shared); a bare noun lists, except shared, which
-# needs a verb. A new command or verb goes in command_table and command_docs, a
+# verb (image, home, workspace, shared); a bare noun lists. A new command or
+# verb goes in command_table and command_docs, a
 # cmd_ function and the dispatch; a new option in parse_args and option_table;
 # a new launcher setting in settings_table. The help, the usage errors' pointers
 # and tab completion read those tables.
@@ -154,7 +154,7 @@ Workspaces
 workspace||list the volume workspaces
 workspace rm|NAME...|delete volume workspaces
 Shared config
-shared|-|the shared config: settings and instructions for every home
+shared||list the shared config: where it is and its files
 shared new||create ~/.clod/shared from the starter
 shared diff||compare ~/.clod/shared with the starter
 shared edit|[FILE]|edit a file of ~/.clod/shared, its AGENTS.md by default
@@ -278,6 +278,7 @@ a container uses.
 Deletes volume workspaces, named NAME or vol:NAME. In a terminal it lists
 them and asks first. It refuses a workspace a container uses.
 @shared
+Lists the shared config a run mounts: where it is and the files in it.
 ~/.clod/shared is mounted read-only as /etc/clod-shared in every container:
 settings for every home (the statusline), any managed settings, and your
 instructions for every home in its AGENTS.md, which every agent reads. Its
@@ -1388,10 +1389,9 @@ parse_args() {
     exit 0
   fi
   case $command${verb:+ $verb} in
-    env|image|'image prune'|home|workspace|'shared new'|'shared diff'|update|uninstall|completion)
+    env|image|'image prune'|home|workspace|shared|'shared new'|'shared diff'|update|uninstall|completion)
       (( $# == 0 )) || usage_error "$command${verb:+ $verb} takes no arguments" ;;
     install) (( $# <= 1 )) || usage_error "install takes at most one directory" ;;
-    shared) usage_error "shared takes a command: new, diff or edit" ;;
     'image show') (( $# == 1 )) || usage_error "image show takes one image name" ;;
     'image diff') (( $# == 1 )) || usage_error "image diff takes one variant name" ;;
     'image new') (( $# == 1 || $# == 2 )) || usage_error "image new takes a NAME and at most one image to start from" ;;
@@ -2869,6 +2869,24 @@ cmd_workspace_rm() {
   remove_volumes clod-workspace- workspace "${names[@]}"
 }
 
+# Lists the shared config a run mounts: where it is, yours or the starter, and
+# the files in it (.git excepted, as a run doesn't mount it).
+cmd_shared() {
+  local f
+  if [[ -z $shared_dir ]]; then
+    echo "clod: no shared config; clod shared new creates $(tildify "$clod_dir/shared") from the starter"
+    return 0
+  fi
+  if [[ $shared_dir == "$clod_dir"/* ]]; then
+    echo "$(tildify "$shared_dir") (your shared config):"
+  else
+    echo "$(tildify "$shared_dir") (the starter):"
+  fi
+  while IFS= read -r f; do
+    echo "  $f"
+  done < <(cd "$shared_dir" && find . -name .git -prune -o -type f -print | sed 's|^\./||' | sort)
+}
+
 cmd_shared_new() {
   local target=$clod_dir/shared starter=$script_dir/shared report backup f
   if [[ ! -d $starter ]]; then
@@ -3637,7 +3655,7 @@ setup_image
 setup_container
 case $command${verb:+ $verb} in
   env) check_workspace; cmd_env; exit 0 ;;
-  image|'image show'|'image new'|'image edit'|home|'shared new'|'shared edit')
+  image|'image show'|'image new'|'image edit'|home|shared|'shared new'|'shared edit')
     "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
   # diff's status: 1 when they differ.
   'shared diff') cmd_shared_diff; exit ;;
