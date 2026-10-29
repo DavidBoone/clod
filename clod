@@ -122,9 +122,9 @@ base_dir=$script_dir
 
 # The commands, as NAME|ARGS|SUMMARY rows under the headings clod help groups
 # them by. A noun's verbs are rows named NOUN VERB; the noun's own row is its
-# listing, or with ARGS - only a summary, for a noun that needs a verb. ARGS
-# holds the command's usage forms, separated by ";". clod help, the commands'
-# pages, parse_args and tab completion all read this table, in this order.
+# listing. ARGS holds the command's usage forms, separated by ";". clod help,
+# the commands' pages, parse_args and tab completion all read this table, in
+# this order.
 read -r -d '' command_table <<'EOF' || true
 Run in the container
 claude|[ARGS...]|Claude Code
@@ -457,7 +457,7 @@ help_summary() {
       continue
     fi
     IFS='|' read -r name args summary <<<"$row"
-    [[ $args == - ]] || help_row "$name${args:+ ${args%%;*}}" "$summary"
+    help_row "$name${args:+ ${args%%;*}}" "$summary"
   done <<<"$command_table"
   printf "\nOptions go before the command, or after it up to --, except after\nclaude, codex, opencode, gemini, bash or zsh, whose arguments are the program's\n"
   help_options clod
@@ -473,7 +473,6 @@ help_page() {
   if [[ -n $run ]]; then out=$(help_options run); else out=$(help_options "$1"); fi
   while IFS='|' read -r name args summary; do
     [[ $name == "$1" ]] || continue
-    [[ $args == - ]] && args=COMMAND
     while IFS= read -r form; do
       if [[ -n $run ]]; then
         printf '%s clod [OPTIONS] %s%s\n' "$label" "$name" "${form:+ $form}"
@@ -1611,13 +1610,18 @@ need_image() {
   [[ -z $image_error ]] || die "$image_error"
 }
 
-# Sets shared_dir to the shared config to mount, port_args and container_ports
-# to CLOD_PORTS's, and tz to the timezone.
-setup_container() {
-  local p
+# Sets shared_dir to the shared config to mount: ~/.clod/shared, else the
+# starter in the checkout, else empty.
+setup_shared() {
   shared_dir=$clod_dir/shared
   [[ -d $shared_dir ]] || shared_dir=$script_dir/shared
   [[ -d $shared_dir ]] || shared_dir=
+}
+
+# Sets port_args and container_ports to CLOD_PORTS's, and tz to the timezone.
+setup_container() {
+  local p
+  setup_shared
 
   # Publishes each CLOD_PORTS entry on the host's 127.0.0.1 unless it names an
   # address, and collects the container ports for the container's CLOD_PORTS.
@@ -2870,21 +2874,20 @@ cmd_workspace_rm() {
 }
 
 # Lists the shared config a run mounts: where it is, yours or the starter, and
-# the files in it (.git excepted, as a run doesn't mount it).
+# its files, symlinks included (.git is left out of the listing: the folder
+# mount at /etc/clod-shared carries it, but it is versioning, not config).
 cmd_shared() {
-  local f
   if [[ -z $shared_dir ]]; then
-    echo "clod: no shared config; clod shared new creates $(tildify "$clod_dir/shared") from the starter"
-    return 0
+    echo "clod: no shared config; clod shared new creates $(tildify "$clod_dir/shared") from the starter" >&2
+    exit 1
   fi
-  if [[ $shared_dir == "$clod_dir"/* ]]; then
+  if [[ $shared_dir == "$clod_dir/shared" ]]; then
     echo "$(tildify "$shared_dir") (your shared config):"
   else
     echo "$(tildify "$shared_dir") (the starter):"
   fi
-  while IFS= read -r f; do
-    echo "  $f"
-  done < <(cd "$shared_dir" && find . -name .git -prune -o -type f -print | sed 's|^\./||' | sort)
+  (cd "$shared_dir" && find . -name .git -prune -o \( -type f -o -type l \) -print) |
+    sed 's|^\./|  |' | sort
 }
 
 cmd_shared_new() {
@@ -3649,13 +3652,16 @@ esac
 setup_workspace
 load_settings
 [[ $command == default ]] && { cmd_default "$@"; exit 0; }
+# A bare shared only needs the shared config's directory, not the image or
+# port setup.
+[[ $command == shared && -z $verb ]] && { setup_shared; cmd_shared; exit 0; }
 [[ -n $command ]] || default_command
 setup_home
 setup_image
 setup_container
 case $command${verb:+ $verb} in
   env) check_workspace; cmd_env; exit 0 ;;
-  image|'image show'|'image new'|'image edit'|home|shared|'shared new'|'shared edit')
+  image|'image show'|'image new'|'image edit'|home|'shared new'|'shared edit')
     "cmd_$command${verb:+_$verb}" "$@"; exit 0 ;;
   # diff's status: 1 when they differ.
   'shared diff') cmd_shared_diff; exit ;;

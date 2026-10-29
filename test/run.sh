@@ -967,13 +967,15 @@ test_shared() {
   exits 1 clod shared diff
   exits 1 clod shared edit 2>&1 | has 'clod shared new creates yours'
   # a bare shared lists the starter's config and its files
-  clod shared | has 'the starter'
-  clod shared | has '^  settings\.json$'
+  clod shared > out
+  has 'the starter' out
+  has '^  settings\.json$' out
   clod shared new
   test -f ~/.clod/shared/statusline.sh
   # a bare shared lists yours now
-  clod shared | has '^~/.clod/shared \(your shared config\):$'
-  clod shared | has '^  statusline\.sh$'
+  clod shared > out
+  has '^~/.clod/shared \(your shared config\):$' out
+  has '^  statusline\.sh$' out
   clod shared new | has 'has everything in the starter'
   clod shared diff | has 'same as the starter'
   clod env | has '^shared: *~/.clod/shared'
