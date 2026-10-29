@@ -974,7 +974,7 @@ test_shared() {
   test -f ~/.clod/shared/statusline.sh
   # a bare shared lists yours now
   clod shared > out
-  has '^~/.clod/shared \(your shared config\):$' out
+  has '^~/.clod/shared (your shared config):$' out
   has '^  statusline\.sh$' out
   clod shared new | has 'has everything in the starter'
   clod shared diff | has 'same as the starter'
