@@ -79,8 +79,8 @@ A setting given empty still wins and means its default, so `clod -P ''` or
 | `CLOD_IMAGE` | `-i`   | `clod`    | A variant: yours in `~/.clod/images/` or a bundled one (`clod image` lists them), named `NAME` or `clod-NAME`, or variants combined as `A+B`, or `devcontainer` for the project's devcontainer (see [Devcontainers](images.md#devcontainers)). Or a local docker image built `FROM clod` (it needs the entrypoint, `claude` user and environment). |
 | `CLOD_BASE` | none | `slim` | The Debian image the base image is built on: `slim` is `debian:trixie-slim`, built as `clod`; `full` is `debian:trixie`, whose packages keep their docs and man pages, built as `clod:full` beside it (see [The base](images.md#the-base)). |
 | `CLOD_COMMAND` | the command | `claude` | What a bare `clod`, or `clod -- ARGS`, runs: `claude`, `codex`, `opencode`, `gemini`, `bash` or `zsh`. |
-| `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. |
-| `CLOD_PORTS_BUSY` | none | `skip` | What a run does with a `CLOD_PORTS` host port another running container publishes: `skip` leaves it out, `next` publishes the next free host port, `error` stops. A taken port given with `-P` always stops the run (see [Publishing ports](usage.md#publishing-ports)). |
+| `CLOD_PORTS` | `-P`   | unset     | Ports to publish on the host's `127.0.0.1`, comma- or space-separated: `8080` (the same on both sides), `host:container`, or `address:host:container` to publish on another address. The host port can be a range, as `8000-8099:5173`: the first one no other container publishes and, for TCP, nothing on the host listens on. |
+| `CLOD_PORTS_BUSY` | none | `skip` | What a run does with a `CLOD_PORTS` host port another running container publishes: `skip` leaves it out, `next` publishes the next free host port, `error` stops. A range isn't affected, and a taken port given with `-P` always stops the run (see [Publishing ports](usage.md#publishing-ports)). |
 | `CLOD_CLIPBOARD` | `--clipboard` | `off` | `on` lets Ctrl+V in Claude Code paste the image on your machine's clipboard (see [Pasting images](usage.md#pasting-images)). |
 | `CLOD_QUIET` | `-q` | `off` | `on` hides the start-up line clod prints on stderr before a run; its other messages still show (see [The command line](usage.md#the-command-line)). |
 | `CLOD_DEVCONTAINER` | none | `off` | `auto` runs the project's devcontainer when it has one, unless `-i`, the shell or the `.envrc` chooses an image (see [Devcontainers](images.md#devcontainers)). |
@@ -123,6 +123,8 @@ Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME_PATH` and `CLOD_WORKSPACE_PATH` are the host folders mounted as the
 home and workspace (`~/`-relative, so a named home is `~/.clod/homes/NAME`),
 and are unset for a volume home or workspace and a scratch workspace.
+`CLOD_PORTS` lists the container ports published and `CLOD_HOST_PORTS` their
+host ports, in the same order; both are unset when no port is published.
 
 `clod env --json` prints what a run would use as one JSON object: each launcher
 setting by its variable (`CLOD_IMAGE`, `CLOD_HOME` and the rest), its built-in

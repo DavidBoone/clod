@@ -137,6 +137,26 @@ check 2 default ports invalid
 check 2 default unknown
 check 0 env -w "$work" -P 6000/udp
 has '^ports: +127\.0\.0\.1:6000 → 6000/udp$'
+check 0 default ports 8000-8099:5173
+check 0 env
+has '^ports: +127\.0\.0\.1:8000-8099 → 5173 \(a range publishes its first free port\)$'
+check 0 env -P 3000
+has '^ports: +127\.0\.0\.1:3000 → 3000$'
+check 0 env -P 3000 -P 8000-8099:80 -P 6000/udp
+has '^ports: .*, 127\.0\.0\.1:8000-8099 → 80, .* \(a range publishes its first free port\)$'
+check 0 default ports --reset
+check 2 default ports 8000-8099
+has "port range '8000-8099' needs a container port: 8000-8099:PORT" errors
+check 2 default ports 9000-8000:80
+has "invalid port range '9000-8000'" errors
+check 2 default ports 8000-70000:80
+check 2 default ports 0-10:80
+has "invalid port range '0-10'" errors
+check 2 default ports 0:80
+has "invalid host port '0'" errors
+check 2 default ports 18446744073709551616-18446744073709551616:80
+check 0 default ports 08000-08099:80,0080:80
+check 0 default ports --reset
 echo 'PASS settings and environment'
 
 # Real filesystem operations: custom variants, editing, diffs and shared config.

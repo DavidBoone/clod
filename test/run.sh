@@ -29,7 +29,7 @@ export LC_ALL=C.UTF-8
 
 lint_tests='lint'
 base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode gemini statusline
-  port port-busy clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
+  port port-busy port-range clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install image-claude-code'
 classic_tests='classic'
@@ -598,6 +598,35 @@ test_port_busy() {
   CLOD_PORTS_BUSY=nope exits 1 clod bash -c true 2>&1 | has "it must be skip, next or error"
   # another protocol's port isn't taken
   CLOD_PORTS=18090/udp CLOD_PORTS_BUSY=error clod bash -c 'test "$CLOD_PORTS" = 18090/udp'
+  # the container learns each one's host port
+  CLOD_PORTS=18090:8080,18091 CLOD_PORTS_BUSY=next clod bash -c 'test "$CLOD_HOST_PORTS" = 18091,18093'
+}
+
+# A range of host ports publishes its first port no container publishes and
+# nothing on the host listens on, whatever CLOD_PORTS_BUSY says.
+test_port_range() {
+  docker rm -f clod-test-ports >/dev/null 2>&1 || true
+  docker run -d --rm --name clod-test-ports -p 127.0.0.1:18100:80 --entrypoint sleep clod 300 >/dev/null
+  python3 -m http.server 18101 --bind 127.0.0.1 >/dev/null 2>&1 &
+  local listener=$!
+  trap 'docker rm -f clod-test-ports >/dev/null 2>&1; kill '$listener' 2>/dev/null' EXIT
+  for _ in $(seq 30); do
+    kill -0 "$listener"
+    curl -so /dev/null -m 2 http://127.0.0.1:18101/ && break
+    sleep 1
+  done
+  curl -so /dev/null -m 2 http://127.0.0.1:18101/
+  clod -P 18100-18105:5173 bash -c 'test "$CLOD_PORTS" = 5173 && test "$CLOD_HOST_PORTS" = 18102' 2>&1 | tee out
+  has '^clod ⌂ .* · localhost:18102 → 5173$' < out
+  # a port given beside it takes it from the range
+  CLOD_PORTS=18102,18100-18105:5173 CLOD_PORTS_BUSY=error clod bash -c 'test "$CLOD_HOST_PORTS" = 18102,18103' 2>&1 | tee out
+  has '^clod ⌂ .* · localhost:18102, localhost:18103 → 5173$' < out
+  # leading zeros name the same port
+  CLOD_PORTS=018102:80,18100-18105:5173 clod bash -c 'test "$CLOD_HOST_PORTS" = 18102,18103'
+  # UDP ports aren't checked on the host
+  clod -P 18101-18105:53/udp bash -c 'test "$CLOD_HOST_PORTS" = 18101'
+  exits 1 clod -P 18100-18101:80 bash -c true 2>&1 | has 'no free host port in 127.0.0.1:18100-18101 for 80'
+  exits 1 clod -P 18100-18101 bash -c true 2>&1 | has "port range '18100-18101' needs a container port"
 }
 
 # The show-image plugin passes Claude Code's checks and its own tests, and its

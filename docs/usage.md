@@ -260,6 +260,7 @@ your machine's localhost, and the server must listen on all interfaces
 clod -P 5173                 # localhost:5173 -> port 5173 in the container
 clod -P 3000:5173            # localhost:3000 -> port 5173 in the container
 clod -P 5173 -P 8080         # several
+clod -P 8000-8099:5173       # the first free port of 8000-8099 -> 5173
 clod -P ''                   # none, even if the .envrc or config sets some
 ```
 
@@ -275,7 +276,17 @@ clod default ports-busy error  # stop, as for -P
 clod default ports-busy skip   # leave it out (the default)
 ```
 
-Only the ports other running containers publish are checked.
+For a single host port, only the ports other running containers publish are
+checked.
+
+A range of host ports suits several runs at once, each getting its own port:
+`clod default ports 8000-8099:5173` gives each run the first port in the range
+that no other container publishes and, for TCP, nothing on your machine
+listens on, mapped to port 5173 inside. If there is none, the run stops,
+whatever `CLOD_PORTS_BUSY` says. The start-up line shows the port picked
+(`localhost:8003 → 5173`), and inside the container `CLOD_HOST_PORTS` lists
+the host port for each of `CLOD_PORTS`, in the same order, so the agent can
+link to the right one.
 
 ## Pasting images
 
