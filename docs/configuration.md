@@ -125,7 +125,8 @@ home and workspace (`~/`-relative, so a named home is `~/.clod/homes/NAME`),
 and are unset for a volume home or workspace and a scratch workspace.
 `CLOD_PORT_MAP` gives each published container port's address on the host, as
 `CONTAINER=ADDRESS:HOST` joined by commas (`5173=localhost:8003,53/udp=0.0.0.0:5353`,
-with `localhost` for `127.0.0.1`); `CLOD_PORTS` lists the same container ports
+with `localhost` for `127.0.0.1`, and a wildcard address such as `0.0.0.0` as it
+is, reached at `localhost` on the host too); `CLOD_PORTS` lists the same container ports
 and `CLOD_HOST_PORTS` their host ports, in the same order. All three are unset
 when no port is published.
 
