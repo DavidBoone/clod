@@ -70,7 +70,10 @@
 # Inside the container, CLOD_HOME, CLOD_WORKSPACE and CLOD_IMAGE hold the home
 # and workspace labels and the image's name as -i takes it, CLOD_HOME_PATH and
 # CLOD_WORKSPACE_PATH the host folders mounted (unset for a volume), and
-# CLOD_PORTS the published container ports and CLOD_HOST_PORTS their host ports, in the same order. With --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
+# CLOD_PORT_MAP each published container port's host address, as
+# CONTAINER=ADDRESS:HOST (5173=localhost:8003), and CLOD_PORTS and
+# CLOD_HOST_PORTS the same container and host ports as two lists. With
+# --docker, CLOD_HOST_WORKSPACE is the workspace directory's path on the host.
 # With --scratch, CLOD_SCRATCH is set and /workspace is an empty volume.
 # With --clipboard, CLOD_CLIPBOARD_URL is where the image's xclip and wl-paste
 # fetch the host clipboard's image, from clipboard-server.py, which clod starts
@@ -3583,18 +3586,20 @@ settle_ports() {
   port_args=(${args[@]+"${args[@]}"}) container_ports=(${conts[@]+"${conts[@]}"})
 }
 
-# Sets REPLY to the published ports as the start-up line shows them, such as
-# localhost:8003 → 5173, or empty when there are none.
-ports_shown() {
+# Sets ports_shown to the published ports as the start-up line shows them,
+# such as localhost:8003 → 5173, and port_map to them as CLOD_PORT_MAP gives
+# them, such as 5173=localhost:8003; both are empty when there are none.
+show_ports() {
   local i spec addr host cont
-  REPLY=''
+  ports_shown='' port_map=''
   for (( i = 1; i < ${#port_args[@]}; i += 2 )); do
     spec=${port_args[i]}
     cont=${spec##*:} spec=${spec%:*}
     host=${spec##*:} addr=${spec%:*}
     [[ $addr == 127.0.0.1 ]] && addr=localhost
-    REPLY+="${REPLY:+, }$addr:$host"
-    [[ $host == "${cont%/tcp}" ]] || REPLY+=" → $cont"
+    ports_shown+="${ports_shown:+, }$addr:$host"
+    [[ $host == "${cont%/tcp}" ]] || ports_shown+=" → $cont"
+    port_map+="${port_map:+,}$cont=$addr:$host"
   done
 }
 
@@ -3661,9 +3666,10 @@ cmd_run() {
   fi
   [[ -n $tz ]] && run_args+=(-e "TZ=$tz")
   settle_ports
+  show_ports
   if (( ${#port_args[@]} )); then
     run_args+=("${port_args[@]}" -e "CLOD_PORTS=$(IFS=,; echo "${container_ports[*]}")" \
-      -e "CLOD_HOST_PORTS=$(IFS=,; echo "${host_ports[*]}")")
+      -e "CLOD_HOST_PORTS=$(IFS=,; echo "${host_ports[*]}")" -e "CLOD_PORT_MAP=$port_map")
   fi
   [[ -n $shared_dir ]] && shared_mounts "$shared_dir"
   # The checkout's entrypoint, container description, clipboard shim and
@@ -3727,8 +3733,7 @@ cmd_run() {
     done
   fi
   if [[ ${CLOD_QUIET:-off} != on ]]; then
-    ports_shown
-    echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${REPLY:+ · $REPLY}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
+    echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${ports_shown:+ · $ports_shown}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
   fi
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"

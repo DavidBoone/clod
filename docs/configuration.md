@@ -123,8 +123,11 @@ Inside the container the same variables hold what the launch resolved to:
 `CLOD_HOME_PATH` and `CLOD_WORKSPACE_PATH` are the host folders mounted as the
 home and workspace (`~/`-relative, so a named home is `~/.clod/homes/NAME`),
 and are unset for a volume home or workspace and a scratch workspace.
-`CLOD_PORTS` lists the container ports published and `CLOD_HOST_PORTS` their
-host ports, in the same order; both are unset when no port is published.
+`CLOD_PORT_MAP` gives each published container port's address on the host, as
+`CONTAINER=ADDRESS:HOST` joined by commas (`5173=localhost:8003,53/udp=0.0.0.0:5353`,
+with `localhost` for `127.0.0.1`); `CLOD_PORTS` lists the same container ports
+and `CLOD_HOST_PORTS` their host ports, in the same order. All three are unset
+when no port is published.
 
 `clod env --json` prints what a run would use as one JSON object: each launcher
 setting by its variable (`CLOD_IMAGE`, `CLOD_HOME` and the rest), its built-in

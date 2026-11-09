@@ -600,6 +600,9 @@ test_port_busy() {
   CLOD_PORTS=18090/udp CLOD_PORTS_BUSY=error clod bash -c 'test "$CLOD_PORTS" = 18090/udp'
   # the container learns each one's host port
   CLOD_PORTS=18090:8080,18091 CLOD_PORTS_BUSY=next clod bash -c 'test "$CLOD_HOST_PORTS" = 18091,18093'
+  # and its address, keyed by container port
+  CLOD_PORTS=18090:8080,0.0.0.0:18094:53/udp CLOD_PORTS_BUSY=next \
+    clod bash -c 'test "$CLOD_PORT_MAP" = 8080=localhost:18091,53/udp=0.0.0.0:18094'
 }
 
 # A range of host ports publishes its first port no container publishes and
@@ -616,7 +619,7 @@ test_port_range() {
     sleep 1
   done
   curl -so /dev/null -m 2 http://127.0.0.1:18101/
-  clod -P 18100-18105:5173 bash -c 'test "$CLOD_PORTS" = 5173 && test "$CLOD_HOST_PORTS" = 18102' 2>&1 | tee out
+  clod -P 18100-18105:5173 bash -c 'test "$CLOD_PORTS" = 5173 && test "$CLOD_HOST_PORTS" = 18102 && test "$CLOD_PORT_MAP" = 5173=localhost:18102' 2>&1 | tee out
   has '^clod ⌂ .* · localhost:18102 → 5173$' < out
   # a port given beside it takes it from the range
   CLOD_PORTS=18102,18100-18105:5173 CLOD_PORTS_BUSY=error clod bash -c 'test "$CLOD_HOST_PORTS" = 18102,18103' 2>&1 | tee out
