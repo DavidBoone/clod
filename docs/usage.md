@@ -284,9 +284,8 @@ A range of host ports suits several runs at once, each getting its own port:
 that no other container publishes and, for TCP, nothing on your machine
 listens on, mapped to port 5173 inside. If there is none, the run stops,
 whatever `CLOD_PORTS_BUSY` says. The start-up line shows the port picked
-(`localhost:8003 → 5173`), and inside the container `CLOD_HOST_PORTS` lists
-the host port for each of `CLOD_PORTS`, in the same order, so the agent can
-link to the right one.
+(`localhost:8003 → 5173`), and inside the container `CLOD_PORT_MAP` gives the
+same (`5173=localhost:8003`), so the agent can link to the right one.
 
 ## Pasting images
 
