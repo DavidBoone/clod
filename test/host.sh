@@ -86,7 +86,8 @@ fits() {
 completes() { clod __complete "$@" | cut -f1 > actual; }
 
 # Help and argument handling need no Docker, on every command's help page.
-for command in help env default install uninstall update completion claude codex opencode gemini bash zsh \
+for command in help env default install uninstall update completion \
+  claude codex opencode gemini pi copilot bash zsh \
   image 'image show' 'image new' 'image edit' 'image diff' 'image rm' \
   'image build' 'image rebuild' 'image clean' 'image prune' \
   home 'home new' 'home cp' 'home mv' 'home rm' workspace 'workspace rm' \
@@ -99,7 +100,8 @@ check 0 --version
 has '^clod '
 check 0 -h
 has '^Options go before the command, or after it up to --, except after$'
-has "^claude, codex, opencode, gemini, bash or zsh, whose arguments are the program's$"
+has "^claude, codex, opencode, gemini, pi, copilot, bash or zsh, whose arguments are$"
+has "^the program's$"
 has '  env +show the home, workspace, image, ports and variables$'
 fits
 check 2 --nope
@@ -306,9 +308,16 @@ check 0 home mv made moved
 test ! -d "$HOME/.clod/homes/made"
 test "$(cat "$HOME/.clod/homes/moved/credential")" = login
 check 0 home new vol:extra
+mkdir -p "$HOME/.clod/homes/pi-none/.pi/agent" "$HOME/.clod/homes/pi-in/.pi/agent"
+echo '{}' > "$HOME/.clod/homes/pi-none/.pi/agent/auth.json"
+echo '{"anthropic":{"type":"oauth"}}' > "$HOME/.clod/homes/pi-in/.pi/agent/auth.json"
 check 0 home
-has '^  moved '
-has '^  vol:extra '
+has '^  HOME +CLAUDE +CODEX +OPENCODE +GEMINI +PI$'
+has '^  moved +- +- +- +- +-$'
+has '^  vol:extra +[?] +[?] +[?] +[?] +[?]$'
+has '^  pi-none +- +- +- +- +-$'
+has '^  pi-in +- +- +- +- +yes$'
+rm -rf "$HOME/.clod/homes/pi-none" "$HOME/.clod/homes/pi-in"
 check 1 home rm moved < /dev/null
 test -d "$HOME/.clod/homes/moved"
 check 0 home rm moved vol:extra --force

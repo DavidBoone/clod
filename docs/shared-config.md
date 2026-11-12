@@ -8,8 +8,9 @@ Claude Code as `--settings`. The instructions for every agent come from there
 too: the entrypoint composes the shared config's `AGENTS.md` (or a `CLAUDE.md`
 kept from before it) with the image's own into the `AGENTS.md` each agent
 reads globally — Codex's `$CODEX_HOME/AGENTS.md`, OpenCode's
-`~/.config/opencode/AGENTS.md` and Gemini CLI's `~/.gemini/GEMINI.md` written
-in the home, and, for Claude Code, `/etc/clod/CLAUDE.md`, which also gets a
+`~/.config/opencode/AGENTS.md`, Gemini CLI's `~/.gemini/GEMINI.md`, pi's
+`~/.pi/agent/AGENTS.md` and Copilot's `~/.copilot/copilot-instructions.md`
+written in the home, and, for Claude Code, `/etc/clod/CLAUDE.md`, which also gets a
 shared `CLAUDE.md` beside the `AGENTS.md`. Until `~/.clod/shared` exists, clod mounts this repo's
 [`shared/`](../shared) there, which updates with `git pull`:
 

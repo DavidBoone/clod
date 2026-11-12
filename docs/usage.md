@@ -8,6 +8,8 @@ clod claude --resume # Claude Code with its own arguments
 clod codex [args]    # Codex
 clod opencode [args] # OpenCode
 clod gemini [args]   # Gemini CLI
+clod pi [args]       # pi
+clod copilot [args]  # GitHub Copilot CLI
 clod bash | zsh      # a shell in the container
 clod -i go           # the go image variant (see Image variants)
 clod -H work         # the "work" home (see Homes)
@@ -37,8 +39,8 @@ starting with `-` is an argument.
 `clod help` lists the commands and options. A command's page, with its usage,
 what it does and the options that apply to it, is `clod help COMMAND`, or `-h`
 or `--help` anywhere after the command: `clod home rm -h`. A noun's page lists
-its verbs. The run commands (`claude`, `codex`, `opencode`, `gemini`, `bash`, `zsh`) are the
-exception: their arguments go to the program they run, so clod's options go
+its verbs. The run commands (`claude`, `codex`, `opencode`, `gemini`, `pi`, `copilot`,
+`bash`, `zsh`) are the exception: their arguments go to the program they run, so clod's options go
 before them, `clod claude --help` is Claude Code's help, and `clod help claude`
 is clod's page for it. A usage error names the page to read.
 
@@ -247,6 +249,64 @@ your shared instructions reach it in its global `~/.gemini/GEMINI.md`, in a
 block the entrypoint rewrites on every run, as for Codex; what you write there
 outside the block stays, for that home. See the
 [Gemini CLI documentation](https://geminicli.com/docs/).
+
+## pi
+
+`clod pi` installs pi from the `@earendil-works/pi-coding-agent` npm package
+into the home on first run, and `clod pi update` updates it. Its logins,
+settings and sessions are per home, in `~/.pi/agent`.
+
+```bash
+clod pi                          # start pi, then /login to log in
+clod pi -p "explain this project"
+clod default command pi          # make it the default agent
+```
+
+The container has no browser: `/login` prints a link to open on the host, and
+when the sign-in can't reach pi, it asks you to paste the final redirect URL or
+code. For an API key instead, export it in the project's `.envrc`
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and so on; `clod pi --help` lists them).
+
+Arguments go to pi unchanged. pi has no approval prompts, but asks before
+loading a project's `.pi/` settings, extensions and MCP servers, so clod runs
+it with `--approve` unless the arguments include `--approve`, `-a`,
+`--no-approve` or `-na`, or start with a subcommand such as `clod pi list`.
+The container's and your shared instructions reach it in its global
+`~/.pi/agent/AGENTS.md`, in a block the entrypoint rewrites on every run, as
+for Codex; what you write there outside the block stays, for that home. See the
+[pi documentation](https://pi.dev/).
+
+## GitHub Copilot CLI
+
+`clod copilot` installs GitHub Copilot CLI into the home on first run, with
+GitHub's install script, which puts it in `~/.local/bin`; it updates itself,
+keeping its versions in `~/.cache/copilot`. Its login and settings are per
+home, in `~/.copilot`.
+
+```bash
+clod copilot login --device-code # sign in with a code entered on github.com
+clod copilot                     # start Copilot
+clod copilot -p "explain this project"
+clod default command copilot     # make it the default agent
+```
+
+The container has no credential store, so Copilot keeps its login in plain
+text under `~/.copilot`. A token in `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` or
+`GITHUB_TOKEN` in the project's `.envrc` takes its place.
+
+Arguments go to Copilot unchanged. Copilot asks before working in a folder
+it doesn't trust, even with `--yolo`, so clod runs it with `--yolo` and
+`COPILOT_ALLOW_ALL=true`, which allows every tool and trusts the folder,
+unless the arguments choose permissions with `--yolo`, `--allow-all`,
+`--allow-all-tools`, `--allow-all-paths`, `--allow-all-urls`, `--allow-tool`,
+`--allow-url` or `--assisted-approval`, which then decide what it asks about,
+the folder included. A `COPILOT_ALLOW_ALL` the `.envrc` sets is kept: `false`
+there makes Copilot ask before trusting the folder, while `--yolo` still
+allows every tool. The container's and your shared instructions reach it in its
+`~/.copilot/copilot-instructions.md`, in a block the entrypoint rewrites on
+every run, as for Codex; what you write there outside the block stays, for
+that home. See the
+[GitHub Copilot CLI repository](https://github.com/github/copilot-cli).
 
 ## Publishing ports
 

@@ -8,6 +8,13 @@ Gemini CLI runs with `--yolo` unless its arguments choose an approval mode,
 and with `GEMINI_CLI_TRUST_WORKSPACE=true`, which also lets it load the
 project's own `.gemini/settings.json` (MCP servers, hooks) without asking; a
 value in `.envrc` overrides it.
+pi has no approval prompts; it runs with `--approve` unless its arguments
+decide, which lets it load the project's own `.pi/` settings, extensions and
+MCP servers without asking.
+GitHub Copilot CLI runs with `--yolo` and `COPILOT_ALLOW_ALL=true` unless its
+arguments choose permissions; the variable also trusts the folder, loading the
+project's skills, plugins, MCP servers and hooks (its own in `.github/` and
+Claude Code's in `.claude/`) without asking; a value in `.envrc` overrides it.
 Within that reach they act without asking:
 
 - **The project directory**, read-write: the agent can change or delete any
@@ -38,8 +45,10 @@ to run containers. It gives the agent the Docker host, which is far more than
 this list: see [Letting the agent run containers](docker-socket.md).
 
 Claude Code installs on first run with
-`curl -fsSL https://claude.ai/install.sh | bash`, and Codex, OpenCode and Gemini
-CLI from npm (`@openai/codex`, `@opencode/cli@2` and `@google/gemini-cli`). The base
+`curl -fsSL https://claude.ai/install.sh | bash`, GitHub Copilot CLI with
+`curl -fsSL https://gh.io/copilot-install | bash`, and Codex, OpenCode, Gemini
+CLI and pi from npm (`@openai/codex`, `@opencode/cli@2`, `@google/gemini-cli`
+and `@earendil-works/pi-coding-agent`). The base
 image's packages come from Debian, except Node, from NodeSource's apt
 repository, the GitHub CLI, from GitHub's, and git, from the git-core PPA on
 Launchpad (its Ubuntu 24.04 build).

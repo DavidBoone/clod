@@ -97,6 +97,8 @@ and the rest go to it:
 | `codex [args]`  | Codex, installed into the home on first run |
 | `opencode [args]` | OpenCode, installed into the home on first run, with all permissions allowed |
 | `gemini [args]` | Gemini CLI, installed into the home on first run, with `--yolo` unless its arguments set an approval mode |
+| `pi [args]` | pi, installed into the home on first run, with `--approve` unless its arguments decide project trust |
+| `copilot [args]` | GitHub Copilot CLI, installed into the home on first run, with `--yolo` unless its arguments choose permissions |
 | `bash`, `zsh`   | a shell |
 
 Anything else also runs Claude Code, with all the arguments passed to it.
@@ -107,7 +109,12 @@ Claude Code gets `--dangerously-skip-permissions` unless its arguments include
 `OPENCODE_PERMISSION='{"*":"allow"}'` unless `-e` sets it. Gemini CLI gets
 `--yolo` unless its arguments include `--approval-mode`, `-y` or `--yolo` or
 start with a subcommand, and `GEMINI_CLI_TRUST_WORKSPACE=true` unless `-e`
-sets it.
+sets it. pi gets `--approve` unless its arguments include `--approve`, `-a`,
+`--no-approve` or `-na` or start with a subcommand. GitHub Copilot CLI gets
+`--yolo`, and `COPILOT_ALLOW_ALL=true` unless `-e` sets it, unless its
+arguments include `--yolo`, `--allow-all`, `--allow-all-tools`,
+`--allow-all-paths`, `--allow-all-urls`, `--allow-tool`, `--allow-url` or
+`--assisted-approval`.
 
 Other `docker run` options work as usual:
 

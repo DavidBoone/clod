@@ -29,11 +29,12 @@ shared=/etc/clod-shared
 # a CLAUDE.md already there came with the image, from a variant made before
 # AGENTS.d/, so it composes in after AGENTS.d/, and the shared CLAUDE.md
 # composes in after the shared AGENTS.md, unless it is the same file. Without
-# $2 ($1 is Codex's, OpenCode's or Gemini's global instructions file, in the
-# home), the variants' files in the old .claude/rules/, which Claude loads
-# itself, and an image's own /etc/clod/CLAUDE.md compose in after AGENTS.d/;
-# and the composition goes between the markers below, keeping whatever else
-# the file has, which is the user's own.
+# $2 ($1 is Codex's, OpenCode's, Gemini's, pi's or Copilot's global
+# instructions file, in the home), the variants' files in the old
+# .claude/rules/, which Claude loads itself, and an image's own
+# /etc/clod/CLAUDE.md compose in after AGENTS.d/; and the composition goes
+# between the markers below, keeping whatever else the file has, which is the
+# user's own.
 #
 # Written to a temporary file then renamed over $1, so an agent another run
 # starts at the same moment on the same home reads one whole version. mktemp
@@ -205,6 +206,84 @@ case "${1:-}" in
         fi
         exec gemini "$@"
         ;;
+    pi)
+        shift
+        # Installed into the mounted home so pi can update itself (pi update).
+        command -v pi >/dev/null || {
+            echo "clod: installing pi into this home..." >&2
+            npm install --global --ignore-scripts @earendil-works/pi-coding-agent
+        }
+        # pi has no approval prompts. It asks before loading a project's .pi/
+        # settings, extensions and MCP servers, unless the arguments decide. A
+        # subcommand (pi list) gets no --approve, before which pi would take
+        # the subcommand for a prompt.
+        approve=--approve
+        case ${1:-} in
+            install|remove|uninstall|update|list|config|auth|mcp) approve= ;;
+        esac
+        for arg; do
+            case $arg in
+                --) break ;;
+                --approve|-a|--no-approve|-na) approve= ;;
+            esac
+        done
+        # The container's and the shared config's instructions, as pi's global
+        # AGENTS.md. Written every run, so changes apply on the next one. pi
+        # expands a leading ~ in PI_CODING_AGENT_DIR itself.
+        pi_dir=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
+        # shellcheck disable=SC2088 # the literal ~ pi expands
+        case $pi_dir in
+            '~'|'~/'*) pi_dir=$HOME${pi_dir#\~} ;;
+        esac
+        mkdir -p "$pi_dir"
+        compose_agents_md "$pi_dir/AGENTS.md"
+        if [ -n "$approve" ]; then
+            exec pi "$approve" "$@"
+        fi
+        exec pi "$@"
+        ;;
+    copilot)
+        shift
+        # GitHub's installer puts the standalone binary in $PREFIX/bin, here
+        # ~/.local/bin in the mounted home, where it updates itself (into
+        # ~/.cache/copilot). VERSION, which an .envrc may set for something
+        # else, would choose its version.
+        command -v copilot >/dev/null || {
+            echo "clod: installing GitHub Copilot CLI into this home..." >&2
+            # sh has no pipefail, so a failed download only shows up here.
+            curl -fsSL https://gh.io/copilot-install | env -u VERSION PREFIX="$HOME/.local" bash
+            command -v copilot >/dev/null || {
+                echo "clod: GitHub Copilot CLI install failed" >&2
+                exit 1
+            }
+        }
+        # Approvals are off unless the arguments choose permissions: --yolo,
+        # which goes before a subcommand (copilot --yolo mcp list), as Copilot
+        # wants, and COPILOT_ALLOW_ALL=true, which allows every tool and also
+        # trusts the folder, as --yolo alone doesn't.
+        yolo=--yolo
+        for arg; do
+            case $arg in
+                --) break ;;
+                --yolo|--allow-all|--allow-all-tools|--allow-all-paths|--allow-all-urls|\
+                --allow-tool|--allow-tool=*|--allow-url|--allow-url=*|--assisted-approval)
+                    yolo= ;;
+            esac
+        done
+        if [ -n "$yolo" ]; then
+            COPILOT_ALLOW_ALL=${COPILOT_ALLOW_ALL-true}
+            export COPILOT_ALLOW_ALL
+        fi
+        # The container's and the shared config's instructions, as Copilot's
+        # personal copilot-instructions.md. Written every run, so changes apply
+        # on the next one.
+        mkdir -p "${COPILOT_HOME:-$HOME/.copilot}"
+        compose_agents_md "${COPILOT_HOME:-$HOME/.copilot}/copilot-instructions.md"
+        if [ -n "$yolo" ]; then
+            exec copilot "$yolo" "$@"
+        fi
+        exec copilot "$@"
+        ;;
     bash|zsh)
         shell=$1
         shift
@@ -239,7 +318,8 @@ fi
 # variants put in AGENTS.d/) compose with the shared config's into one file,
 # which the agents each get as their global instructions: Codex's
 # $CODEX_HOME/AGENTS.md, OpenCode's ~/.config/opencode/AGENTS.md, Gemini's
-# ~/.gemini/GEMINI.md and, here,
+# ~/.gemini/GEMINI.md, pi's ~/.pi/agent/AGENTS.md, Copilot's
+# ~/.copilot/copilot-instructions.md and, here,
 # /etc/clod/CLAUDE.md, which loads through --add-dir. The = form keeps the
 # option, which takes several directories, from taking a subcommand or prompt
 # as one.
