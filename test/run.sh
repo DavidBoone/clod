@@ -28,7 +28,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 export LC_ALL=C.UTF-8
 
 lint_tests='lint'
-base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode gemini statusline
+base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode gemini pi copilot statusline
   port port-busy port-range clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install image-claude-code'
@@ -424,7 +424,7 @@ EOF
   chmod +x ~/.clod/homes/opencode-args/.local/bin/opencode
   mkdir -p ~/.clod/homes/opencode-args/.local/share/opencode
   echo '{"provider":{"type":"api","key":"test"}}' > ~/.clod/homes/opencode-args/.local/share/opencode/auth.json
-  clod home | has -E 'opencode-args +[-] +[-] +yes +[-]$'
+  clod home | has -E 'opencode-args +[-] +[-] +yes +[-] +[-] +[-]$'
   clod -H opencode-args opencode run 'a prompt' --model provider/model > out
   test "$(cat out)" = "$(printf '%s\n' '{"permission":{"*":"allow"}}' run 'a prompt' --model provider/model)"
   echo 'export OPENCODE_PERMISSION='"'"'{"*":"ask"}'"'" > .envrc
@@ -462,7 +462,7 @@ printf '%s\n' "$GEMINI_CLI_TRUST_WORKSPACE" "$@"
 EOF
   chmod +x ~/.clod/homes/gemini-args/.local/bin/gemini
   echo '{"access_token":"test"}' > ~/.clod/homes/gemini-args/.gemini/oauth_creds.json
-  clod home | has -E 'gemini-args +[-] +[-] +[-] +yes$'
+  clod home | has -E 'gemini-args +[-] +[-] +[-] +yes +[-] +[-]$'
   clod -H gemini-args gemini -p 'a prompt' > out
   test "$(cat out)" = "$(printf 'true\n--yolo\n-p\na prompt')"
   clod -H gemini-args gemini --approval-mode=auto_edit > out
@@ -490,6 +490,110 @@ EOF
   direnv allow
   clod -H gemini-args gemini -y > out
   test "$(cat out)" = "$(printf 'false\n-y')"
+}
+
+test_pi() {
+  # pi installs into the home on first run, and the entrypoint composes the
+  # container's instructions into its global AGENTS.md, keeping the user's own
+  # text after the block
+  mkdir -p ~/.clod/homes/pi-install
+  clod -H pi-install pi --version | tee out
+  has -E '^[0-9]+\.[0-9]+\.[0-9]+' out
+  clod -H pi-install bash -c 'test -x ~/.local/bin/pi && grep -q "disposable Docker container" ~/.pi/agent/AGENTS.md'
+  clod -H pi-install bash -c 'echo "# my pi rules" >> ~/.pi/agent/AGENTS.md'
+  clod -H pi-install pi --version > out 2> err
+  exits 1 grep -q 'installing pi' err
+  clod -H pi-install bash -c '
+    set -e
+    f=~/.pi/agent/AGENTS.md
+    test "$(grep -c "^<!-- clod:begin" $f)" = 1
+    test "$(tail -1 $f)" = "# my pi rules"
+  '
+  # --approve unless the arguments choose
+  mkdir -p ~/.clod/homes/pi-args/.local/bin ~/.clod/homes/pi-args/.pi/agent
+  cat > ~/.clod/homes/pi-args/.local/bin/pi <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@"
+EOF
+  chmod +x ~/.clod/homes/pi-args/.local/bin/pi
+  # the empty auth.json pi writes before any login is no login
+  echo '{}' > ~/.clod/homes/pi-args/.pi/agent/auth.json
+  clod home | has -E 'pi-args +[-] +[-] +[-] +[-] +[-] +[-]$'
+  echo '{"anthropic":{"type":"api_key","key":"test"}}' > ~/.clod/homes/pi-args/.pi/agent/auth.json
+  clod home | has -E 'pi-args +[-] +[-] +[-] +[-] +yes +[-]$'
+  clod -H pi-args pi -p 'a prompt' > out
+  test "$(cat out)" = "$(printf -- '--approve\n-p\na prompt')"
+  clod -H pi-args pi -na > out
+  test "$(cat out)" = "-na"
+  clod -H pi-args pi --no-approve > out
+  test "$(cat out)" = "--no-approve"
+  # a subcommand gets no --approve, which would make it a prompt
+  clod -H pi-args pi list > out
+  test "$(cat out)" = "list"
+  # after --, an approval flag is the prompt's, not pi's
+  clod -H pi-args pi -- -a > out
+  test "$(cat out)" = "$(printf -- '--approve\n--\n-a')"
+  # pi expands a ~ in PI_CODING_AGENT_DIR, and so does the entrypoint
+  echo "export PI_CODING_AGENT_DIR='~/.pi/custom'" > .envrc
+  direnv allow
+  clod -H pi-args pi -p x > /dev/null
+  test -f ~/.clod/homes/pi-args/.pi/custom/AGENTS.md
+  test ! -e '~'
+}
+
+test_copilot() {
+  # Copilot installs into the home on first run, with GitHub's script, which
+  # VERSION in the .envrc doesn't steer, and the entrypoint composes the
+  # container's instructions into its personal copilot-instructions.md,
+  # keeping the user's own text after the block
+  echo 'export VERSION=0.0.1' > .envrc
+  direnv allow
+  mkdir -p ~/.clod/homes/copilot-install
+  clod -H copilot-install copilot --version | tee out
+  has -E '^GitHub Copilot CLI [1-9][0-9]*\.[0-9]+\.[0-9]+' out
+  rm .envrc
+  clod -H copilot-install bash -c '
+    set -e
+    test -x ~/.local/bin/copilot
+    grep -q "disposable Docker container" ~/.copilot/copilot-instructions.md
+    copilot instruction list | grep -q copilot-instructions.md
+  '
+  clod -H copilot-install bash -c 'echo "# my copilot rules" >> ~/.copilot/copilot-instructions.md'
+  clod -H copilot-install copilot --version > out 2> err
+  exits 1 grep -q 'installing GitHub Copilot CLI' err
+  clod -H copilot-install bash -c '
+    set -e
+    f=~/.copilot/copilot-instructions.md
+    test "$(grep -c "^<!-- clod:begin" $f)" = 1
+    test "$(tail -1 $f)" = "# my copilot rules"
+  '
+  # the --yolo clod adds goes before a subcommand, where Copilot takes it
+  clod -H copilot-install copilot mcp list
+  # --yolo and COPILOT_ALLOW_ALL=true unless the arguments or the .envrc choose
+  mkdir -p ~/.clod/homes/copilot-args/.local/bin
+  cat > ~/.clod/homes/copilot-args/.local/bin/copilot <<'EOF'
+#!/bin/sh
+printf '%s\n' "$COPILOT_ALLOW_ALL" "$@"
+EOF
+  chmod +x ~/.clod/homes/copilot-args/.local/bin/copilot
+  clod -H copilot-args copilot -p 'a prompt' > out
+  test "$(cat out)" = "$(printf 'true\n--yolo\n-p\na prompt')"
+  clod -H copilot-args copilot mcp list > out
+  test "$(cat out)" = "$(printf 'true\n--yolo\nmcp\nlist')"
+  # permissions the arguments choose get neither default
+  clod -H copilot-args copilot --allow-all-paths > out
+  test "$(cat out)" = "$(printf '\n--allow-all-paths')"
+  clod -H copilot-args copilot --allow-tool='shell(git:*)' > out
+  test "$(cat out)" = "$(printf '\n--allow-tool=shell(git:*)')"
+  clod -H copilot-args copilot --allow-url github.com > out
+  test "$(cat out)" = "$(printf '\n--allow-url\ngithub.com')"
+  # nor does a flag after --, which goes to Copilot as it is
+  clod -H copilot-args copilot -- --yolo > out
+  test "$(cat out)" = "$(printf 'true\n--yolo\n--\n--yolo')"
+  echo 'export COPILOT_ALLOW_ALL=false' > .envrc
+  direnv allow
+  clod -H copilot-args copilot --allow-all > out
+  test "$(cat out)" = "$(printf 'false\n--allow-all')"
 }
 
 test_statusline() {
@@ -1697,7 +1801,7 @@ test_completion() {
   test "$(completes i)" = "$(printf 'image\ninstall')"
   test "$(completes u)" = "$(printf 'uninstall\nupdate')"
   # in command_table's order, with its descriptions
-  test "$(completes '' | head -7)" = "$(printf 'claude\ncodex\nopencode\ngemini\nbash\nzsh\nimage')"
+  test "$(completes '' | head -9)" = "$(printf 'claude\ncodex\nopencode\ngemini\npi\ncopilot\nbash\nzsh\nimage')"
   clod __complete '' | has -xF -e "$(printf 'claude\tClaude Code')"
   clod __complete image '' | has -xF -e "$(printf 'rm\tdelete your variants and their built images')"
   clod __complete --sk | has -xF -e "$(printf -- '--skip-build\trun the image as built, even if its files changed')"
