@@ -311,13 +311,22 @@ check 0 home new vol:extra
 mkdir -p "$HOME/.clod/homes/pi-none/.pi/agent" "$HOME/.clod/homes/pi-in/.pi/agent"
 echo '{}' > "$HOME/.clod/homes/pi-none/.pi/agent/auth.json"
 echo '{"anthropic":{"type":"oauth"}}' > "$HOME/.clod/homes/pi-in/.pi/agent/auth.json"
+# Copilot's config.json, comments first, before and after a login
+mkdir -p "$HOME/.clod/homes/copilot-none/.copilot" "$HOME/.clod/homes/copilot-in/.copilot"
+printf '// managed by Copilot\n{\n  "firstLaunchAt": "2026-11-12T09:04:00.000Z"\n}\n' \
+  > "$HOME/.clod/homes/copilot-none/.copilot/config.json"
+printf '// managed by Copilot\n{\n  "authTokens": {\n    "https://github.com:someone": {\n      "token": "x"\n    }\n  }\n}\n' \
+  > "$HOME/.clod/homes/copilot-in/.copilot/config.json"
 check 0 home
-has '^  HOME +CLAUDE +CODEX +OPENCODE +GEMINI +PI$'
-has '^  moved +- +- +- +- +-$'
-has '^  vol:extra +[?] +[?] +[?] +[?] +[?]$'
-has '^  pi-none +- +- +- +- +-$'
-has '^  pi-in +- +- +- +- +yes$'
-rm -rf "$HOME/.clod/homes/pi-none" "$HOME/.clod/homes/pi-in"
+has '^  HOME +CLAUDE +CODEX +OPENCODE +GEMINI +PI +COPILOT$'
+has '^  moved +- +- +- +- +- +-$'
+has '^  vol:extra +[?] +[?] +[?] +[?] +[?] +[?]$'
+has '^  pi-none +- +- +- +- +- +-$'
+has '^  pi-in +- +- +- +- +yes +-$'
+has '^  copilot-none +- +- +- +- +- +-$'
+has '^  copilot-in +- +- +- +- +- +yes$'
+rm -rf "$HOME/.clod/homes/pi-none" "$HOME/.clod/homes/pi-in" \
+  "$HOME/.clod/homes/copilot-none" "$HOME/.clod/homes/copilot-in"
 check 1 home rm moved < /dev/null
 test -d "$HOME/.clod/homes/moved"
 check 0 home rm moved vol:extra --force

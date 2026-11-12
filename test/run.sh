@@ -424,7 +424,7 @@ EOF
   chmod +x ~/.clod/homes/opencode-args/.local/bin/opencode
   mkdir -p ~/.clod/homes/opencode-args/.local/share/opencode
   echo '{"provider":{"type":"api","key":"test"}}' > ~/.clod/homes/opencode-args/.local/share/opencode/auth.json
-  clod home | has -E 'opencode-args +[-] +[-] +yes +[-] +[-]$'
+  clod home | has -E 'opencode-args +[-] +[-] +yes +[-] +[-] +[-]$'
   clod -H opencode-args opencode run 'a prompt' --model provider/model > out
   test "$(cat out)" = "$(printf '%s\n' '{"permission":{"*":"allow"}}' run 'a prompt' --model provider/model)"
   echo 'export OPENCODE_PERMISSION='"'"'{"*":"ask"}'"'" > .envrc
@@ -462,7 +462,7 @@ printf '%s\n' "$GEMINI_CLI_TRUST_WORKSPACE" "$@"
 EOF
   chmod +x ~/.clod/homes/gemini-args/.local/bin/gemini
   echo '{"access_token":"test"}' > ~/.clod/homes/gemini-args/.gemini/oauth_creds.json
-  clod home | has -E 'gemini-args +[-] +[-] +[-] +yes +[-]$'
+  clod home | has -E 'gemini-args +[-] +[-] +[-] +yes +[-] +[-]$'
   clod -H gemini-args gemini -p 'a prompt' > out
   test "$(cat out)" = "$(printf 'true\n--yolo\n-p\na prompt')"
   clod -H gemini-args gemini --approval-mode=auto_edit > out
@@ -518,9 +518,9 @@ EOF
   chmod +x ~/.clod/homes/pi-args/.local/bin/pi
   # the empty auth.json pi writes before any login is no login
   echo '{}' > ~/.clod/homes/pi-args/.pi/agent/auth.json
-  clod home | has -E 'pi-args +[-] +[-] +[-] +[-] +[-]$'
+  clod home | has -E 'pi-args +[-] +[-] +[-] +[-] +[-] +[-]$'
   echo '{"anthropic":{"type":"api_key","key":"test"}}' > ~/.clod/homes/pi-args/.pi/agent/auth.json
-  clod home | has -E 'pi-args +[-] +[-] +[-] +[-] +yes$'
+  clod home | has -E 'pi-args +[-] +[-] +[-] +[-] +yes +[-]$'
   clod -H pi-args pi -p 'a prompt' > out
   test "$(cat out)" = "$(printf -- '--approve\n-p\na prompt')"
   clod -H pi-args pi -na > out

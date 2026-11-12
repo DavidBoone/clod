@@ -2641,10 +2641,10 @@ cmd_image_prune() {
 # Prints a row for home $1 (a directory or vol:NAME), labelled $2. A volume's
 # logins aren't on the host, so they show as ?.
 home_row() {
-  local mark=' ' claude=- codex=- opencode=- gemini=- pi=-
+  local mark=' ' claude=- codex=- opencode=- gemini=- pi=- copilot=-
   [[ $1 == "$home" ]] && mark='*'
   if [[ $1 == vol:* ]]; then
-    claude='?' codex='?' opencode='?' gemini='?' pi='?'
+    claude='?' codex='?' opencode='?' gemini='?' pi='?' copilot='?'
   else
     [[ -s $1/.claude/.credentials.json ]] && claude=yes
     [[ -s $1/.codex/auth.json ]] && codex=yes
@@ -2652,13 +2652,16 @@ home_row() {
     [[ -s $1/.gemini/oauth_creds.json ]] && gemini=yes
     # pi writes an empty {} before any login.
     grep -qs '"' "$1/.pi/agent/auth.json" && pi=yes
+    # Copilot's config.json, which it writes at first launch, holds a token
+    # once logged in, where there is no credential store to keep it.
+    grep -qs '"token"' "$1/.copilot/config.json" && copilot=yes
   fi
-  printf '%s %-20s %-7s %-7s %-8s %-7s %s\n' "$mark" "$2" "$claude" "$codex" "$opencode" "$gemini" "$pi"
+  printf '%s %-20s %-7s %-7s %-8s %-7s %-7s %s\n' "$mark" "$2" "$claude" "$codex" "$opencode" "$gemini" "$pi" "$copilot"
 }
 
 cmd_home() {
   local d v listed=''
-  printf '  %-20s %-7s %-7s %-8s %-7s %s\n' HOME CLAUDE CODEX OPENCODE GEMINI PI
+  printf '  %-20s %-7s %-7s %-8s %-7s %-7s %s\n' HOME CLAUDE CODEX OPENCODE GEMINI PI COPILOT
   for d in "$clod_dir"/homes/*; do
     [[ -d $d ]] || continue
     home_row "$d" "$(basename "$d")"
