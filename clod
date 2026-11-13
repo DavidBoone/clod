@@ -24,6 +24,10 @@
 #               ARG BASE are built on the one it names
 #   CLOD_COMMAND  command a bare `clod` (or `clod -- ARGS`) runs: claude
 #               (default), codex, opencode, gemini, pi, copilot, bash or zsh
+#   CLOD_YOLO   on (default) runs each agent without approval prompts, as with
+#               Claude Code's --dangerously-skip-permissions; off runs it with
+#               its own prompts and folder trust. --yolo and --no-yolo set it
+#               for a run
 #   CLOD_PORTS  ports to publish on the host's 127.0.0.1, comma- or
 #               space-separated: 8080 (the same on both sides), host:container,
 #               or address:host:container to publish on another address; the
@@ -184,39 +188,42 @@ Runs Claude Code in a throwaway container on the current directory, which is
 mounted as /workspace. ARGS go to Claude Code unchanged, its own options and
 --help included. It runs with --dangerously-skip-permissions unless ARGS
 include --permission-mode, --dangerously-skip-permissions or
---allow-dangerously-skip-permissions. A bare clod runs it too, unless
-CLOD_COMMAND or clod default command says otherwise; clod -- ARGS passes ARGS
-to that default command.
+--allow-dangerously-skip-permissions, or --no-yolo leaves it out. A bare clod
+runs it too, unless CLOD_COMMAND or clod default command says otherwise;
+clod -- ARGS passes ARGS to that default command.
 @codex
-Runs Codex in a throwaway container on the current directory, which is
-mounted as /workspace, with --dangerously-bypass-approvals-and-sandbox. ARGS
-go to Codex unchanged. Codex installs into the home on first run.
+Runs Codex in a throwaway container on the current directory, which is mounted
+as /workspace, with --dangerously-bypass-approvals-and-sandbox, or with
+--no-yolo --sandbox=danger-full-access unless ARGS include --sandbox or -s,
+since Codex's sandbox can't run in the container. ARGS go to Codex unchanged.
+Codex installs into the home on first run.
 @opencode
 Runs OpenCode in a throwaway container on the current directory, which is
 mounted as /workspace, with all permissions allowed unless OPENCODE_PERMISSION
-is set. ARGS go to OpenCode unchanged. OpenCode v2 installs into the home on
-first run, replacing v1 if present.
+is set or --no-yolo leaves them to OpenCode. ARGS go to OpenCode unchanged.
+OpenCode v2 installs into the home on first run, replacing v1 if present.
 @gemini
 Runs Gemini CLI in a throwaway container on the current directory, which is
 mounted as /workspace, with --yolo unless ARGS include --approval-mode, -y or
 --yolo or start with a subcommand (mcp, extensions, skills, hooks, gemma), and
-the workspace trusted unless GEMINI_CLI_TRUST_WORKSPACE is set. ARGS go to
-Gemini CLI unchanged. Gemini CLI installs into the home on first run.
+the workspace trusted unless GEMINI_CLI_TRUST_WORKSPACE is set; --no-yolo
+leaves out both. ARGS go to Gemini CLI unchanged. Gemini CLI installs into the
+home on first run.
 @pi
-Runs pi in a throwaway container on the current directory, which is mounted
-as /workspace, with --approve (trusting the project's .pi/ files) unless ARGS
+Runs pi in a throwaway container on the current directory, which is mounted as
+/workspace, with --approve (trusting the project's .pi/ files) unless ARGS
 include --approve, -a, --no-approve or -na or start with a subcommand
-(install, remove, uninstall, update, list, config, auth, mcp). pi has no
-approval prompts. ARGS go to pi unchanged. pi installs into the home on first
-run.
+(install, remove, uninstall, update, list, config, auth, mcp) or --no-yolo
+leaves it out. pi has no approval prompts. ARGS go to pi unchanged. pi
+installs into the home on first run.
 @copilot
 Runs GitHub Copilot CLI in a throwaway container on the current directory,
 which is mounted as /workspace, with --yolo and, unless it is set,
 COPILOT_ALLOW_ALL=true, which also trusts the folder, unless ARGS include
 --yolo, --allow-all, --allow-all-tools, --allow-all-paths, --allow-all-urls,
---allow-tool, --allow-url or --assisted-approval. ARGS go to Copilot
-unchanged. Copilot installs into the home on first run, with GitHub's install
-script.
+--allow-tool, --allow-url or --assisted-approval, or --no-yolo leaves out
+both. ARGS go to Copilot unchanged. Copilot installs into the home on first
+run, with GitHub's install script.
 @bash
 Runs bash in a throwaway container on the current directory, which is mounted
 as /workspace. ARGS go to bash unchanged: clod bash -c 'make test'.
@@ -371,6 +378,8 @@ clod|--json||print the settings and variables as JSON (env)
 env|--json||print the settings and the .envrc's variables as one JSON object
 clod,run,env|--clipboard||let Ctrl+V in Claude Code paste the host clipboard's image (CLOD_CLIPBOARD)
 clod,run,env|-q --quiet||hide the start-up line clod prints before a run (CLOD_QUIET)
+clod,run,env|--yolo||run the agent without approval prompts, the default (CLOD_YOLO)
+clod,run,env|--no-yolo||run the agent with its own approval prompts and folder trust (CLOD_YOLO=off)
 clod|--build||build the image after editing it (image edit)
 image edit|--build||build the image once the editor exits, as image build does
 clod,run|--docker||mount the host's Docker socket, which is root on the Docker host; the CLI comes from the image (-i docker)
@@ -384,6 +393,7 @@ read -r -d '' settings_table <<'EOF' || true
 image|CLOD_IMAGE|clod|the image or variant a run uses
 base|CLOD_BASE|slim|the Debian image clod's image is built on: slim (debian:trixie-slim) or full (debian:trixie, with docs and man pages)
 command|CLOD_COMMAND|claude|what a bare clod runs: claude, codex, opencode, gemini, pi, copilot, bash or zsh
+yolo|CLOD_YOLO|on|off runs the agents with their own approval prompts and folder trust
 home|CLOD_HOME|default|the container home: a name, a path or vol:NAME
 ports|CLOD_PORTS|-|ports to publish on localhost, comma-separated
 ports-busy|CLOD_PORTS_BUSY|skip|when another container has one of ports' host ports: skip it, use the next free one (next) or stop (error)
@@ -1368,6 +1378,8 @@ take_option() {
     --docker) docker_socket=1 ;;
     --clipboard) CLOD_CLIPBOARD=on ;;
     -q|--quiet) CLOD_QUIET=on ;;
+    --yolo) CLOD_YOLO=on ;;
+    --no-yolo) CLOD_YOLO=off ;;
     --json) json=1 ;;
     -h|--help) help=1 ;;
     --version) echo "clod $(clod_version)"; exit 0 ;;
@@ -1704,6 +1716,10 @@ setup_container() {
   case ${CLOD_QUIET:-off} in
     on|off) ;;
     *) echo "clod: CLOD_QUIET is '$CLOD_QUIET'; it must be on or off" >&2; exit 1 ;;
+  esac
+  case ${CLOD_YOLO:-on} in
+    on|off) ;;
+    *) echo "clod: CLOD_YOLO is '$CLOD_YOLO'; it must be on or off" >&2; exit 1 ;;
   esac
 
   tz=${TZ:-$(readlink /etc/localtime 2>/dev/null)}
@@ -2135,6 +2151,10 @@ cmd_complete() {
       1:quiet)
         offer $'on\thide clod\'s start-up line' $'off\tshow clod\'s start-up line' "$reset"
         ;;
+      1:yolo)
+        offer $'on\trun the agents without approval prompts' \
+          $'off\trun the agents with their own approval prompts' "$reset"
+        ;;
     esac
   elif is_one_of "$cmd" "$nouns"; then
     if (( ${#cmd_args[@]} == 0 )); then
@@ -2343,6 +2363,9 @@ cmd_default() {
         ;;
       quiet)
         is_one_of "$value" 'on off' || usage_error "quiet is on or off"
+        ;;
+      yolo)
+        is_one_of "$value" 'on off' || usage_error "yolo is on or off"
         ;;
     esac
   fi
@@ -3382,6 +3405,7 @@ cmd_env() {
   fi
   [[ ${CLOD_CLIPBOARD:-off} == on ]] && field clipboard "the host clipboard's image, for Ctrl+V in Claude Code"
   [[ ${CLOD_QUIET:-off} == on ]] && field quiet "clod's start-up line is hidden"
+  [[ ${CLOD_YOLO:-on} == off ]] && field yolo "off: the agents keep their own approval prompts"
   [[ -n $docker_socket ]] && field docker "the host's Docker socket (root on the Docker host)"
   [[ -f $config ]] && field config "$(tildify "$config")"
   (( ${#vars[@]} )) && printf '%s\n' "${vars[@]}"
@@ -3657,7 +3681,7 @@ start_clipboard() {
 }
 
 cmd_run() {
-  local run_args variants endpoint sock mount probe sock_stat
+  local run_args variants endpoint sock mount probe sock_stat no_yolo=''
   need_home
   [[ -n $dc_note ]] && echo "$dc_note" >&2
 
@@ -3674,7 +3698,7 @@ cmd_run() {
   [[ -n $built ]] && docker image prune -f --filter label=clod.hash >/dev/null
 
   mount_arg "$home_src" /home/claude
-  run_args=(-i --mount "$REPLY" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$image")
+  run_args=(-i --mount "$REPLY" -e "CLOD_HOME=$home_label" -e "CLOD_IMAGE=$image" -e "CLOD_YOLO=${CLOD_YOLO:-on}")
   [[ $home != vol:* ]] && run_args+=(-e "CLOD_HOME_PATH=$(tildify "$home")")
   # A scratch workspace is an anonymous volume, which --rm removes. Docker
   # copies the image's /workspace into it, owned by claude.
@@ -3755,7 +3779,8 @@ cmd_run() {
     done
   fi
   if [[ ${CLOD_QUIET:-off} != on ]]; then
-    echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${ports_shown:+ · $ports_shown}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}" >&2
+    [[ ${CLOD_YOLO:-on} == off ]] && no_yolo=1
+    echo "clod ⌂ $home_label ⬢ $image · ${#vars[@]} vars${workspace_opt:+ · $workspace_label}${scratch:+ · scratch}${ports_shown:+ · $ports_shown}${docker_socket:+ · Docker socket}${clipboard_on:+ · clipboard}${no_yolo:+ · no yolo}" >&2
   fi
   # Images are local: clod builds them, so a mistyped name must not pull one.
   exec docker run --rm --pull=never --env-file <(printf '%s\n' ${vars[@]+"${vars[@]}"}) "${run_args[@]}" "$tag" "$command" "$@"

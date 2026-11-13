@@ -104,7 +104,7 @@ and the rest go to it:
 Anything else also runs Claude Code, with all the arguments passed to it.
 Claude Code gets `--dangerously-skip-permissions` unless its arguments include
 `--permission-mode`, `--dangerously-skip-permissions` or
-`--allow-dangerously-skip-permissions`. Codex always runs with
+`--allow-dangerously-skip-permissions`. Codex runs with
 `--dangerously-bypass-approvals-and-sandbox`. OpenCode gets
 `OPENCODE_PERMISSION='{"*":"allow"}'` unless `-e` sets it. Gemini CLI gets
 `--yolo` unless its arguments include `--approval-mode`, `-y` or `--yolo` or
@@ -114,7 +114,10 @@ sets it. pi gets `--approve` unless its arguments include `--approve`, `-a`,
 `--yolo`, and `COPILOT_ALLOW_ALL=true` unless `-e` sets it, unless its
 arguments include `--yolo`, `--allow-all`, `--allow-all-tools`,
 `--allow-all-paths`, `--allow-all-urls`, `--allow-tool`, `--allow-url` or
-`--assisted-approval`.
+`--assisted-approval`. With `-e CLOD_YOLO=off`, none of them gets any of
+these, and the agents keep their own approval prompts; Codex gets
+`--sandbox=danger-full-access` instead, unless its arguments include
+`--sandbox` or `-s`, as its sandbox can't run in the container.
 
 Other `docker run` options work as usual:
 

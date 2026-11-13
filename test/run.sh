@@ -29,7 +29,7 @@ export LC_ALL=C.UTF-8
 
 lint_tests='lint'
 base_tests='env env-json run-command terminal mount-paths scratch workspace refuses-home claude claude-args codex opencode gemini pi copilot statusline
-  port port-busy port-range clipboard quiet show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
+  port port-busy port-range clipboard quiet yolo show-image docker-socket envrc envrc-path volume-home home-copy home-new volume-workspace default shared command-line help
   multi-stage combine image-add live-files rebuild base-full image-edit image-diff image-rm image-clean image-prune devcontainer-names
   completion update install image-claude-code'
 classic_tests='classic'
@@ -104,8 +104,8 @@ test_env_json() {
   mkdir "$dir"
   clod -w "$dir" env --json > out
   test "$(jq -r 'keys_unsorted | join(" ")' out)" = \
-    'CLOD_IMAGE CLOD_BASE CLOD_COMMAND CLOD_HOME CLOD_PORTS CLOD_PORTS_BUSY CLOD_CLIPBOARD CLOD_QUIET CLOD_DEVCONTAINER CLOD_WORKSPACE CLOD_SCRATCH variables'
-  jq -e '.CLOD_IMAGE == "clod" and .CLOD_BASE == "slim" and .CLOD_COMMAND == "claude" and .CLOD_HOME == "default" and .CLOD_PORTS == null
+    'CLOD_IMAGE CLOD_BASE CLOD_COMMAND CLOD_YOLO CLOD_HOME CLOD_PORTS CLOD_PORTS_BUSY CLOD_CLIPBOARD CLOD_QUIET CLOD_DEVCONTAINER CLOD_WORKSPACE CLOD_SCRATCH variables'
+  jq -e '.CLOD_IMAGE == "clod" and .CLOD_BASE == "slim" and .CLOD_COMMAND == "claude" and .CLOD_YOLO == "on" and .CLOD_HOME == "default" and .CLOD_PORTS == null
     and .CLOD_PORTS_BUSY == "skip" and .CLOD_CLIPBOARD == "off" and .CLOD_QUIET == "off" and .CLOD_DEVCONTAINER == "off"
     and .CLOD_SCRATCH == null and .variables == {}' out >/dev/null
   test "$(jq -r .CLOD_WORKSPACE out)" = "$(clod -w "$dir" env | sed -n 's/^workspace: *//p')"
@@ -798,6 +798,62 @@ test_quiet() {
   exits 2 clod default quiet maybe
   test "$(completes default quiet '' | tr '\n' ' ')" = 'on off --reset '
   test "$(completes --q)" = --quiet
+}
+
+# --no-yolo and CLOD_YOLO=off run every agent with its own approval prompts:
+# none of the flags and variables clod otherwise adds. Stand-ins print what
+# they get.
+test_yolo() {
+  local bin=~/.clod/homes/yolo/.local/bin agent
+  mkdir -p "$bin"
+  for agent in claude codex gemini pi copilot; do
+    printf '#!/bin/sh\nprintf "%%s|%%s|%%s\\n" "${GEMINI_CLI_TRUST_WORKSPACE-unset}" "${COPILOT_ALLOW_ALL-unset}" "$*"\n' > "$bin/$agent"
+  done
+  printf '#!/bin/sh\n[ "$1" = --version ] && { echo "opencode v2.0.0"; exit; }\nprintf "%%s|%%s|%%s\\n" "${OPENCODE_PERMISSION-unset}" "${OPENCODE_CONFIG_CONTENT-unset}" "$*"\n' > "$bin/opencode"
+  chmod +x "$bin"/*
+  clod -H yolo codex x > out
+  test "$(cat out)" = 'unset|unset|--dangerously-bypass-approvals-and-sandbox x'
+  clod -H yolo --no-yolo codex x > out
+  test "$(cat out)" = 'unset|unset|--sandbox=danger-full-access x'
+  clod -H yolo --no-yolo codex -s read-only x > out
+  test "$(cat out)" = 'unset|unset|-s read-only x'
+  clod -H yolo --no-yolo gemini x > out
+  test "$(cat out)" = 'unset|unset|x'
+  clod -H yolo --no-yolo pi x > out
+  test "$(cat out)" = 'unset|unset|x'
+  clod -H yolo --no-yolo copilot x > out
+  test "$(cat out)" = 'unset|unset|x'
+  clod -H yolo --no-yolo opencode run x > out
+  test "$(cat out)" = 'unset|unset|run x'
+  clod -H yolo --no-yolo -- x > out
+  has -x 'unset|unset|.*x' out
+  if grep -q -- --dangerously-skip-permissions out; then false; fi
+  # the start-up line and clod env say so
+  clod -H yolo --no-yolo codex x 2> err >/dev/null
+  has '^clod ⌂.* · no yolo$' < err
+  clod --no-yolo env | has '^yolo:'
+  if clod env | has '^yolo:'; then false; fi
+  # a default, which --yolo overrides for a run, as CLOD_YOLO does
+  clod default yolo off
+  clod -H yolo -- x > out
+  if grep -q -- --dangerously-skip-permissions out; then false; fi
+  clod -H yolo --yolo -- x > out
+  grep -q -- --dangerously-skip-permissions out
+  CLOD_YOLO=on clod -H yolo gemini x > out
+  test "$(cat out)" = 'true|unset|--yolo x'
+  clod default yolo --reset
+  # the .envrc's own values still reach the agent
+  printf 'export CLOD_YOLO=off COPILOT_ALLOW_ALL=false OPENCODE_PERMISSION=%s\n' "'{\"*\":\"ask\"}'" > .envrc
+  direnv allow
+  clod -H yolo copilot x > out
+  test "$(cat out)" = 'unset|false|x'
+  clod -H yolo opencode run x > out
+  test "$(cat out)" = '{"*":"ask"}|{"permission":{"*":"ask"}}|run x'
+  rm .envrc
+  CLOD_YOLO=maybe exits 1 clod bash -c true 2>&1 | has "CLOD_YOLO is 'maybe'; it must be on or off"
+  exits 2 clod default yolo maybe
+  test "$(completes default yolo '' | tr '\n' ' ')" = 'on off --reset '
+  test "$(completes --no-y)" = --no-yolo
 }
 
 test_docker_socket() {

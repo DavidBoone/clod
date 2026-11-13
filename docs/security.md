@@ -15,7 +15,9 @@ GitHub Copilot CLI runs with `--yolo` and `COPILOT_ALLOW_ALL=true` unless its
 arguments choose permissions; the variable also trusts the folder, loading the
 project's skills, plugins, MCP servers and hooks (its own in `.github/` and
 Claude Code's in `.claude/`) without asking; a value in `.envrc` overrides it.
-Within that reach they act without asking:
+Within that reach they act without asking. `--no-yolo` (or `clod default
+yolo off`) leaves all of this out, so each agent asks as it does outside clod
+(see [The command line](usage.md#the-command-line)):
 
 - **The project directory**, read-write: the agent can change or delete any
   file in it, including any secrets the project keeps, such as a `.env` file.
