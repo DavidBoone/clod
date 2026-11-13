@@ -17,6 +17,7 @@ clod -w ~/src/app    # that directory as /workspace (see Another workspace)
 clod -w vol:play     # a workspace kept in a Docker volume
 clod -s              # an empty, throwaway /workspace (see A scratch workspace)
 clod -q              # without clod's start-up line
+clod --no-yolo       # with the agent's own approval prompts
 clod env             # show the home, workspace, image, ports, .envrc and variables that would be used
 clod env --json      # the same settings and variables as one JSON object
 clod default         # show your defaults
@@ -57,6 +58,17 @@ Claude Code runs with `--dangerously-skip-permissions` unless its arguments
 include `--permission-mode`, `--dangerously-skip-permissions` or
 `--allow-dangerously-skip-permissions`, so `clod claude --permission-mode plan`
 brings the prompts back. `clod claude -p "..." | ...` works without a terminal.
+
+Every agent runs without its approval prompts, each in its own way, described
+in its section below. `--no-yolo` runs it with its own prompts and folder
+trust instead, as it runs outside clod: clod adds none of Claude Code's
+`--dangerously-skip-permissions`, Codex's
+`--dangerously-bypass-approvals-and-sandbox` (see [Codex](#codex)), Gemini
+CLI's and Copilot's `--yolo` or pi's `--approve`, and sets none of `OPENCODE_PERMISSION`,
+`GEMINI_CLI_TRUST_WORKSPACE` and `COPILOT_ALLOW_ALL`, though values the
+`.envrc` gives them still reach the agent. `clod default yolo off`, or
+`CLOD_YOLO=off` in the shell or an `.envrc`, does so for every run, and
+`--yolo` turns the prompts off again for one.
 
 `clod` refuses to mount your home directory or any directory above it,
 `~/.clod`, or `~/.clod/homes` or anything under it as the workspace, since the
@@ -189,7 +201,10 @@ See [OpenAI's authentication documentation](https://learn.chatgpt.com/docs/auth)
 
 Codex runs with `--dangerously-bypass-approvals-and-sandbox`, which turns off
 its own sandbox and approval prompts inside the container, including for
-resumed sessions. The container's and your shared instructions reach it in its
+resumed sessions. With `--no-yolo` it runs with `--sandbox=danger-full-access`
+instead, keeping its approval prompts without its sandbox, which needs user
+namespaces the container doesn't allow; `--sandbox` or `-s` in the arguments
+replaces it. The container's and your shared instructions reach it in its
 global `AGENTS.md`, in a block between `<!-- clod:begin` and `<!-- clod:end -->`
 lines that the entrypoint rewrites in the home on every run; anything of your
 own outside the block stays (`~/.codex/AGENTS.override.md` of your own would

@@ -20,6 +20,12 @@ unset env_file
 # beside the image's own.
 shared=/etc/clod-shared
 
+# CLOD_YOLO=off (clod --no-yolo) runs each agent with its own approval prompts
+# and folder trust, as outside clod: none of the flags and variables below that
+# let it act without asking.
+bypass=1
+[ "${CLOD_YOLO:-on}" != off ] || bypass=
+
 # Composes the instructions agents share into the file $1, in order: the
 # image's /etc/clod/AGENTS.md, anything its variants added under
 # /etc/clod/AGENTS.d/, then the shared config's own AGENTS.md, or, when there
@@ -143,7 +149,23 @@ case "${1:-}" in
         # The container's and the shared config's instructions, as Codex's
         # global AGENTS.md. Written every run, so changes apply on the next one.
         compose_agents_md "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
-        exec codex --dangerously-bypass-approvals-and-sandbox "$@"
+        if [ -n "$bypass" ]; then
+            exec codex --dangerously-bypass-approvals-and-sandbox "$@"
+        fi
+        # Codex's sandbox needs user namespaces, which the container doesn't
+        # allow, so its approval prompts run with the container as the only
+        # sandbox, unless the arguments choose one (Codex refuses two).
+        sandbox=--sandbox=danger-full-access
+        for arg; do
+            case $arg in
+                --) break ;;
+                -s|-s*|--sandbox|--sandbox=*|--dangerously-bypass-approvals-and-sandbox) sandbox= ;;
+            esac
+        done
+        if [ -n "$sandbox" ]; then
+            exec codex "$sandbox" "$@"
+        fi
+        exec codex "$@"
         ;;
     opencode)
         shift
@@ -160,13 +182,15 @@ case "${1:-}" in
             echo "clod: installing OpenCode into this home..." >&2
             npm install --global @opencode/cli@2
         fi
-        OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-'{"*":"allow"}'}
+        [ -z "$bypass" ] || OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-'{"*":"allow"}'}
         # V2 reads inline config rather than OPENCODE_PERMISSION. Its V1
         # config compatibility keeps existing permission overrides working.
-        OPENCODE_CONFIG_CONTENT=${OPENCODE_CONFIG_CONTENT:-'{}'}
-        OPENCODE_CONFIG_CONTENT=$(printf '%s\n' "$OPENCODE_CONFIG_CONTENT" |
-            jq -c --argjson permission "$OPENCODE_PERMISSION" '.permission = $permission')
-        export OPENCODE_PERMISSION OPENCODE_CONFIG_CONTENT
+        if [ -n "${OPENCODE_PERMISSION:-}" ]; then
+            OPENCODE_CONFIG_CONTENT=${OPENCODE_CONFIG_CONTENT:-'{}'}
+            OPENCODE_CONFIG_CONTENT=$(printf '%s\n' "$OPENCODE_CONFIG_CONTENT" |
+                jq -c --argjson permission "$OPENCODE_PERMISSION" '.permission = $permission')
+            export OPENCODE_PERMISSION OPENCODE_CONFIG_CONTENT
+        fi
         # The container's and the shared config's instructions, as OpenCode's
         # global AGENTS.md, the only instructions file it reads from outside
         # the workspace. Written every run, so changes apply on the next one.
@@ -182,12 +206,14 @@ case "${1:-}" in
             npm install --global @google/gemini-cli
         }
         # Gemini drops YOLO to default approval in a folder it doesn't trust.
-        GEMINI_CLI_TRUST_WORKSPACE=${GEMINI_CLI_TRUST_WORKSPACE-true}
-        export GEMINI_CLI_TRUST_WORKSPACE
+        if [ -n "$bypass" ]; then
+            GEMINI_CLI_TRUST_WORKSPACE=${GEMINI_CLI_TRUST_WORKSPACE-true}
+            export GEMINI_CLI_TRUST_WORKSPACE
+        fi
         # Approvals are off unless the arguments choose an approval mode. A
         # subcommand (gemini mcp list) gets no --yolo, before which Gemini
         # would take the subcommand for a prompt.
-        yolo=--yolo
+        yolo=${bypass:+--yolo}
         case ${1:-} in
             mcp|extensions|extension|skills|skill|hooks|hook|gemma) yolo= ;;
         esac
@@ -217,7 +243,7 @@ case "${1:-}" in
         # settings, extensions and MCP servers, unless the arguments decide. A
         # subcommand (pi list) gets no --approve, before which pi would take
         # the subcommand for a prompt.
-        approve=--approve
+        approve=${bypass:+--approve}
         case ${1:-} in
             install|remove|uninstall|update|list|config|auth|mcp) approve= ;;
         esac
@@ -261,7 +287,7 @@ case "${1:-}" in
         # which goes before a subcommand (copilot --yolo mcp list), as Copilot
         # wants, and COPILOT_ALLOW_ALL=true, which allows every tool and also
         # trusts the folder, as --yolo alone doesn't.
-        yolo=--yolo
+        yolo=${bypass:+--yolo}
         for arg; do
             case $arg in
                 --) break ;;
@@ -303,7 +329,7 @@ mkdir -p "$config"
     echo '{"skipDangerousModePermissionPrompt":true}' > "$config/settings.json"
 
 # Permission prompts are off unless the arguments choose a permission mode.
-skip=--dangerously-skip-permissions
+skip=${bypass:+--dangerously-skip-permissions}
 for arg; do
     case $arg in
         --) break ;;
