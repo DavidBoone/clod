@@ -277,6 +277,22 @@ test_claude_args() {
   has -e '^--dangerously-skip-permissions$' out
   has -e '^--plugin-dir=/etc/clod/plugins/show-image$' out
   test "$(tail -2 out | tr '\n' ' ')" = '-p hi '
+  # --add-dir's folder is trusted, in a new home's .claude.json and in one
+  # without the record, keeping its other keys and its mode; one jq can't
+  # parse is left alone
+  json=~/.clod/homes/args/.claude/.claude.json
+  trusted='.projects["/etc/clod"].hasTrustDialogAccepted and .projects["/workspace"].hasTrustDialogAccepted'
+  clod -H args bash -c "jq -e '$trusted' ~/.claude/.claude.json"
+  echo '{"keep":1,"projects":{"/workspace":{"hasTrustDialogAccepted":true}}}' > "$json"
+  chmod 600 "$json"
+  clod -H args -- -p hi > /dev/null
+  clod -H args bash -c "jq -e '.keep == 1 and $trusted' ~/.claude/.claude.json"
+  test "$(stat -c %a "$json")" = 600
+  echo 'not json' > "$json"
+  clod -H args -- -p hi > /dev/null
+  test "$(cat "$json")" = 'not json'
+  test -z "$(find ~/.clod/homes/args/.claude -name '.claude.json.clod-tmp.*')"
+  rm "$json"
   # only the last --settings applies, so the user's own replaces the shared one
   clod -H args -- --settings mine.json -p hi | tee out
   exits 1 grep -q /etc/clod-shared/settings.json out

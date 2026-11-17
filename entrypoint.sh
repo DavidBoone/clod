@@ -358,6 +358,20 @@ if [ -d /etc/clod ]; then
     compose_agents_md /etc/clod/CLAUDE.md claude
     set -- --add-dir=/etc/clod "$@"
     export CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
+    # Claude Code asks whether to trust an --add-dir folder that has no trust
+    # record in .claude.json, and keeps the answer for that session only, so
+    # the record goes in once per home. Renamed into place, like the
+    # instructions, with the file's own mode; a file jq can't parse is left
+    # alone, and Claude Code then asks.
+    json=$config/.claude.json
+    if [ -f "$json" ] && [ ! -L "$json" ] &&
+        ! jq -e '.projects["/etc/clod"].hasTrustDialogAccepted == true' "$json" >/dev/null 2>&1 &&
+        tmp=$(mktemp "$json.clod-tmp.XXXXXX" 2>/dev/null); then
+        if ! { jq '.projects["/etc/clod"].hasTrustDialogAccepted = true' "$json" > "$tmp" 2>/dev/null &&
+            chmod "$(stat -c %a "$json")" "$tmp" && mv -f "$tmp" "$json" 2>/dev/null; }; then
+            rm -f "$tmp"
+        fi
+    fi
 fi
 # The shared settings (the statusline) go in as --settings, not as managed
 # settings, which an organisation's server-managed settings would replace. Only
