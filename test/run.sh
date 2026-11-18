@@ -622,12 +622,16 @@ test_statusline() {
   git init -q -b main .
   # five columns over two lines: model over effort, context over tokens, home
   # over image and ports, git over lines changed; the 5h meter ends line 1
-  clod -P 5173 -P 6000/udp bash -c 'bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
-    sed 's/\x1b\[[0-9;]*m//g; s/\x1b\]8;;[^\x07]*\x07//g' | tee out
+  # each TCP port links to its host address, labelled CONTAINER→HOST when
+  # the two differ
+  clod -P 5173 -P 8003:5174 -P 6000/udp bash -c 'bash /etc/clod-shared/statusline.sh < /workspace/input.json' |
+    sed 's/\x1b\[[0-9;]*m//g' > links
+  sed 's/\x1b\]8;;[^\x07]*\x07//g' links | tee out
   test "$(wc -l < out)" = 2
-  head -1 out | has '^✨ Opus  *◔ [▰▱]* 42%  *🏠 default  *🪾 main ±[0-9]  *5h '
-  tail -1 out | has '^⚡ high  *↑0  *↓0  *📦 clod  ⇄ :5173  *+120/-35$'
+  head -1 out | has '^✨ Opus  *◔ [▰▱]* 42%  *🏠 default  *🌿 main ±[0-9]  *5h '
+  tail -1 out | has '^⚡ high  *↑0  *↓0  *📦 clod  ⇄ :5173 :5174→8003  *+120/-35$'
   if grep -q 6000 out; then false; fi
+  has -F $'\x1b]8;;http://localhost:8003\x07:5174→8003' < links
   # subagents' transcripts beside the session's add to the token counts, each
   # streamed message counted once, at its last entry
   mkdir -p s/subagents

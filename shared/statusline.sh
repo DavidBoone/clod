@@ -259,30 +259,46 @@ if [ -n "${CLOD_HOME:-}" ]; then
     [ -n "${CLOD_IMAGE:-}" ] && bottom[3]="${BROWN}📦 ${CLOD_IMAGE}${RST}"
 fi
 
-# Published container ports (CLOD_PORTS) as underlined :PORT, each an OSC 8
-# link to http://localhost:PORT. Claude Code passes the links on only when it
-# recognises the terminal (TERM_PROGRAM and the like, or FORCE_HYPERLINK=1);
-# otherwise they show as plain text. CLOD_PORTS holds container ports, so a
-# link is right only when the host port is the same. UDP ports aren't shown.
-if [ -n "${CLOD_PORTS:-}" ]; then
+# Published TCP ports as underlined labels, each an OSC 8 link to the port's
+# address on the host. CLOD_PORT_MAP gives each as CONTAINER=ADDRESS:HOST; the
+# label is :HOST, or :CONTAINER→HOST when the two differ, and a wildcard
+# address (0.0.0.0, [::]) links to localhost. An older launcher sets only
+# CLOD_PORTS, the container ports, which link to the same port on localhost.
+# Claude Code passes the links on only when it recognises the terminal
+# (TERM_PROGRAM and the like, or FORCE_HYPERLINK=1); otherwise they show as
+# plain text.
+port_entries=()
+if [ -n "${CLOD_PORT_MAP+set}" ]; then
+    IFS=', ' read -ra port_entries <<< "$CLOD_PORT_MAP"
+else
+    IFS=', ' read -ra ports <<< "${CLOD_PORTS:-}"
+    for port in ${ports[@]+"${ports[@]}"}; do
+        port_entries+=("$port=localhost:${port%/*}")
+    done
+fi
+if [ ${#port_entries[@]} -gt 0 ]; then
     ports_part="${MAGENTA}⇄${RST}"
-    for port in ${CLOD_PORTS//,/ }; do
-        [[ $port == */udp ]] && continue
-        port=${port%/tcp}
-        ports_part+=" ${UL_MAGENTA}"$'\033]8;;'"http://localhost:${port}"$'\a'":${port}"$'\033]8;;\a'"${RST}"
+    for entry in "${port_entries[@]}"; do
+        cont=${entry%%=*} addr=${entry#*=}
+        [[ $cont == */udp ]] && continue
+        cont=${cont%/tcp} host=${addr##*:} addr=${addr%:*}
+        [[ $addr == 0.0.0.0 || $addr == "[::]" ]] && addr=localhost
+        label=":$host"
+        [ "$cont" = "$host" ] || label=":$cont→$host"
+        ports_part+=" ${UL_MAGENTA}"$'\033]8;;'"http://$addr:$host"$'\a'"$label"$'\033]8;;\a'"${RST}"
     done
     bottom[3]+="${bottom[3]:+  }$ports_part"
 fi
 
 # Git branch (short hash when detached) and ±N changed files, untracked included.
-# A linked worktree (git dir differs from the common one) shows as 🌿 and its
-# folder in place of 🪾 and the branch. A folder inside a host-mounted /workspace
+# A linked worktree (git dir differs from the common one) shows as 📂 and its
+# folder in place of 🌿 and the branch. A folder inside a host-mounted /workspace
 # shows relative to it, which iTerm resolves against the folder clod ran from
 # and opens on ⌘-click; any other shows only its name. The branch follows,
 # dimmed, when it doesn't contain the folder's name.
 if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --short -q HEAD 2>/dev/null \
         || git -C "$cwd" --no-optional-locks rev-parse --short HEAD 2>/dev/null); then
-    git_part="🪾 ${GREEN}${branch}${RST}"
+    git_part="🌿 ${GREEN}${branch}${RST}"
     # Inside .git there is no top level, and rev-parse prints less.
     git_dir="" common_dir="" top_dir=""
     { read -r git_dir; read -r common_dir; read -r top_dir; } < <(git -C "$cwd" --no-optional-locks \
@@ -290,7 +306,7 @@ if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --sh
     if [ -n "$git_dir" ] && [ "$git_dir" != "$common_dir" ]; then
         wt=${top_dir##*/}
         [ -n "${CLOD_WORKSPACE_PATH:-}" ] && [[ $top_dir == /workspace/* ]] && wt=${top_dir#/workspace/}
-        git_part="🌿 ${GREEN}${wt}${RST}"
+        git_part="📂 ${GREEN}${wt}${RST}"
         [[ $branch == *"${top_dir##*/}"* ]] || git_part+=" ${DIM}${branch}${RST}"
     fi
     dirty=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null | wc -l) || dirty=0
@@ -378,7 +394,7 @@ width() {
     local s=$1 narrow
     s=${s//$'\033['*([0-9;])m/}
     s=${s//$'\033]8;;'*([!$'\a'])$'\a'/}
-    narrow=${s//[✨⚡🏠📦💤🪾🌿]/}
+    narrow=${s//[✨⚡🏠📦💤🌿📂]/}
     echo $(( 2 * ${#s} - ${#narrow} ))
 }
 
