@@ -267,15 +267,18 @@ fi
 # Claude Code passes the links on only when it recognises the terminal
 # (TERM_PROGRAM and the like, or FORCE_HYPERLINK=1); otherwise they show as
 # plain text.
-port_map=${CLOD_PORT_MAP:-}
-if [ -z "$port_map" ] && [ -n "${CLOD_PORTS:-}" ]; then
-    for port in ${CLOD_PORTS//,/ }; do
-        port_map+="${port_map:+,}$port=localhost:${port%/*}"
+port_entries=()
+if [ -n "${CLOD_PORT_MAP+set}" ]; then
+    IFS=', ' read -ra port_entries <<< "$CLOD_PORT_MAP"
+else
+    IFS=', ' read -ra ports <<< "${CLOD_PORTS:-}"
+    for port in ${ports[@]+"${ports[@]}"}; do
+        port_entries+=("$port=localhost:${port%/*}")
     done
 fi
-if [ -n "$port_map" ]; then
+if [ ${#port_entries[@]} -gt 0 ]; then
     ports_part="${MAGENTA}⇄${RST}"
-    for entry in ${port_map//,/ }; do
+    for entry in "${port_entries[@]}"; do
         cont=${entry%%=*} addr=${entry#*=}
         [[ $cont == */udp ]] && continue
         cont=${cont%/tcp} host=${addr##*:} addr=${addr%:*}
