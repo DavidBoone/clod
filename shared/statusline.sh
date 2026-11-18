@@ -259,17 +259,30 @@ if [ -n "${CLOD_HOME:-}" ]; then
     [ -n "${CLOD_IMAGE:-}" ] && bottom[3]="${BROWN}📦 ${CLOD_IMAGE}${RST}"
 fi
 
-# Published container ports (CLOD_PORTS) as underlined :PORT, each an OSC 8
-# link to http://localhost:PORT. Claude Code passes the links on only when it
-# recognises the terminal (TERM_PROGRAM and the like, or FORCE_HYPERLINK=1);
-# otherwise they show as plain text. CLOD_PORTS holds container ports, so a
-# link is right only when the host port is the same. UDP ports aren't shown.
-if [ -n "${CLOD_PORTS:-}" ]; then
-    ports_part="${MAGENTA}⇄${RST}"
+# Published TCP ports as underlined labels, each an OSC 8 link to the port's
+# address on the host. CLOD_PORT_MAP gives each as CONTAINER=ADDRESS:HOST; the
+# label is :HOST, or :CONTAINER→HOST when the two differ, and a wildcard
+# address (0.0.0.0, [::]) links to localhost. An older launcher sets only
+# CLOD_PORTS, the container ports, which link to the same port on localhost.
+# Claude Code passes the links on only when it recognises the terminal
+# (TERM_PROGRAM and the like, or FORCE_HYPERLINK=1); otherwise they show as
+# plain text.
+port_map=${CLOD_PORT_MAP:-}
+if [ -z "$port_map" ] && [ -n "${CLOD_PORTS:-}" ]; then
     for port in ${CLOD_PORTS//,/ }; do
-        [[ $port == */udp ]] && continue
-        port=${port%/tcp}
-        ports_part+=" ${UL_MAGENTA}"$'\033]8;;'"http://localhost:${port}"$'\a'":${port}"$'\033]8;;\a'"${RST}"
+        port_map+="${port_map:+,}$port=localhost:${port%/*}"
+    done
+fi
+if [ -n "$port_map" ]; then
+    ports_part="${MAGENTA}⇄${RST}"
+    for entry in ${port_map//,/ }; do
+        cont=${entry%%=*} addr=${entry#*=}
+        [[ $cont == */udp ]] && continue
+        cont=${cont%/tcp} host=${addr##*:} addr=${addr%:*}
+        [[ $addr == 0.0.0.0 || $addr == "[::]" ]] && addr=localhost
+        label=":$host"
+        [ "$cont" = "$host" ] || label=":$cont→$host"
+        ports_part+=" ${UL_MAGENTA}"$'\033]8;;'"http://$addr:$host"$'\a'"$label"$'\033]8;;\a'"${RST}"
     done
     bottom[3]+="${bottom[3]:+  }$ports_part"
 fi

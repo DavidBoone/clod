@@ -18,8 +18,9 @@ shared `CLAUDE.md` beside the `AGENTS.md`. Until `~/.clod/shared` exists, clod m
   model (`✨`) over its effort (`⚡`); context use over the session's input
   and output tokens, subagents included; the cache idle time over a
   cache-miss warning; the home (`🏠`) over the image (`📦`) and the
-  published ports (`⇄`, TCP only, as links to `localhost` where the terminal
-  supports them, right when the host port is the container's); and the git
+  published ports (`⇄`, TCP only, each the host port, or `:5173→8003` when
+  it differs from the container's, as a link to it where the terminal
+  supports them); and the git
   branch (`🪾`, or `🌿` and its folder in a linked worktree) with its count
   of changed files, over the lines changed. The 5-hour and 7-day rate limits
   sit at the right end of the two lines, their bars 10 to 20 cells wide as
