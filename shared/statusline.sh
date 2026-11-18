@@ -291,14 +291,14 @@ if [ ${#port_entries[@]} -gt 0 ]; then
 fi
 
 # Git branch (short hash when detached) and ±N changed files, untracked included.
-# A linked worktree (git dir differs from the common one) shows as 🌿 and its
-# folder in place of 🪾 and the branch. A folder inside a host-mounted /workspace
+# A linked worktree (git dir differs from the common one) shows as 📂 and its
+# folder in place of 🌿 and the branch. A folder inside a host-mounted /workspace
 # shows relative to it, which iTerm resolves against the folder clod ran from
 # and opens on ⌘-click; any other shows only its name. The branch follows,
 # dimmed, when it doesn't contain the folder's name.
 if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --short -q HEAD 2>/dev/null \
         || git -C "$cwd" --no-optional-locks rev-parse --short HEAD 2>/dev/null); then
-    git_part="🪾 ${GREEN}${branch}${RST}"
+    git_part="🌿 ${GREEN}${branch}${RST}"
     # Inside .git there is no top level, and rev-parse prints less.
     git_dir="" common_dir="" top_dir=""
     { read -r git_dir; read -r common_dir; read -r top_dir; } < <(git -C "$cwd" --no-optional-locks \
@@ -306,7 +306,7 @@ if [ -n "$cwd" ] && branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --sh
     if [ -n "$git_dir" ] && [ "$git_dir" != "$common_dir" ]; then
         wt=${top_dir##*/}
         [ -n "${CLOD_WORKSPACE_PATH:-}" ] && [[ $top_dir == /workspace/* ]] && wt=${top_dir#/workspace/}
-        git_part="🌿 ${GREEN}${wt}${RST}"
+        git_part="📂 ${GREEN}${wt}${RST}"
         [[ $branch == *"${top_dir##*/}"* ]] || git_part+=" ${DIM}${branch}${RST}"
     fi
     dirty=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null | wc -l) || dirty=0
@@ -394,7 +394,7 @@ width() {
     local s=$1 narrow
     s=${s//$'\033['*([0-9;])m/}
     s=${s//$'\033]8;;'*([!$'\a'])$'\a'/}
-    narrow=${s//[✨⚡🏠📦💤🪾🌿]/}
+    narrow=${s//[✨⚡🏠📦💤🌿📂]/}
     echo $(( 2 * ${#s} - ${#narrow} ))
 }
 

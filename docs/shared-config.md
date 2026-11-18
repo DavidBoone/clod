@@ -21,7 +21,7 @@ shared `CLAUDE.md` beside the `AGENTS.md`. Until `~/.clod/shared` exists, clod m
   published ports (`⇄`, TCP only, each the host port, or `:5173→8003` when
   it differs from the container's, as a link to it where the terminal
   supports them); and the git
-  branch (`🪾`, or `🌿` and its folder in a linked worktree) with its count
+  branch (`🌿`, or `📂` and its folder in a linked worktree) with its count
   of changed files, over the lines changed. The 5-hour and 7-day rate limits
   sit at the right end of the two lines, their bars 10 to 20 cells wide as
   the terminal allows. A rate limit's bar shows usage against how much of its

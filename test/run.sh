@@ -628,7 +628,7 @@ test_statusline() {
     sed 's/\x1b\[[0-9;]*m//g' > links
   sed 's/\x1b\]8;;[^\x07]*\x07//g' links | tee out
   test "$(wc -l < out)" = 2
-  head -1 out | has '^✨ Opus  *◔ [▰▱]* 42%  *🏠 default  *🪾 main ±[0-9]  *5h '
+  head -1 out | has '^✨ Opus  *◔ [▰▱]* 42%  *🏠 default  *🌿 main ±[0-9]  *5h '
   tail -1 out | has '^⚡ high  *↑0  *↓0  *📦 clod  ⇄ :5173 :5174→8003  *+120/-35$'
   if grep -q 6000 out; then false; fi
   has -F $'\x1b]8;;http://localhost:8003\x07:5174→8003' < links
