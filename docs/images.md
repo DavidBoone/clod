@@ -9,7 +9,7 @@ compiler or browser on top. clod comes with these, in [`images/`](../images):
 |-----------|------|
 | `browser` | Chromium, fonts, and the system libraries Playwright's browsers need |
 | `docker`  | the Docker CLI, with buildx and compose, for use with `--docker` |
-| `dotnet`  | .NET 10 SDK, from Microsoft's package repository |
+| `dotnet`  | .NET 11 SDK, from Microsoft's package repository |
 | `go`      | the latest Go release, as of when the image is built |
 | `lamp`    | PHP with common extensions, Composer, Apache and MariaDB |
 | `python`  | uv, and the C toolchain and headers for native extensions |
